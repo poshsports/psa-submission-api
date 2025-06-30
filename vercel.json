@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "routes": [
+    {
+      "src": "/api/submit",
+      "methods": ["POST"],
+      "dest": "/api/submit.js"
+    }
+  ]
+}
+
