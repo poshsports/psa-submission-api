@@ -1,5 +1,18 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
+  // Set CORS headers for all requests
+  res.setHeader('Access-Control-Allow-Origin', 'https://poshsports.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle CORS preflight request
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // Reject non-POST requests
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Only POST allowed' });
+  }
 
   const {
     customer_email,
@@ -42,4 +55,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Submission failed', details: err.message });
   }
 }
-
