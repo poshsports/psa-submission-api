@@ -1,15 +1,12 @@
 export default async function handler(req, res) {
-  // Set CORS headers for all requests
   res.setHeader('Access-Control-Allow-Origin', 'https://poshsports.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
-  // Reject non-POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Only POST allowed' });
   }
@@ -21,7 +18,8 @@ export default async function handler(req, res) {
     evaluation,
     address,
     totals,
-    status = 'Received'
+    status = 'Received',
+    card_info // ✅ grab it here if preferred
   } = req.body;
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -43,7 +41,8 @@ export default async function handler(req, res) {
         evaluation,
         address,
         totals,
-        status
+        status,
+        card_info // ✅ ← include it here!
       })
     });
 
