@@ -1,4 +1,4 @@
-// api/shopify-orders-paid.js
+// /api/shopify-orders-paid.js
 import crypto from 'crypto';
 
 export default async function handler(req, res) {
@@ -8,30 +8,41 @@ export default async function handler(req, res) {
   }
 
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
-  if (!secret) return res.status(500).send('Missing webhook secret');
+  if (!secret) {
+    console.error('[PSA Webhook] Missing SHOPIFY_WEBHOOK_SECRET');
+    return res.status(500).send('Missing webhook secret');
+  }
 
-  // 1) Read RAW body
+  // 1) Read RAW body (important for HMAC)
   const chunks = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const rawBody = Buffer.concat(chunks);
 
-  // 2) Verify HMAC
+  // 2) Compute + compare HMAC
   const sentHmac = req.headers['x-shopify-hmac-sha256'];
-  if (!sentHmac) return res.status(401).send('Missing HMAC');
-
   const computed = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
 
-  const ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
+  // DEBUG: log what we're comparing (safe: only show first 5 of secret)
+  console.log('[PSA Webhook] HMAC check', {
+    secretFirst5: secret.substring(0, 5),
+    sentHmac: sentHmac || '(none)',
+    computed
+  });
+
+  if (!sentHmac) return res.status(401).send('Missing HMAC');
+
+  let ok = false;
+  try {
+    ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
+  } catch (e) {
+    console.warn('[PSA Webhook] timingSafeEqual threw', e);
+  }
   if (!ok) {
-    // DEBUG: Log first few chars to help identify mismatch
-    console.warn('[PSA Webhook] HMAC mismatch', {
-      got: String(sentHmac || '').slice(0, 12),
-      exp: computed.slice(0, 12),
-    });
+    console.warn('[PSA Webhook] HMAC verification failed');
     return res.status(401).send('HMAC verification failed');
   }
 
-  // 3) Now it's safe to parse
+  // 3) Safe to parse JSON now
   let payload;
   try {
     payload = JSON.parse(rawBody.toString('utf8'));
@@ -39,7 +50,6 @@ export default async function handler(req, res) {
     return res.status(400).send('Invalid JSON');
   }
 
-  // --- your logic here ---
   console.log('[orders-paid] OK', {
     id: payload?.id,
     email: payload?.email,
