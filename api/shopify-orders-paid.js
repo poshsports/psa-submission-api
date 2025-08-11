@@ -30,8 +30,13 @@ export default async function handler(req, res) {
   if (!sentHmac) return res.status(401).send('Missing HMAC');
 
   const computed = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
-  const ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
-  if (!ok) return res.status(401).send('HMAC verification failed');
+  try {
+    const ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
+    if (!ok) return res.status(401).send('HMAC verification failed');
+  } catch {
+    // timingSafeEqual throws if lengths differ
+    return res.status(401).send('HMAC verification failed');
+  }
 
   // --- 3) Parse JSON only after verification ---
   let order;
@@ -50,8 +55,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, skipped: true });
   }
 
-  // --- 5) Decode psa_payload_b64 from note attributes (if present) ---
-  // Shopify sends note_attributes as an array [{name, value}]
+  // --- 5) Read note attributes and extract our ids/payload ---
   const noteAttrsArr = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
   const attrs = noteAttrsArr.reduce((acc, cur) => {
     const k = (cur?.name || '').toLowerCase();
@@ -59,39 +63,32 @@ export default async function handler(req, res) {
     return acc;
   }, {});
 
+  const submissionId = attrs['psa_submission_id'] || '';
+  if (!submissionId) {
+    // We can't correlate without the id; log and bail safely.
+    console.warn('[PSA Webhook] Missing psa_submission_id on order', { order: order?.name, id: order?.id });
+    return res.status(200).json({ ok: true, missing_submission_id: true });
+  }
+
+  // Optional: decode small payload if present (not required for update)
   let basePayload = null;
   if (attrs['psa_payload_b64']) {
-    const b64 = attrs['psa_payload_b64'];
     try {
-      // Try plain base64 → utf8
-      let decoded = Buffer.from(b64, 'base64').toString('utf8');
-
-      // If original was encoded with encodeURIComponent, decode it:
+      let decoded = Buffer.from(attrs['psa_payload_b64'], 'base64').toString('utf8');
       try { decoded = decodeURIComponent(decoded); } catch {}
-
       basePayload = JSON.parse(decoded);
     } catch (e) {
       console.warn('[PSA Webhook] Failed to decode psa_payload_b64:', e);
     }
   }
 
-  // Fallback minimal payload if nothing came through attributes
-  if (!basePayload) {
-    basePayload = {
-      customer_email: order?.email || '',
-      cards: 0,
-      evaluation: true,
-      status: 'pending_payment_fallback',
-      card_info: [],
-    };
-  }
-
-  // --- 6) Build final payload and submit to Supabase ---
+  // --- 6) Build update payload and submit to your API ---
   const finalPayload = {
-    ...basePayload,
-    status: 'paid',
+    ...(basePayload || {}),
+    submission_id: submissionId,                 // <<< correlate to existing row
+    status: 'submitted_paid',                    // <<< mark as paid
     submitted_via: 'webhook_orders_paid',
-    submitted_at_iso: new Date().toISOString(),
+    paid_at_iso: new Date().toISOString(),
     shopify: {
       id: order?.id,
       name: order?.name,
@@ -124,9 +121,9 @@ export default async function handler(req, res) {
   console.log('[orders-paid] OK', {
     id: order?.id,
     email: order?.email,
-    line_items: order?.line_items?.length,
     order: order?.name,
+    submissionId,
   });
 
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, updated_submission_id: submissionId });
 }
