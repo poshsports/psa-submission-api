@@ -1,4 +1,4 @@
-// submit.js (reference, full file)
+// submit.js (full)
 
 // ---- config ----
 const API_URL = 'https://psa-submission-api.vercel.app/api/submit';
@@ -9,6 +9,15 @@ function utf8ToB64(str) {
   catch { return ''; }
 }
 function nowIso() { return new Date().toISOString(); }
+function uuidv4() {
+  // Use secure UUID if available; fallback is fine for our correlation id
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : ((r & 0x3) | 0x8);
+    return v.toString(16);
+  });
+}
 
 // If your project already has a payload builder, delete this and call psaSubmit(payload) instead.
 function buildPsaPayloadFromForm() {
@@ -51,49 +60,49 @@ function buildPsaPayloadFromForm() {
 
 // ---- core flow (call this with your existing payload) ----
 async function psaSubmit(payload) {
+  // 0) Ensure we have a stable submissionId first (stored for the whole flow)
+  let submissionId = null;
+  try { submissionId = sessionStorage.getItem('psaSubmissionId'); } catch {}
+  if (!submissionId) {
+    submissionId = uuidv4();
+    try { sessionStorage.setItem('psaSubmissionId', submissionId); } catch {}
+  }
+
   // 1) Save base payload locally for the confirmation UI
   try { sessionStorage.setItem('psaSubmissionPayload', JSON.stringify(payload)); } catch {}
 
-  // 2) PRE-SUBMIT to Supabase and capture submission_id
-  let submissionId = null;
+  // 2) PRE-SUBMIT to Supabase (send our submission_id explicitly)
   try {
-    const pre = await fetch(API_URL, {
+    await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...payload,
+        submission_id: submissionId,            // <<< IMPORTANT: never null
         status: 'pending_payment',
         submitted_via: 'form_precheckout',
         submitted_at_iso: nowIso()
       })
     });
-    if (pre.ok) {
-      const j = await pre.json().catch(() => ({}));
-      submissionId = j?.submission_id || j?.submission?.[0]?.submission_id || null;
-    } else {
-      console.warn('Pre-submit to Supabase failed with status', pre.status);
-    }
   } catch (e) {
     console.warn('Pre-submit to Supabase threw', e);
+    // We still proceed to checkout; webhook will reconcile later
   }
-
-  // 2b) Persist id for post-checkout updater
-  try { if (submissionId) sessionStorage.setItem('psaSubmissionId', submissionId); } catch {}
 
   // If evaluation selected → Shopify checkout path; else → direct submit
   if (payload.evaluation === true) {
     await goToCheckoutWithEvalProduct(payload, submissionId);
-    return; // IMPORTANT: stop here; final Supabase update happens post-checkout
+    return; // IMPORTANT: stop here; final update happens via webhook after payment
   }
 
-  // No evaluation → final submit straight to Supabase + redirect
+  // No evaluation → final submit straight to Supabase + redirect (include the same id)
   await finalSubmitNoEval(payload, submissionId);
 }
 
 // ---- eval checkout path ----
 async function goToCheckoutWithEvalProduct(payload, submissionId) {
   // 3) Carry the id + tiny payload through checkout as cart attributes
-  const payloadWithId = { ...payload, submission_id: submissionId || undefined };
+  const payloadWithId = { ...payload, submission_id: submissionId };
   let b64 = '';
   try {
     const json = JSON.stringify(payloadWithId);
@@ -108,7 +117,7 @@ async function goToCheckoutWithEvalProduct(payload, submissionId) {
       body: JSON.stringify({
         attributes: {
           psa_eval: 'true',
-          psa_submission_id: submissionId || '',
+          psa_submission_id: submissionId,      // <<< same id we generated
           ...(b64 ? { psa_payload_b64: b64 } : {})
         }
       })
@@ -136,17 +145,18 @@ async function goToCheckoutWithEvalProduct(payload, submissionId) {
 }
 
 // ---- no-eval direct submit ----
-async function finalSubmitNoEval(payload, preId) {
+async function finalSubmitNoEval(payload, submissionId) {
   try {
     const finalRes = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...payload,
+        submission_id: submissionId,          // keep the same id
         status: 'submitted',
         submitted_via: 'form_no_payment',
         submitted_at_iso: nowIso(),
-        pre_submission_id: preId || null
+        pre_submission_id: submissionId       // optional: allow API to upsert by same id
       })
     });
 
