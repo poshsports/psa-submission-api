@@ -22,7 +22,14 @@ export default async function handler(req, res) {
   const computed = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
 
   const ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
-  if (!ok) return res.status(401).send('HMAC verification failed');
+  if (!ok) {
+    // DEBUG: Log first few chars to help identify mismatch
+    console.warn('[PSA Webhook] HMAC mismatch', {
+      got: String(sentHmac || '').slice(0, 12),
+      exp: computed.slice(0, 12),
+    });
+    return res.status(401).send('HMAC verification failed');
+  }
 
   // 3) Now it's safe to parse
   let payload;
@@ -33,7 +40,6 @@ export default async function handler(req, res) {
   }
 
   // --- your logic here ---
-  // e.g., check for your eval variant, upsert submission, etc.
   console.log('[orders-paid] OK', {
     id: payload?.id,
     email: payload?.email,
