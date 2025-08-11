@@ -1,67 +1,55 @@
-// /api/submit.js
-export default async function handler(req, res) {
-  // CORS (unchanged)
-  res.setHeader('Access-Control-Allow-Origin', 'https://poshsports.com');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+// 1) Save base payload locally for the confirmation UI
+try { sessionStorage.setItem('psaSubmissionPayload', JSON.stringify(payload)); } catch {}
 
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Only POST allowed' });
-
-  const {
-    // existing fields
-    customer_email,
-    date,
-    cards,
-    evaluation,
-    address,
-    totals,
-    status = 'Received',
-    card_info,
-
-    // NEW (optional): used to update an existing pending row later
-    submission_id
-  } = req.body;
-
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-
-  try {
-    // Build the row we send to Supabase
-    const row = {
-      customer_email,
-      date,
-      cards,
-      evaluation,
-      address,
-      totals,
-      status,
-      card_info
-    };
-
-    // If caller provided submission_id, include it so we can upsert on that unique key
-    if (submission_id) row.submission_id = submission_id;
-
-    // Prefer header "resolution=merge-duplicates" turns POST into an UPSERT when the table
-    // has a UNIQUE constraint (make sure submissions.submission_id is UNIQUE).
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/submissions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-        // return=representation => send back the inserted/updated row
-        // resolution=merge-duplicates => UPSERT on unique keys present in payload
-        'Prefer': 'return=representation,resolution=merge-duplicates'
-      },
-      body: JSON.stringify(row)
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(JSON.stringify(data));
-
-    return res.status(200).json({ success: true, submission: data });
-  } catch (err) {
-    return res.status(500).json({ error: 'Submission failed', details: err.message });
+// 2) PRE-SUBMIT to Supabase and capture submission_id
+let submissionId = null;
+try {
+  const pre = await fetch('https://psa-submission-api.vercel.app/api/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...payload,
+      status: 'pending_payment',
+      submitted_via: 'form_precheckout',
+      submitted_at_iso: new Date().toISOString()
+    })
+  });
+  if (pre.ok) {
+    const j = await pre.json().catch(() => ({}));
+    submissionId = j.submission_id || j?.submission?.[0]?.submission_id || null;
+  } else {
+    console.warn('Pre-submit to Supabase failed with status', pre.status);
   }
+} catch (e) {
+  console.warn('Pre-submit to Supabase threw', e);
 }
+
+// 3) Carry the id + payload through checkout as order attributes
+const payloadWithId = { ...payload, submission_id: submissionId || undefined };
+let b64 = '';
+try { b64 = utf8ToB64(JSON.stringify(payloadWithId)); } catch {}
+
+try {
+  await fetch('/cart/update.js', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      attributes: {
+        psa_eval: 'true',
+        psa_submission_id: submissionId || '',    // <-- IMPORTANT
+        psa_payload_b64: b64
+      }
+    })
+  });
+} catch (e) {
+  console.warn('Failed to set cart attributes for eval payload', e);
+}
+
+// 4) Add eval product + go to checkout (unchanged below)
+document.getElementById('evaluation-product-qty').value = qty;
+const form = document.getElementById('evaluation-charge-form');
+form.action = '/cart/add';
+form.method = 'POST';
+form.querySelector('input[name="return_to"]').value = "/checkout";
+form.submit();
+return;
