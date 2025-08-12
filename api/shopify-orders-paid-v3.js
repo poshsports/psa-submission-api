@@ -1,8 +1,10 @@
-// v3.4 — accelerated-checkout fallback + optional paid_amount + optional eval_line_subtotal + optional Shopify order keys
+// v3.5 — accelerated-checkout fallback + optional paid_amount + optional eval_line_subtotal
+//        + optional Shopify order keys + optional idempotency guard
 // - Fallback: read psa_submission_id / psa_payload_b64 from line_items[].properties when note_attributes are missing.
 // - Optional: SAVE_PSA_PAID_AMOUNT=1 -> write paid_amount (whole order total).
 // - Optional: SAVE_PSA_EVAL_SUBTOTAL=1 -> write eval_line_subtotal (eval SKU subtotal after discounts).
 // - Optional: SAVE_PSA_ORDER_KEYS=1 -> write shopify_order_id, shopify_order_number, shopify_order_name, shop_domain.
+// - Optional: ENABLE_PSA_IDEMPOTENCY=1 -> skip duplicate orders/paid for same submission already marked submitted_paid.
 // - Keeps v3.1 behavior: raw HMAC, early eval-SKU gate, preserve cards, update→insert, same table/columns.
 
 import crypto from "crypto";
@@ -14,6 +16,7 @@ const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const SAVE_PSA_PAID_AMOUNT = process.env.SAVE_PSA_PAID_AMOUNT === "1";
 const SAVE_PSA_EVAL_SUBTOTAL = process.env.SAVE_PSA_EVAL_SUBTOTAL === "1";
 const SAVE_PSA_ORDER_KEYS = process.env.SAVE_PSA_ORDER_KEYS === "1";
+const ENABLE_PSA_IDEMPOTENCY = process.env.ENABLE_PSA_IDEMPOTENCY === "1";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -119,7 +122,7 @@ function computeEvalLineSubtotal(lineItems, evalVariantId) {
 }
 
 export default async function handler(req, res) {
-  console.log("[PSA VERSION] v3.4 handler start");
+  console.log("[PSA VERSION] v3.5 handler start");
 
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -157,6 +160,12 @@ export default async function handler(req, res) {
   }
   dlog("received", { id: order?.id, name: order?.name });
 
+  // Precompute keys we may use (even if we don't persist them)
+  const shopDomain = String(req.headers["x-shopify-shop-domain"] || "");
+  const orderIdStr = order?.id != null ? String(order.id) : null; // keep as string to avoid JS safe-int issues
+  const orderNumber = order?.order_number ?? null;
+  const orderName = order?.name ?? null;
+
   // --- 4) only care if eval variant is in the order (unchanged behavior)
   if (!Number.isFinite(EVAL_VARIANT_ID) || EVAL_VARIANT_ID <= 0) {
     console.warn("[PSA v3] Missing/invalid SHOPIFY_EVAL_VARIANT_ID; skipping.");
@@ -174,7 +183,7 @@ export default async function handler(req, res) {
     0
   );
 
-  // NEW: compute the eval-only subtotal (after discounts, before tax/shipping)
+  // Compute the eval-only subtotal (after discounts, before tax/shipping)
   const evalLineSubtotal = computeEvalLineSubtotal(lineItems, EVAL_VARIANT_ID);
 
   // --- 5) pull our attributes (primary: note_attributes; fallback: line_items.properties)
@@ -207,6 +216,33 @@ export default async function handler(req, res) {
   if (!submissionId) {
     console.warn("[PSA v3] Missing psa_submission_id on order", { id: order?.id, name: order?.name });
     return res.status(200).json({ ok: true, missing_submission_id: true });
+  }
+
+  // --- 5.5) Idempotency guard (optional)
+  if (ENABLE_PSA_IDEMPOTENCY) {
+    try {
+      const { data: idem } = await supabase
+        .from("psa_submissions")
+        .select("status, shopify_order_id, paid_at_iso")
+        .eq("submission_id", submissionId)
+        .maybeSingle();
+
+      if (idem && idem.status === "submitted_paid") {
+        // If we already marked this submission paid, short-circuit.
+        // We treat it as idempotent if either no stored order id yet OR it matches the incoming one.
+        if (!idem.shopify_order_id || (orderIdStr && String(idem.shopify_order_id) === orderIdStr)) {
+          dlog("idempotency: already submitted_paid; skipping duplicate orders/paid", {
+            submissionId,
+            existing_order_id: idem.shopify_order_id,
+            incoming_order_id: orderIdStr
+          });
+          return res.status(200).json({ ok: true, idempotent: true, submission_id: submissionId });
+        }
+      }
+    } catch (e) {
+      dlog("idempotency check error (non-fatal):", e?.message);
+      // continue normally if the check fails
+    }
   }
 
   // Optional tiny payload (may have cards/email)
@@ -268,12 +304,6 @@ export default async function handler(req, res) {
 
   // Optional paid_amount (env-gated)
   const paidAmount = SAVE_PSA_PAID_AMOUNT ? extractPaidAmount(order) : null;
-
-  // Optional Shopify order keys (env-gated)
-  const shopDomain = String(req.headers["x-shopify-shop-domain"] || "");
-  const orderIdStr = order?.id != null ? String(order.id) : null; // keep as string to avoid JS safe-int issues
-  const orderNumber = order?.order_number ?? null;
-  const orderName = order?.name ?? null;
 
   // --- 9) update first, then insert if not found (unchanged pattern)
   const common = {
