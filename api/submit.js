@@ -65,18 +65,30 @@ export default async function handler(req, res) {
   const cardsNumRaw = Number(payload.cards);
   const parsedCards = Number.isFinite(cardsNumRaw)
     ? Math.max(0, Math.trunc(cardsNumRaw))
-    : 1; // choose your default (1 here)
+    : 1; // default to 1 if not provided
   console.log('[submit] cards payload=', payload.cards, 'parsed=', parsedCards);
+
+  // STEP 1b: parse/normalize `evaluation` with a safe default
+  const evalNumRaw =
+    typeof payload.evaluation === 'number'
+      ? payload.evaluation
+      : payload?.totals?.evaluation; // fallback if you pass it inside totals
+
+  const parsedEvaluation = Number.isFinite(Number(evalNumRaw))
+    ? Math.max(0, Math.trunc(Number(evalNumRaw)))
+    : 0;
+  console.log('[submit] evaluation payload=', payload.evaluation, 'parsed=', parsedEvaluation);
 
   if (!supabase) {
     console.error('[submit] Missing SUPABASE_URL or key');
     return res.status(500).json({ ok: false, error: 'Server misconfigured' });
   }
 
-  // STEP 2: include parsedCards in the row
+  // STEP 2: build row
   const row = {
     submission_id,
-    cards: parsedCards,                     // <-- important
+    cards: parsedCards,
+    evaluation: parsedEvaluation,
     status: payload.status ?? null,
     submitted_via: payload.submitted_via ?? null,
     submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
