@@ -6,6 +6,8 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey =
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
 
+// Optional: restrict to your storefronts via env:
+// ALLOWED_ORIGINS="https://poshsports.com,https://www.poshsports.com"
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(s => s.trim())
@@ -56,7 +58,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'Invalid JSON' });
   }
 
-  // Always use a valid UUID
+  // Always use a valid UUID for the DB
   const submission_id = ensureUuid(payload.submission_id);
 
   if (!supabase) {
@@ -66,15 +68,20 @@ export default async function handler(req, res) {
 
   const row = {
     submission_id,
+    // NEW: make sure we persist cards so NOT NULL passes
+    cards: typeof payload.cards === 'number'
+      ? payload.cards
+      : (payload.cards ? Number(payload.cards) : 0),
+
     status: payload.status ?? null,
     submitted_via: payload.submitted_via ?? null,
     submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
     customer_email: payload.customer_email ?? null,
-    address: payload.address ?? null,
-    totals: payload.totals ?? null,
-    card_info: payload.card_info ?? null,
-    shopify: payload.shopify ?? null,
-    raw: payload ?? null,
+    address: payload.address ?? null,     // jsonb
+    totals: payload.totals ?? null,       // jsonb
+    card_info: payload.card_info ?? null, // jsonb
+    shopify: payload.shopify ?? null,     // jsonb
+    raw: payload ?? null,                 // jsonb audit copy
   };
 
   try {
@@ -84,7 +91,6 @@ export default async function handler(req, res) {
 
     if (error) {
       console.error('[submit] Supabase upsert error:', error);
-      // >>> keep these fields so we can actually see the failure
       return res.status(500).json({
         ok: false,
         error: 'Database error',
