@@ -1,7 +1,8 @@
-// v3.2 — accelerated-checkout fallback + optional paid_amount (env-gated)
+// v3.3 — accelerated-checkout fallback + optional paid_amount + optional eval_line_subtotal
 // - Fallback: read psa_submission_id / psa_payload_b64 from line_items[].properties
 //   when note_attributes are missing (Shop Pay / Apple Pay cases).
-// - Optional: SAVE_PSA_PAID_AMOUNT=1 to persist a numeric paid_amount; otherwise skipped.
+// - Optional: SAVE_PSA_PAID_AMOUNT=1 to persist numeric paid_amount (whole order total).
+// - Optional: SAVE_PSA_EVAL_SUBTOTAL=1 to persist eval_line_subtotal (only eval SKU subtotal after discounts).
 // - Keeps v3.1 behavior: raw HMAC, early eval-SKU gate, preserve cards, update→insert, same table/columns.
 
 import crypto from "crypto";
@@ -11,6 +12,7 @@ export const config = { api: { bodyParser: false } }; // needed for raw HMAC bod
 
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const SAVE_PSA_PAID_AMOUNT = process.env.SAVE_PSA_PAID_AMOUNT === "1";
+const SAVE_PSA_EVAL_SUBTOTAL = process.env.SAVE_PSA_EVAL_SUBTOTAL === "1";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -40,7 +42,7 @@ function propsToMap(props) {
   return out;
 }
 
-// Extract a best-effort paid amount from order totals
+// Extract a best-effort paid amount from order totals (entire order)
 function extractPaidAmount(order) {
   const candidates = [
     order?.total_price,
@@ -56,8 +58,67 @@ function extractPaidAmount(order) {
   return null;
 }
 
+// Compute subtotal for the evaluation line(s) after discounts (price*qty minus discounts).
+// This is item-level only (no tax/shipping); sums all eval variant occurrences.
+function computeEvalLineSubtotal(lineItems, evalVariantId) {
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const sumDiscountAllocations = (li) => {
+    if (!Array.isArray(li?.discount_allocations)) return 0;
+    let s = 0;
+    for (const da of li.discount_allocations) {
+      s += toNum(da?.amount)
+        || toNum(da?.amount_set?.shop_money?.amount)
+        || toNum(da?.amount_set?.presentment_money?.amount);
+    }
+    return s;
+  };
+
+  let total = 0;
+
+  for (const li of Array.isArray(lineItems) ? lineItems : []) {
+    if (Number(li?.variant_id) !== evalVariantId) continue;
+
+    const qty = toNum(li?.quantity || 0);
+
+    // Prefer discounted unit price if present
+    const discountedUnit =
+      toNum(li?.discounted_price) ||
+      toNum(li?.discounted_price_set?.shop_money?.amount) ||
+      0;
+
+    if (discountedUnit > 0) {
+      total += discountedUnit * qty;
+      continue;
+    }
+
+    // Fallback: use regular unit price minus total discounts
+    const unit =
+      toNum(li?.price) ||
+      toNum(li?.price_set?.shop_money?.amount) ||
+      0;
+
+    const gross = unit * qty;
+
+    // total_discount fields; fallback to allocations sum
+    const totalDiscount =
+      toNum(li?.total_discount) ||
+      toNum(li?.total_discount_set?.shop_money?.amount) ||
+      sumDiscountAllocations(li);
+
+    const net = Math.max(0, gross - totalDiscount);
+    total += net;
+  }
+
+  // Round to cents to avoid floating noise
+  return Math.round(total * 100) / 100;
+}
+
 export default async function handler(req, res) {
-  console.log("[PSA VERSION] v3.2 handler start");
+  console.log("[PSA VERSION] v3.3 handler start");
 
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -111,6 +172,9 @@ export default async function handler(req, res) {
     (acc, li) => acc + (Number(li.variant_id) === EVAL_VARIANT_ID ? Number(li.quantity || 0) : 0),
     0
   );
+
+  // NEW: compute the eval-only subtotal (after discounts, before tax/shipping)
+  const evalLineSubtotal = computeEvalLineSubtotal(lineItems, EVAL_VARIANT_ID);
 
   // --- 5) pull our attributes (primary: note_attributes; fallback: line_items.properties)
   const noteAttrs = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
@@ -216,6 +280,9 @@ export default async function handler(req, res) {
   };
   if (SAVE_PSA_PAID_AMOUNT && Number.isFinite(paidAmount)) {
     common.paid_amount = paidAmount;
+  }
+  if (SAVE_PSA_EVAL_SUBTOTAL && Number.isFinite(evalLineSubtotal)) {
+    common.eval_line_subtotal = evalLineSubtotal;
   }
 
   // try UPDATE
