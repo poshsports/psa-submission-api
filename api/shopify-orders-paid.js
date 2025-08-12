@@ -1,4 +1,5 @@
 // v3 — writes customer_email and never uses upsert
+console.log('[PSA VERSION] v3.1');
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
