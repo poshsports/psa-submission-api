@@ -1,176 +1,97 @@
-// submit.js (full)
+// api/submit.js
+import { createClient } from '@supabase/supabase-js';
 
-// ---- config ----
-const API_URL = 'https://psa-submission-api.vercel.app/api/submit';
+// --- ENV required ---
+// SUPABASE_URL
+// SUPABASE_SERVICE_ROLE (preferred) or SUPABASE_ANON_KEY (service role is best for upserts)
+// Optional: ALLOWED_ORIGINS (comma-separated), e.g. "https://yourstore.com,https://admin.shopify.com"
 
-// ---- helpers ----
-function utf8ToB64(str) {
-  try { return btoa(unescape(encodeURIComponent(str))); }
-  catch { return ''; }
-}
-function nowIso() { return new Date().toISOString(); }
-function uuidv4() {
-  // Use secure UUID if available; fallback is fine for our correlation id
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : ((r & 0x3) | 0x8);
-    return v.toString(16);
-  });
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('[submit] Missing Supabase env vars');
 }
 
-// If your project already has a payload builder, delete this and call psaSubmit(payload) instead.
-function buildPsaPayloadFromForm() {
-  // Minimal example — keep your existing builder if you already have one
-  const qty = Number(document.querySelector('#psaQuantity')?.value || 0);
-  const evaluation = !!document.querySelector('#evaluateCards')?.checked;
-  const email = (document.querySelector('#customerEmail')?.value || '').trim();
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // NOTE: Keep your real structure (address, card_info, totals, etc.)
-  return {
-    cards: qty,
-    evaluation,
-    customer_email: email,
-    // ...include your existing fields here
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+function cors(res, reqOrigin) {
+  const origin = allowedOrigins.includes(reqOrigin) ? reqOrigin : allowedOrigins[0] || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+export default async function handler(req, res) {
+  cors(res, req.headers.origin || '');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
+
+  // Parse JSON body
+  let payload;
+  try {
+    payload = req.body && typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
+  } catch {
+    return res.status(400).json({ ok: false, error: 'Invalid JSON' });
+  }
+
+  // Minimal validation
+  const submission_id = String(payload.submission_id || '').trim();
+  if (!submission_id) {
+    return res.status(400).json({ ok: false, error: 'submission_id is required' });
+  }
+
+  // Normalize fields (everything else is stored as JSONB)
+  const row = {
+    submission_id,
+    status: payload.status || null,
+    submitted_via: payload.submitted_via || null,
+    submitted_at_iso: payload.submitted_at_iso || new Date().toISOString(),
+    customer_email: payload.customer_email || null,
+
+    // JSONB columns (create these as jsonb in Supabase):
+    address: payload.address ?? null,
+    totals: payload.totals ?? null,
+    card_info: payload.card_info ?? null,
+    shopify: payload.shopify ?? null,
+
+    // Anything else you want to keep verbatim:
+    raw: payload, // optional: keep entire payload for auditing
   };
-}
 
-// ---- main entry (choose one) ----
-// A) If you already have your own submit handler, just call: psaSubmit(payload)
-// B) If you want this file to wire the form submit, keep this listener:
-(function wireFormIfPresent() {
-  const form = document.querySelector('#psaForm');
-  if (!form) return; // your project may wire elsewhere
+  try {
+    // Upsert into a table, e.g. "psa_submissions"
+    // Schema suggestion:
+    // submission_id (text, PK or unique), status (text), submitted_via (text), submitted_at_iso (timestamptz),
+    // customer_email (text), address (jsonb), totals (jsonb), card_info (jsonb), shopify (jsonb), raw (jsonb)
+    const { data, error } = await supabase
+      .from('psa_submissions')
+      .upsert(row, { onConflict: 'submission_id' }) // requires a UNIQUE index on submission_id
+      .select()
+      .single();
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    // If you have your own validation, run it here and return on failure.
-    // assume valid:
-    const payload = buildPsaPayloadFromForm();
-
-    try {
-      await psaSubmit(payload);
-    } catch (err) {
-      console.error('PSA submit failed', err);
-      alert('Unexpected error submitting PSA form.');
+    if (error) {
+      console.error('[submit] Supabase upsert error:', error);
+      return res.status(500).json({ ok: false, error: 'Database error' });
     }
-  });
-})();
 
-// ---- core flow (call this with your existing payload) ----
-async function psaSubmit(payload) {
-  // 0) Ensure we have a stable submissionId first (stored for the whole flow)
-  let submissionId = null;
-  try { submissionId = sessionStorage.getItem('psaSubmissionId'); } catch {}
-  if (!submissionId) {
-    submissionId = uuidv4();
-    try { sessionStorage.setItem('psaSubmissionId', submissionId); } catch {}
-  }
-
-  // 1) Save base payload locally for the confirmation UI
-  try { sessionStorage.setItem('psaSubmissionPayload', JSON.stringify(payload)); } catch {}
-
-  // 2) PRE-SUBMIT to Supabase (send our submission_id explicitly)
-  try {
-    await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...payload,
-        submission_id: submissionId,            // <<< IMPORTANT: never null
-        status: 'pending_payment',
-        submitted_via: 'form_precheckout',
-        submitted_at_iso: nowIso()
-      })
-    });
+    return res.status(200).json({ ok: true, id: data.submission_id });
   } catch (e) {
-    console.warn('Pre-submit to Supabase threw', e);
-    // We still proceed to checkout; webhook will reconcile later
-  }
-
-  // If evaluation selected → Shopify checkout path; else → direct submit
-  if (payload.evaluation === true) {
-    await goToCheckoutWithEvalProduct(payload, submissionId);
-    return; // IMPORTANT: stop here; final update happens via webhook after payment
-  }
-
-  // No evaluation → final submit straight to Supabase + redirect (include the same id)
-  await finalSubmitNoEval(payload, submissionId);
-}
-
-// ---- eval checkout path ----
-async function goToCheckoutWithEvalProduct(payload, submissionId) {
-  // 3) Carry the id + tiny payload through checkout as cart attributes
-  const payloadWithId = { ...payload, submission_id: submissionId };
-  let b64 = '';
-  try {
-    const json = JSON.stringify(payloadWithId);
-    const maybeB64 = utf8ToB64(json);
-    if (maybeB64 && maybeB64.length < 240) b64 = maybeB64; // avoid attr size issues
-  } catch {}
-
-  try {
-    const res = await fetch('/cart/update.js', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        attributes: {
-          psa_eval: 'true',
-          psa_submission_id: submissionId,      // <<< same id we generated
-          ...(b64 ? { psa_payload_b64: b64 } : {})
-        }
-      })
-    });
-    if (!res.ok) console.warn('Cart attributes not accepted', res.status);
-  } catch (e) {
-    console.warn('Failed to set cart attributes for eval payload', e);
-  }
-
-  // 4) Add eval product + go to checkout
-  const qty = Number(payload?.cards) > 0 ? Number(payload.cards) : 1;
-  const qtyEl = document.getElementById('evaluation-product-qty');
-  if (qtyEl) qtyEl.value = String(qty);
-
-  const form = document.getElementById('evaluation-charge-form');
-  if (!form) {
-    alert('Evaluation form missing. Please refresh and try again.');
-    return;
-  }
-  form.action = '/cart/add';
-  form.method = 'POST';
-  const rt = form.querySelector('input[name="return_to"]');
-  if (rt) rt.value = '/checkout';
-  form.submit();
-}
-
-// ---- no-eval direct submit ----
-async function finalSubmitNoEval(payload, submissionId) {
-  try {
-    const finalRes = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...payload,
-        submission_id: submissionId,          // keep the same id
-        status: 'submitted',
-        submitted_via: 'form_no_payment',
-        submitted_at_iso: nowIso(),
-        pre_submission_id: submissionId       // optional: allow API to upsert by same id
-      })
-    });
-
-    if (finalRes.ok) {
-      window.location.href = '/pages/psa-confirmation';
-    } else {
-      console.error('Final submit failed', finalRes.status);
-      alert('Error submitting PSA form — please try again.');
-    }
-  } catch (e) {
-    console.error('Final submit error', e);
-    alert('Unexpected error submitting PSA form.');
+    console.error('[submit] Unexpected error:', e);
+    return res.status(500).json({ ok: false, error: 'Unexpected error' });
   }
 }
-
-// Optionally expose psaSubmit if you prefer calling it from your existing code:
-window.psaSubmit = psaSubmit;
