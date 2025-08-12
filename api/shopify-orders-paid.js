@@ -1,9 +1,14 @@
 // /api/shopify-orders-paid.js
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 
-const EVAL_VARIANT_ID = '51003437613332';
-const SUPABASE_ENDPOINT =
-  process.env.SUPABASE_SUBMIT_URL || 'https://psa-submission-api.vercel.app/api/submit';
+// Prefer configuring this in Vercel as SHOPIFY_EVAL_VARIANT_ID
+const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || '51003437613332');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 // flip to '1' temporarily if you want extra logs
 const DEBUG = process.env.DEBUG_PSA_WEBHOOK === '1';
@@ -34,7 +39,6 @@ export default async function handler(req, res) {
     const ok = crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sentHmac));
     if (!ok) return res.status(401).send('HMAC verification failed');
   } catch {
-    // timingSafeEqual throws if lengths differ
     return res.status(401).send('HMAC verification failed');
   }
 
@@ -48,12 +52,22 @@ export default async function handler(req, res) {
 
   // --- 4) Does this order include the eval SKU? ---
   const hasEval = Array.isArray(order?.line_items) &&
-    order.line_items.some(li => String(li.variant_id) === EVAL_VARIANT_ID);
+    order.line_items.some(li =>
+      (EVAL_VARIANT_ID && Number(li.variant_id) === EVAL_VARIANT_ID) ||
+      String(li.title || '').toLowerCase().includes('evaluation')
+    );
 
   if (!hasEval) {
     dlog('Order has no eval line item; skipping.', { order: order?.name, id: order?.id });
     return res.status(200).json({ ok: true, skipped: true });
   }
+
+  // Also compute evaluation quantity (how many evals purchased)
+  const evalQty = (order.line_items || []).reduce((acc, li) => {
+    const byVariant = EVAL_VARIANT_ID && Number(li.variant_id) === EVAL_VARIANT_ID;
+    const byTitle = (li.title || '').toLowerCase().includes('evaluation');
+    return acc + (byVariant || byTitle ? Number(li.quantity || 0) : 0);
+  }, 0);
 
   // --- 5) Read note attributes and extract our ids/payload ---
   const noteAttrsArr = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
@@ -62,15 +76,13 @@ export default async function handler(req, res) {
     acc[k] = String(cur?.value ?? '');
     return acc;
   }, {});
-
   const submissionId = attrs['psa_submission_id'] || '';
   if (!submissionId) {
-    // We can't correlate without the id; log and bail safely.
     console.warn('[PSA Webhook] Missing psa_submission_id on order', { order: order?.name, id: order?.id });
     return res.status(200).json({ ok: true, missing_submission_id: true });
   }
 
-  // Optional: decode small payload if present (not required for update)
+  // Optional: decode small payload if present (may contain cards)
   let basePayload = null;
   if (attrs['psa_payload_b64']) {
     try {
@@ -82,40 +94,62 @@ export default async function handler(req, res) {
     }
   }
 
-  // --- 6) Build update payload and submit to your API ---
-  const finalPayload = {
-    ...(basePayload || {}),
-    submission_id: submissionId,                 // <<< correlate to existing row
-    status: 'submitted_paid',                    // <<< mark as paid
-    submitted_via: 'webhook_orders_paid',
-    paid_at_iso: new Date().toISOString(),
-    shopify: {
-      id: order?.id,
-      name: order?.name,
-      order_number: order?.order_number,
-      email: order?.email,
-      currency: order?.currency,
-      total_price: order?.total_price,
-      created_at: order?.created_at,
-      note_attributes: noteAttrsArr,
-      line_items: order?.line_items || [],
-    },
+  // --- 6) Preserve the original cards count ---
+  let cardsToUse = 0;
+  try {
+    const { data: existing } = await supabase
+      .from('psa_submissions')
+      .select('cards')
+      .eq('submission_id', submissionId)
+      .single();
+
+    const fromDb = Number(existing?.cards);
+    const fromPayload = Number(basePayload?.cards);
+    cardsToUse = Number.isFinite(fromDb) && fromDb > 0
+      ? fromDb
+      : (Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0);
+  } catch (e) {
+    console.warn('[PSA Webhook] Could not read existing cards, falling back to payload', e?.message);
+    const fromPayload = Number(basePayload?.cards);
+    cardsToUse = Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0;
+  }
+
+  // --- 7) Minimal Shopify snapshot (no bloat) ---
+  const shopify = {
+    id: order?.id,
+    name: order?.name,
+    order_number: order?.order_number,
+    email: order?.email,
+    currency: order?.currency,
+    total_price: order?.total_price,
+    created_at: order?.created_at,
+    line_items: (order.line_items || []).map(li => ({
+      id: li.id,
+      variant_id: li.variant_id,
+      title: li.title,
+      quantity: li.quantity,
+      price: li.price
+    }))
   };
 
-  try {
-    const resp = await fetch(SUPABASE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(finalPayload),
-    });
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      console.error('[PSA Webhook] Submit failed', resp.status, txt);
-      return res.status(500).send('Submit failed');
-    }
-  } catch (e) {
-    console.error('[PSA Webhook] Submit error', e);
-    return res.status(500).send('Submit error');
+  // --- 8) Upsert the minimal set of fields directly to Supabase ---
+  const update = {
+    submission_id: submissionId,           // key
+    status: 'submitted_paid',
+    submitted_via: 'webhook_orders_paid',
+    paid_at_iso: new Date().toISOString(),
+    evaluation: evalQty,                   // how many evals were purchased
+    cards: cardsToUse,                     // preserve original card count
+    shopify
+  };
+
+  const { error } = await supabase
+    .from('psa_submissions')
+    .upsert(update, { onConflict: 'submission_id' });
+
+  if (error) {
+    console.error('[PSA Webhook] Supabase upsert error:', error);
+    return res.status(500).send('Submit failed');
   }
 
   console.log('[orders-paid] OK', {
@@ -123,6 +157,8 @@ export default async function handler(req, res) {
     email: order?.email,
     order: order?.name,
     submissionId,
+    evalQty,
+    cardsToUse
   });
 
   return res.status(200).json({ ok: true, updated_submission_id: submissionId });
