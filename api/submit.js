@@ -61,27 +61,31 @@ export default async function handler(req, res) {
   // Always use a valid UUID for the DB
   const submission_id = ensureUuid(payload.submission_id);
 
+  // STEP 1: parse/normalize `cards` with a safe default
+  const cardsNumRaw = Number(payload.cards);
+  const parsedCards = Number.isFinite(cardsNumRaw)
+    ? Math.max(0, Math.trunc(cardsNumRaw))
+    : 1; // choose your default (1 here)
+  console.log('[submit] cards payload=', payload.cards, 'parsed=', parsedCards);
+
   if (!supabase) {
     console.error('[submit] Missing SUPABASE_URL or key');
     return res.status(500).json({ ok: false, error: 'Server misconfigured' });
   }
 
+  // STEP 2: include parsedCards in the row
   const row = {
     submission_id,
-    // NEW: make sure we persist cards so NOT NULL passes
-    cards: typeof payload.cards === 'number'
-      ? payload.cards
-      : (payload.cards ? Number(payload.cards) : 0),
-
+    cards: parsedCards,                     // <-- important
     status: payload.status ?? null,
     submitted_via: payload.submitted_via ?? null,
     submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
     customer_email: payload.customer_email ?? null,
-    address: payload.address ?? null,     // jsonb
-    totals: payload.totals ?? null,       // jsonb
-    card_info: payload.card_info ?? null, // jsonb
-    shopify: payload.shopify ?? null,     // jsonb
-    raw: payload ?? null,                 // jsonb audit copy
+    address: payload.address ?? null,       // jsonb
+    totals: payload.totals ?? null,         // jsonb
+    card_info: payload.card_info ?? null,   // jsonb
+    shopify: payload.shopify ?? null,       // jsonb
+    raw: payload ?? null,                   // jsonb audit copy
   };
 
   try {
