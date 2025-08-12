@@ -2,7 +2,7 @@
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-export const config = { api: { bodyParser: false } }; // safe even if not Next.js
+export const config = { api: { bodyParser: false } }; // needed for raw HMAC body on Next/Vercel
 
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const supabase = createClient(
@@ -15,7 +15,8 @@ const DEBUG = process.env.DEBUG_PSA_WEBHOOK === "1";
 const dlog = (...a) => DEBUG && console.log("[PSA v3]", ...a);
 
 export default async function handler(req, res) {
-  console.log('[PSA VERSION] v3.1');
+  console.log("[PSA VERSION] v3.1 handler start");
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).send("Method Not Allowed");
@@ -53,6 +54,11 @@ export default async function handler(req, res) {
   dlog("received", { id: order?.id, name: order?.name });
 
   // --- 4) only care if eval variant is in the order
+  if (!Number.isFinite(EVAL_VARIANT_ID) || EVAL_VARIANT_ID <= 0) {
+    console.warn("[PSA v3] Missing/invalid SHOPIFY_EVAL_VARIANT_ID; skipping.");
+    return res.status(200).json({ ok: true, skipped: true, reason: "no_eval_id" });
+  }
+
   const lineItems = Array.isArray(order?.line_items) ? order.line_items : [];
   const hasEval = lineItems.some(li => Number(li.variant_id) === EVAL_VARIANT_ID);
   if (!hasEval) {
@@ -67,7 +73,7 @@ export default async function handler(req, res) {
   // --- 5) pull our attributes
   const noteAttrs = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
   const attrs = noteAttrs.reduce((acc, cur) => {
-    const k = String(cur?.name || "").toLowerCase();
+    const k = String(cur?.name || "").toLowerCase().trim();
     acc[k] = String(cur?.value ?? "");
     return acc;
   }, {});
@@ -83,7 +89,9 @@ export default async function handler(req, res) {
   let basePayload = null;
   if (attrs["psa_payload_b64"]) {
     try {
-      let decoded = Buffer.from(attrs["psa_payload_b64"], "base64").toString("utf8");
+      // be tolerant: base64 may contain URL-safe alphabet or have been URI-encoded pre-encode
+      let b64 = attrs["psa_payload_b64"].replace(/ /g, "+"); // just in case
+      let decoded = Buffer.from(b64, "base64").toString("utf8");
       try { decoded = decodeURIComponent(decoded); } catch {}
       basePayload = JSON.parse(decoded);
     } catch (e) {
@@ -98,12 +106,13 @@ export default async function handler(req, res) {
       .from("psa_submissions")
       .select("cards")
       .eq("submission_id", submissionId)
-      .single();
+      .maybeSingle();
     const fromDb = Number(existing?.cards);
     const fromPayload = Number(basePayload?.cards);
-    cardsToUse = Number.isFinite(fromDb) && fromDb > 0 ? fromDb :
-                 (Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0);
-  } catch (e) {
+    cardsToUse = Number.isFinite(fromDb) && fromDb > 0
+      ? fromDb
+      : (Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0);
+  } catch {
     const fromPayload = Number(basePayload?.cards);
     cardsToUse = Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0;
   }
@@ -143,20 +152,21 @@ export default async function handler(req, res) {
   };
 
   // try UPDATE
-  const { data: updated, error: updErr } = await supabase
+  const { data: updRows, error: updErr } = await supabase
     .from("psa_submissions")
     .update(common)
     .eq("submission_id", submissionId)
-    .select("id")
-    .maybeSingle();
+    .select("id");
 
   if (updErr) {
     console.error("[PSA v3] Supabase update error:", updErr);
     return res.status(500).send("Update failed");
   }
 
-  if (!updated) {
-    // not found -> INSERT
+  const updatedCount = Array.isArray(updRows) ? updRows.length : 0;
+
+  if (updatedCount === 0) {
+    // not found -> INSERT (rare, but handles cases where pre-submit never ran)
     const toInsert = { submission_id: submissionId, ...common };
     const { error: insErr } = await supabase.from("psa_submissions").insert(toInsert);
     if (insErr) {
@@ -165,7 +175,7 @@ export default async function handler(req, res) {
     }
     dlog("inserted new row", submissionId);
   } else {
-    dlog("updated existing row", submissionId);
+    dlog("updated existing row", { submissionId, updatedCount });
   }
 
   console.log("[PSA v3] OK", { order: order?.name, submissionId, evalQty, cardsToUse });
