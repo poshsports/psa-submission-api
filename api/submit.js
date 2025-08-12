@@ -73,18 +73,15 @@ export default async function handler(req, res) {
   };
 
   try {
-    const { data, error } = await supabase
-      .from('psa_submissions')
-      .upsert(row, { onConflict: 'submission_id' })
-      .select()
-      .single();
+const { error } = await supabase
+  .from('psa_submissions')
+  .upsert(row, { onConflict: 'submission_id' });
 
-    if (error) {
-      console.error('[submit] Supabase upsert error:', error);
-      return res.status(500).json({ ok: false, error: 'Database error' });
-    }
-
-    return res.status(200).json({ ok: true, id: data.submission_id });
+if (error) {
+  console.error('[submit] Supabase upsert error:', error);
+  return res.status(500).json({ ok: false, error: 'Database error' });
+}
+return res.status(200).json({ ok: true, id: submission_id });
   } catch (e) {
     console.error('[submit] Unexpected error:', e);
     return res.status(500).json({ ok: false, error: 'Unexpected error' });
