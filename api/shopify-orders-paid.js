@@ -2,6 +2,7 @@
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
+// Variant ID for the evaluation product
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || '51003437613332');
 
 const supabase = createClient(
@@ -9,39 +10,24 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// flip to '1' if you want extra logs
+// Set DEBUG_PSA_WEBHOOK=1 in Vercel to see these logs
 const DEBUG = process.env.DEBUG_PSA_WEBHOOK === '1';
 const dlog = (...a) => DEBUG && console.log('[PSA Webhook]', ...a);
 
-// helpers
-function getAttr(order, key) {
-  const arr = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
-  const found = arr.find(a => (a.name || a.key) === key);
-  return found ? String(found.value ?? '') : '';
-}
-function decodeB64ToJson(s) {
-  try {
-    if (!s) return null;
-    let dec = Buffer.from(s, 'base64').toString('utf8');
-    try { dec = decodeURIComponent(dec); } catch {}
-    return JSON.parse(dec);
-  } catch {
-    return null;
-  }
-}
-
 export default async function handler(req, res) {
+  console.log('[PSA Webhook] v2 live');
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).send('Method Not Allowed');
   }
 
-  // --- 1) Read RAW body (must be raw for HMAC) ---
+  // --- 1) Read RAW body (needed for HMAC) ---
   const chunks = [];
-  for await (const c of req) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const rawBody = Buffer.concat(chunks);
 
-  // --- 2) HMAC verify ---
+  // --- 2) Verify HMAC ---
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
   if (!secret) {
     console.error('[PSA Webhook] Missing SHOPIFY_WEBHOOK_SECRET');
@@ -66,7 +52,7 @@ export default async function handler(req, res) {
     return res.status(400).send('Invalid JSON');
   }
 
-  // --- 4) Does this order include the eval SKU? (ID ONLY) ---
+  // --- 4) Only handle orders that include the eval variant ---
   const hasEval = Array.isArray(order?.line_items) &&
     order.line_items.some(li => Number(li.variant_id) === EVAL_VARIANT_ID);
 
@@ -80,57 +66,67 @@ export default async function handler(req, res) {
     return acc + (Number(li.variant_id) === EVAL_VARIANT_ID ? Number(li.quantity || 0) : 0);
   }, 0);
 
-  // --- 5) Note attributes ---
-  const submissionId = getAttr(order, 'psa_submission_id');
+  // --- 5) Extract our attributes (submission id + tiny payload) ---
+  const noteAttrsArr = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
+  const attrs = noteAttrsArr.reduce((acc, cur) => {
+    const k = (cur?.name || '').toLowerCase();
+    acc[k] = String(cur?.value ?? '');
+    return acc;
+  }, {});
+
+  const submissionId = attrs['psa_submission_id'] || '';
   if (!submissionId) {
     console.warn('[PSA Webhook] Missing psa_submission_id on order', { order: order?.name, id: order?.id });
     return res.status(200).json({ ok: true, missing_submission_id: true });
   }
-  const smallPayload = decodeB64ToJson(getAttr(order, 'psa_payload_b64')) || {};
 
-  // --- 6) Load existing pre-checkout row (source of truth) ---
-  const { data: existing, error: fetchErr } = await supabase
-    .from('psa_submissions')
-    .select('*')
-    .eq('submission_id', submissionId)
-    .maybeSingle();
-
-  if (fetchErr) {
-    console.warn('[PSA Webhook] Could not fetch existing row:', fetchErr.message);
+  // Optional: decode tiny payload (may include cards/email)
+  let basePayload = null;
+  if (attrs['psa_payload_b64']) {
+    try {
+      let decoded = Buffer.from(attrs['psa_payload_b64'], 'base64').toString('utf8');
+      try { decoded = decodeURIComponent(decoded); } catch {}
+      basePayload = JSON.parse(decoded);
+    } catch (e) {
+      console.warn('[PSA Webhook] Failed to decode psa_payload_b64:', e);
+    }
   }
 
-  // Preserve original cards
-  const cardsToUse = Number.isFinite(existing?.cards) && existing.cards > 0
-    ? Number(existing.cards)
-    : (Number.isFinite(smallPayload?.cards) && smallPayload.cards > 0 ? Number(smallPayload.cards) : 0);
+  // --- 6) Read existing row to preserve cards + maybe existing email ---
+  let cardsToUse = 0;
+  let existingEmail = null;
+  try {
+    const { data: existing } = await supabase
+      .from('psa_submissions')
+      .select('cards, customer_email')
+      .eq('submission_id', submissionId)
+      .single();
 
-  // MUST have a customer_email (DB NOT NULL)
+    if (existing) {
+      const fromDbCards = Number(existing.cards);
+      if (Number.isFinite(fromDbCards) && fromDbCards > 0) cardsToUse = fromDbCards;
+      if (existing.customer_email) existingEmail = existing.customer_email;
+    }
+  } catch (e) {
+    dlog('Could not read existing row; will fall back to payload/order', e?.message);
+  }
+
+  // Fall back for cards if we didn't get it from DB
+  if (!cardsToUse) {
+    const fromPayload = Number(basePayload?.cards);
+    if (Number.isFinite(fromPayload) && fromPayload > 0) cardsToUse = fromPayload;
+  }
+
+  // --- 7) Resolve customer_email robustly (prevents NOT NULL error) ---
   const customer_email =
-    existing?.customer_email ||
-    smallPayload?.customer_email ||
     order?.email ||
     order?.customer?.email ||
     order?.contact_email ||
+    existingEmail ||
+    basePayload?.customer_email ||
     null;
 
-  if (!customer_email) {
-    console.warn('[PSA Webhook] Missing customer_email even after fallbacks', {
-      order: order?.name, id: order?.id, submissionId
-    });
-    // ACK so Shopify stops retrying; we can reprocess manually if needed
-    return res.status(200).send('missing email');
-  }
-
-  // Map shipping address if we need to fill gaps
-  const ship = order?.shipping_address || {};
-  const addrFromOrder = ship?.address1 ? {
-    street: ship.address1 + (ship.address2 ? ` ${ship.address2}` : ''),
-    city:   ship.city || '',
-    state:  ship.province_code || ship.province || '',
-    zip:    ship.zip || '',
-  } : null;
-
-  // Minimal Shopify snapshot (no bloat)
+  // --- 8) Minimal Shopify snapshot (not bloated) ---
   const shopify = {
     id: order?.id,
     name: order?.name,
@@ -148,54 +144,30 @@ export default async function handler(req, res) {
     }))
   };
 
-  // --- 7) Build update doc (don’t null-out good data) ---
-  const updateDoc = {
-    customer_email,
-    status: 'submitted',                           // unify with non-eval flow
+  // --- 9) Upsert to Supabase (conflict on submission_id) ---
+  const update = {
+    submission_id: submissionId,               // conflict key
+    customer_email,                            // <-- REQUIRED (NOT NULL)
+    status: 'submitted_paid',
     submitted_via: 'webhook_orders_paid',
-    submitted_at_iso: new Date().toISOString(),
-    paid_at_iso: order?.processed_at || new Date().toISOString(),
-    evaluation: Number(evalQty) || 0,
-    cards: cardsToUse,
-    shopify,
-    ...(existing?.totals ? { totals: existing.totals } :
-       smallPayload?.totals ? { totals: smallPayload.totals } : {}),
-    ...(existing?.card_info ? { card_info: existing.card_info } :
-       smallPayload?.card_info ? { card_info: smallPayload.card_info } : {}),
-    ...(existing?.address ? { address: existing.address } :
-       addrFromOrder ? { address: addrFromOrder } : {})
+    paid_at_iso: new Date().toISOString(),
+    evaluation: Number.isFinite(evalQty) ? evalQty : 0,  // purchased eval count
+    cards: cardsToUse,                                   // original card count
+    shopify
   };
 
-  // --- 8) Prefer UPDATE by submission_id (idempotent) ---
-  const { data: upd, error: updErr } = await supabase
+  const { error } = await supabase
     .from('psa_submissions')
-    .update(updateDoc)
-    .eq('submission_id', submissionId)
-    .select('id')
-    .maybeSingle();
+    .upsert(update, { onConflict: 'submission_id' });
 
-  if (updErr) {
-    console.error('[PSA Webhook] Update error:', updErr);
-    // ACK to stop retries; you’ll see this in logs
-    return res.status(200).send('update err (ack)');
-  }
-
-  // If no row existed (rare), INSERT with required fields
-  if (!upd) {
-    const insertDoc = { ...updateDoc, submission_id: submissionId };
-    const { error: insErr } = await supabase
-      .from('psa_submissions')
-      .insert([insertDoc]);
-
-    if (insErr) {
-      console.error('[PSA Webhook] Insert error:', insErr);
-      return res.status(200).send('insert err (ack)');
-    }
+  if (error) {
+    console.error('[PSA Webhook] Supabase upsert error:', error);
+    return res.status(500).send('Submit failed');
   }
 
   console.log('[orders-paid] OK', {
     id: order?.id,
-    email: customer_email,
+    email: order?.email,
     order: order?.name,
     submissionId,
     evalQty,
