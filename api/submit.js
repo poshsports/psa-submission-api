@@ -12,14 +12,6 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .map(s => s.trim())
   .filter(Boolean);
 
-function cors(res, reqOrigin) {
-  const origin = allowedOrigins.includes(reqOrigin) ? reqOrigin : allowedOrigins[0] || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-}
-
 if (!supabaseUrl || !supabaseKey) {
   console.error('[submit] Missing SUPABASE_URL or SUPABASE_SERVICE_KEY/ANON_KEY');
 }
@@ -27,9 +19,28 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default async function handler(req, res) {
-  cors(res, req.headers.origin || '');
+  // --- CORS (same policy used in /api/test-cors) ---
+  const origin = req.headers.origin || '';
+  const okOrigin = !allowedOrigins.length || allowedOrigins.includes(origin);
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // prevent cache mixing by Origin
+  res.setHeader('Vary', 'Origin');
+
+  // Preflight
+  if (req.method === 'OPTIONS') {
+    if (!okOrigin) return res.status(403).end();
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return res.status(204).end();
+  }
+
+  // Actual request CORS gate
+  if (!okOrigin) {
+    return res.status(403).json({ ok: false, error: `Origin ${origin} not allowed` });
+  }
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  // --- end CORS ---
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST, OPTIONS');
