@@ -4,8 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 
 export const config = { api: { bodyParser: false } }; // safe even if not Next.js
 
-console.log('[PSA VERSION] v3.1');
-
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -17,6 +15,7 @@ const DEBUG = process.env.DEBUG_PSA_WEBHOOK === "1";
 const dlog = (...a) => DEBUG && console.log("[PSA v3]", ...a);
 
 export default async function handler(req, res) {
+  console.log('[PSA VERSION] v3.1');
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).send("Method Not Allowed");
