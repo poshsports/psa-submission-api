@@ -2,7 +2,7 @@
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
-// Prefer configuring this in Vercel as SHOPIFY_EVAL_VARIANT_ID
+// Use the variant id from Vercel env
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || '51003437613332');
 
 const supabase = createClient(
@@ -50,23 +50,18 @@ export default async function handler(req, res) {
     return res.status(400).send('Invalid JSON');
   }
 
-  // --- 4) Does this order include the eval SKU? ---
+  // --- 4) Does this order include the eval SKU? (ID ONLY) ---
   const hasEval = Array.isArray(order?.line_items) &&
-    order.line_items.some(li =>
-      (EVAL_VARIANT_ID && Number(li.variant_id) === EVAL_VARIANT_ID) ||
-      String(li.title || '').toLowerCase().includes('evaluation')
-    );
+    order.line_items.some(li => Number(li.variant_id) === EVAL_VARIANT_ID);
 
   if (!hasEval) {
     dlog('Order has no eval line item; skipping.', { order: order?.name, id: order?.id });
     return res.status(200).json({ ok: true, skipped: true });
   }
 
-  // Also compute evaluation quantity (how many evals purchased)
+  // Compute evaluation quantity strictly by variant id
   const evalQty = (order.line_items || []).reduce((acc, li) => {
-    const byVariant = EVAL_VARIANT_ID && Number(li.variant_id) === EVAL_VARIANT_ID;
-    const byTitle = (li.title || '').toLowerCase().includes('evaluation');
-    return acc + (byVariant || byTitle ? Number(li.quantity || 0) : 0);
+    return acc + (Number(li.variant_id) === EVAL_VARIANT_ID ? Number(li.quantity || 0) : 0);
   }, 0);
 
   // --- 5) Read note attributes and extract our ids/payload ---
@@ -138,8 +133,8 @@ export default async function handler(req, res) {
     status: 'submitted_paid',
     submitted_via: 'webhook_orders_paid',
     paid_at_iso: new Date().toISOString(),
-    evaluation: evalQty,                   // how many evals were purchased
-    cards: cardsToUse,                     // preserve original card count
+    evaluation: Number.isFinite(evalQty) ? evalQty : 0,  // purchased eval count
+    cards: cardsToUse,                                   // original card count
     shopify
   };
 
