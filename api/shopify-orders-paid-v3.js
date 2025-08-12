@@ -1,8 +1,8 @@
-// v3.3 — accelerated-checkout fallback + optional paid_amount + optional eval_line_subtotal
-// - Fallback: read psa_submission_id / psa_payload_b64 from line_items[].properties
-//   when note_attributes are missing (Shop Pay / Apple Pay cases).
-// - Optional: SAVE_PSA_PAID_AMOUNT=1 to persist numeric paid_amount (whole order total).
-// - Optional: SAVE_PSA_EVAL_SUBTOTAL=1 to persist eval_line_subtotal (only eval SKU subtotal after discounts).
+// v3.4 — accelerated-checkout fallback + optional paid_amount + optional eval_line_subtotal + optional Shopify order keys
+// - Fallback: read psa_submission_id / psa_payload_b64 from line_items[].properties when note_attributes are missing.
+// - Optional: SAVE_PSA_PAID_AMOUNT=1 -> write paid_amount (whole order total).
+// - Optional: SAVE_PSA_EVAL_SUBTOTAL=1 -> write eval_line_subtotal (eval SKU subtotal after discounts).
+// - Optional: SAVE_PSA_ORDER_KEYS=1 -> write shopify_order_id, shopify_order_number, shopify_order_name, shop_domain.
 // - Keeps v3.1 behavior: raw HMAC, early eval-SKU gate, preserve cards, update→insert, same table/columns.
 
 import crypto from "crypto";
@@ -13,6 +13,7 @@ export const config = { api: { bodyParser: false } }; // needed for raw HMAC bod
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const SAVE_PSA_PAID_AMOUNT = process.env.SAVE_PSA_PAID_AMOUNT === "1";
 const SAVE_PSA_EVAL_SUBTOTAL = process.env.SAVE_PSA_EVAL_SUBTOTAL === "1";
+const SAVE_PSA_ORDER_KEYS = process.env.SAVE_PSA_ORDER_KEYS === "1";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -118,7 +119,7 @@ function computeEvalLineSubtotal(lineItems, evalVariantId) {
 }
 
 export default async function handler(req, res) {
-  console.log("[PSA VERSION] v3.3 handler start");
+  console.log("[PSA VERSION] v3.4 handler start");
 
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -242,12 +243,12 @@ export default async function handler(req, res) {
     cardsToUse = Number.isFinite(fromPayload) && fromPayload > 0 ? fromPayload : 0;
   }
 
-  // --- 7) email (required by DB) — keep your behavior; add customer.email as mild fallback
+  // --- 7) email (required by DB)
   let customerEmail = (order?.email || order?.customer?.email || basePayload?.customer_email || "").trim();
   if (!customerEmail) customerEmail = "unknown@no-email.local"; // prevents NOT NULL violation
   dlog("email", customerEmail);
 
-  // --- 8) small Shopify snapshot (unchanged fields; keep email and price present)
+  // --- 8) small Shopify snapshot (unchanged fields)
   const shopify = {
     id: order?.id,
     name: order?.name,
@@ -265,8 +266,14 @@ export default async function handler(req, res) {
     }))
   };
 
-  // Optional paid_amount (env-gated to avoid breaking if column not ready)
+  // Optional paid_amount (env-gated)
   const paidAmount = SAVE_PSA_PAID_AMOUNT ? extractPaidAmount(order) : null;
+
+  // Optional Shopify order keys (env-gated)
+  const shopDomain = String(req.headers["x-shopify-shop-domain"] || "");
+  const orderIdStr = order?.id != null ? String(order.id) : null; // keep as string to avoid JS safe-int issues
+  const orderNumber = order?.order_number ?? null;
+  const orderName = order?.name ?? null;
 
   // --- 9) update first, then insert if not found (unchanged pattern)
   const common = {
@@ -283,6 +290,12 @@ export default async function handler(req, res) {
   }
   if (SAVE_PSA_EVAL_SUBTOTAL && Number.isFinite(evalLineSubtotal)) {
     common.eval_line_subtotal = evalLineSubtotal;
+  }
+  if (SAVE_PSA_ORDER_KEYS) {
+    if (orderIdStr) common.shopify_order_id = orderIdStr;
+    if (orderNumber != null) common.shopify_order_number = orderNumber;
+    if (orderName != null) common.shopify_order_name = orderName;
+    if (shopDomain) common.shop_domain = shopDomain;
   }
 
   // try UPDATE
