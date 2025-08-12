@@ -1,56 +1,50 @@
 // api/submit.js
 import { createClient } from '@supabase/supabase-js';
 
-// Uses your existing env names
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey =
   process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
 
-// Optional: lock CORS to your storefront(s)
+// Optional: restrict to your storefronts via env ALLOWED_ORIGINS="https://poshsports.com,https://www.poshsports.com"
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('[submit] Missing SUPABASE_URL or SUPABASE_SERVICE_KEY/ANON_KEY');
+function cors(res, reqOrigin) {
+  const origin =
+    allowedOrigins.length === 0
+      ? '*'
+      : allowedOrigins.includes(reqOrigin)
+      ? reqOrigin
+      : allowedOrigins[0];
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = (supabaseUrl && supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
 
 export default async function handler(req, res) {
-  // --- CORS (same policy used in /api/test-cors) ---
-  const origin = req.headers.origin || '';
-  const okOrigin = !allowedOrigins.length || allowedOrigins.includes(origin);
+  cors(res, req.headers.origin || '');
 
-  // prevent cache mixing by Origin
-  res.setHeader('Vary', 'Origin');
-
-  // Preflight
   if (req.method === 'OPTIONS') {
-    if (!okOrigin) return res.status(403).end();
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    return res.status(204).end();
+    return res.status(200).end();
   }
-
-  // Actual request CORS gate
-  if (!okOrigin) {
-    return res.status(403).json({ ok: false, error: `Origin ${origin} not allowed` });
-  }
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  // --- end CORS ---
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST, OPTIONS');
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
-  // Parse JSON body
+  // Parse JSON safely
   let payload;
   try {
-    payload = req.body && typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
+    payload = typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
   } catch {
     return res.status(400).json({ ok: false, error: 'Invalid JSON' });
   }
@@ -58,6 +52,11 @@ export default async function handler(req, res) {
   const submission_id = String(payload.submission_id || '').trim();
   if (!submission_id) {
     return res.status(400).json({ ok: false, error: 'submission_id is required' });
+  }
+
+  if (!supabase) {
+    console.error('[submit] Missing SUPABASE_URL or key');
+    return res.status(500).json({ ok: false, error: 'Server misconfigured' });
   }
 
   const row = {
@@ -70,13 +69,13 @@ export default async function handler(req, res) {
     totals: payload.totals ?? null,
     card_info: payload.card_info ?? null,
     shopify: payload.shopify ?? null,
-    raw: payload, // optional audit copy
+    raw: payload, // audit copy
   };
 
   try {
     const { data, error } = await supabase
       .from('psa_submissions')
-      .upsert(row, { onConflict: 'submission_id' }) // UNIQUE index required
+      .upsert(row, { onConflict: 'submission_id' })
       .select()
       .single();
 
