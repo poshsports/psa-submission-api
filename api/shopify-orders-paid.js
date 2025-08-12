@@ -1,9 +1,10 @@
 // v3 — writes customer_email and never uses upsert
-console.log('[PSA VERSION] v3.1');
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 export const config = { api: { bodyParser: false } }; // safe even if not Next.js
+
+console.log('[PSA VERSION] v3.1');
 
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const supabase = createClient(
