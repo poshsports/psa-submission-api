@@ -1,35 +1,40 @@
-// /api/proxy/submissions.js
-const crypto = require('crypto');
-const { getSubmissionsByCustomer } = require('../../lib/getSubmissionsByCustomer');
+// /api/proxy/submissions.js  (ESM version)
+import crypto from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 
-const { SHOPIFY_API_SECRET } = process.env;
+const {
+  SHOPIFY_API_SECRET,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_KEY,
+} = process.env;
 
-// Verify Shopify App Proxy signature (query param: `signature`)
-function verifyProxyHmac(query) {
-  const { signature, ...rest } = query || {};
-  // Shopify expects keys sorted and concatenated key=value with no separators
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// Verify Shopify App Proxy signature (query contains `signature`)
+function verifyProxyHmac(query = {}) {
+  const { signature, ...rest } = query;
   const msg = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('');
   const digest = crypto.createHmac('sha256', SHOPIFY_API_SECRET).update(msg).digest('hex');
   return digest === signature;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');
       return res.status(405).json({ ok: false, error: 'method_not_allowed' });
     }
 
-    // App Proxy responses should not be cached by Shopify/CDN
+    // App Proxy responses should not be cached
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
 
-    // Validate App Proxy signature
+    // 1) signature check
     if (!verifyProxyHmac(req.query)) {
       return res.status(403).json({ ok: false, error: 'invalid_signature' });
     }
 
-    // Shopify injects this in App Proxy requests
+    // 2) Shopify injects this when customer is logged in
     const customerIdRaw =
       req.query.logged_in_customer_id ||
       req.headers['x-shopify-customer-id'] ||
@@ -40,15 +45,44 @@ module.exports = async (req, res) => {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    const submissions = await getSubmissionsByCustomer(customerIdNum);
+    // 3) fetch from Supabase
+    const { data, error } = await supabase
+      .from('psa_submissions')
+      .select(`
+        submission_id,
+        created_at,
+        submitted_at_iso,
+        cards,
+        card_count,
+        quantity,
+        items,
+        status,
+        totals,
+        grading_total,
+        amount_cents,
+        total,
+        number,
+        submission_no,
+        id,
+        ref,
+        code,
+        shopify_customer_id
+      `)
+      .eq('shopify_customer_id', customerIdNum)
+      .order('submitted_at_iso', { ascending: false });
+
+    if (error) {
+      console.error('Supabase query error:', error);
+      return res.status(500).json({ ok: false, error: 'db_error' });
+    }
 
     return res.status(200).json({
       ok: true,
       customerId: String(customerIdNum),
-      submissions,
+      submissions: data || [],
     });
   } catch (e) {
     console.error('proxy/submissions error', e);
     return res.status(500).json({ ok: false, error: 'server_error' });
   }
-};
+}
