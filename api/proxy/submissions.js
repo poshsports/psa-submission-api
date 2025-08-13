@@ -60,6 +60,7 @@ const { data, error } = await supabase
     created_at,
     submitted_at_iso,
     cards,
+    grading_service,
     status,
     totals,
     shopify_customer_id
@@ -106,6 +107,7 @@ const submissions = (data || []).map((r) => {
     grading_total: (r.totals && r.totals.grading) ?? null,
     status: r.status || "received",
     totals: r.totals || null,
+    grading_service: r.grading_service || null
   };
 });
 
