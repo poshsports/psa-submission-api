@@ -1,35 +1,30 @@
-// Vercel serverless function: /api/submissions.js
+// /api/submissions.js  -- Vercel serverless function
 // Returns the logged-in customer's PSA submissions for the portal UI.
 
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
-// ---- ENV (set these in your Vercel project) ----
-// SUPABASE_URL=...
-// SUPABASE_SERVICE_ROLE=...       // server-only key
-// SHOPIFY_API_SECRET=...          // App Proxy "Secret" from your Shopify app
-// SHOPIFY_ADMIN_TOKEN=...         // Admin API token (private/custom app)
-// SHOPIFY_STORE=poshsports.myshopify.com  // your store domain
-
+// --- ENV names aligned to your Vercel variables (from your screenshot) ---
 const {
   SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE,
-  SHOPIFY_API_SECRET,
-  SHOPIFY_ADMIN_TOKEN,
-  SHOPIFY_STORE,
+  SUPABASE_SERVICE_KEY,           // your service-role key (server-only)
+  SHOPIFY_API_SECRET,             // App Proxy secret (NOT the Admin token)
+  SHOPIFY_ADMIN_API_ACCESS_TOKEN, // Admin API access token
+  SHOPIFY_STORE,                  // e.g. "poshsports.myshopify.com"  <-- add this
+  SHOPIFY_API_VERSION,            // optional; falls back if missing
 } = process.env;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // --- Verify Shopify App Proxy signature (param: `signature`) ---
 function verifyProxyHmac(query) {
-  // Build sorted key=value string EXCLUDING `signature`
   const { signature, ...rest } = query || {};
   const sorted = Object.keys(rest)
     .sort()
     .map((k) => `${k}=${rest[k]}`)
     .join('');
-  const digest = crypto.createHmac('sha256', SHOPIFY_API_SECRET)
+  const digest = crypto
+    .createHmac('sha256', SHOPIFY_API_SECRET)
     .update(sorted)
     .digest('hex');
   return digest === signature;
@@ -52,20 +47,25 @@ module.exports = async (req, res) => {
     if (!customerId) return res.status(401).json({ error: 'Not logged in' });
 
     // 3) Lookup customer email via Admin API (ID -> email)
+    const apiVersion = SHOPIFY_API_VERSION || '2024-10';
     const adminResp = await fetch(
-      `https://${SHOPIFY_STORE}/admin/api/2024-10/customers/${customerId}.json`,
+      `https://${SHOPIFY_STORE}/admin/api/${apiVersion}/customers/${customerId}.json`,
       {
         headers: {
-          'X-Shopify-Access-Token': SHOPIFY_ADMIN_TOKEN,
+          'X-Shopify-Access-Token': SHOPIFY_ADMIN_API_ACCESS_TOKEN,
           'Content-Type': 'application/json',
         },
         cache: 'no-store',
       }
     );
+
     if (!adminResp.ok) {
       const text = await adminResp.text().catch(() => '');
-      return res.status(500).json({ error: 'Failed to fetch customer', debug: text });
+      return res
+        .status(500)
+        .json({ error: 'Failed to fetch customer', debug: text });
     }
+
     const { customer } = await adminResp.json();
     const email = (customer?.email || '').trim().toLowerCase();
     if (!email) return res.status(404).json({ error: 'Customer email not found' });
@@ -97,7 +97,7 @@ module.exports = async (req, res) => {
 
     if (error) throw error;
 
-    // 5) Return as the portal expects (array or { submissions: [...] } both OK)
+    // 5) Return payload (your frontend normalizes keys)
     return res.status(200).json({ submissions: data || [] });
   } catch (e) {
     console.error('submissions endpoint error', e);
