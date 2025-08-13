@@ -99,6 +99,7 @@ const submissions = (data || []).map((r) => {
 
   return {
     id: rawId, // unchanged for compatibility
+    submission_id: r.submission_id || null,
     display_id, // what the UI shows as "Submission #"
     created_at: r.submitted_at_iso || r.created_at,
     cards: r.cards ?? 0,
