@@ -73,21 +73,37 @@ if (error) {
 }
 
 // Normalize to what the front-end expects
-const submissions = (data || []).map(r => ({
-  // keep the DB uuid stable/untouched
-  id: r.id,
-  // what the UI shows as "Submission #"
-  // (use your friendly submission_id if present, else fall back to uuid)
-  display_id: r.submission_id || r.id,
+const submissions = (data || []).map((r) => {
+  // Keep the stable DB uuid for internal identity
+  const rawId = r.id;
 
-  created_at: r.submitted_at_iso || r.created_at,
-  cards: r.cards ?? 0,
-  grading_total: (r.totals && r.totals.grading) ?? null,
-  status: r.status || 'received',
-  totals: r.totals || null,
-}));
+  // Prefer a truly friendly submission_id if present (and not just a uuid)
+  const isUuid = (v) => /^[0-9a-f-]{36}$/i.test(String(v || ""));
+  let display_id = r.submission_id && !isUuid(r.submission_id)
+    ? r.submission_id
+    : null;
 
+  // If no friendly submission_id, synthesize one like SUB-YYYYMMDD-ABCDE
+  if (!display_id) {
+    const dateIso = (r.submitted_at_iso || r.created_at || "").toString();
+    const datePart = dateIso ? dateIso.slice(0, 10).replace(/-/g, "") : "";
+    const tail = String(r.submission_id || rawId)
+      .replace(/[^a-z0-9]/gi, "")
+      .slice(-5)
+      .toUpperCase();
+    display_id = datePart ? `SUB-${datePart}-${tail}` : `SUB-${tail}`;
+  }
 
+  return {
+    id: rawId, // unchanged for compatibility
+    display_id, // what the UI shows as "Submission #"
+    created_at: r.submitted_at_iso || r.created_at,
+    cards: r.cards ?? 0,
+    grading_total: (r.totals && r.totals.grading) ?? null,
+    status: r.status || "received",
+    totals: r.totals || null,
+  };
+});
 
 return res.status(200).json({
   ok: true,
