@@ -1,4 +1,4 @@
-// /api/proxy/submissions.js  (ESM)
+// /api/proxy/submissions.js
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
@@ -14,68 +14,61 @@ function verifyProxyHmac(query = {}) {
 
 export default async function handler(req, res) {
   try {
+    if (req.query.ping === '1') {
+      return res.json({ ok: true, where: '/api/proxy/submissions', query: req.query });
+    }
+
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');
-      return res.status(405).json({ ok:false, error:'method_not_allowed' });
+      return res.status(405).json({ ok: false, error: 'method_not_allowed' });
     }
 
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
 
-    // Quick probe to confirm this function runs via the App Proxy
-    if (req.query.ping === '1') {
-      return res.status(200).json({ ok:true, where:'/api/proxy/submissions', query:req.query });
-    }
-
-    // TEMP bypass (works even in prod). Remove after testing.
     const devBypass = req.query.dev_skip_sig === '1';
     if (!devBypass && !verifyProxyHmac(req.query)) {
-      return res.status(403).json({ ok:false, error:'invalid_signature' });
+      return res.status(403).json({ ok: false, error: 'invalid_signature' });
     }
 
-    const idRaw =
+    // Customer id from Shopify (force to string to match TEXT or BIGINT columns)
+    const customerIdRaw =
       req.query.logged_in_customer_id ||
       req.headers['x-shopify-customer-id'] ||
       req.headers['x-shopify-logged-in-customer-id'];
+    const customerId = String(customerIdRaw || '');
+    if (!customerId) return res.status(401).json({ ok: false, error: 'not_logged_in' });
 
-    const idNum = Number(idRaw);
-    if (!Number.isFinite(idNum)) {
-      return res.status(401).json({ ok:false, error:'not_logged_in' });
-    }
-
+    // Select everything, then map to the shape the UI needs
     const { data, error } = await supabase
       .from('psa_submissions')
-      .select(`
-        submission_id,
-        created_at,
-        submitted_at_iso,
-        cards,
-        card_count,
-        quantity,
-        items,
-        status,
-        totals,
-        grading_total,
-        amount_cents,
-        total,
-        number,
-        submission_no,
-        id,
-        ref,
-        code,
-        shopify_customer_id
-      `)
-      .eq('shopify_customer_id', String(idNum))
+      .select('*')
+      .eq('shopify_customer_id', customerId)
       .order('submitted_at_iso', { ascending: false });
 
     if (error) {
       console.error('Supabase query error:', error);
-      return res.status(500).json({ ok:false, error:'db_error' });
+      return res.status(500).json({ ok: false, error: 'db_error', code: error.code });
     }
 
-    return res.status(200).json({ ok:true, customerId:String(idNum), submissions: data || [] });
+    const submissions = (data || []).map(r => ({
+      id: r.submission_no || r.number || r.ref || r.code || r.submission_id || r.id,
+      created_at: r.submitted_at_iso || r.created_at,
+      cards:
+        r.cards ??
+        r.card_count ??
+        r.quantity ??
+        (Array.isArray(r.items) ? r.items.length : 0),
+      grading_total:
+        r.grading_total ??
+        (r.totals && (r.totals.grading ?? r.totals.total ?? r.totals.grand)) ??
+        (typeof r.amount_cents === 'number' ? r.amount_cents / 100 : 0),
+      status: r.status || 'pending',
+    }));
+
+    return res.status(200).json({ ok: true, customerId, submissions });
   } catch (e) {
     console.error('proxy/submissions error', e);
-    return res.status(500).json({ ok:false, error:'server_error' });
+    return res.status(500).json({ ok: false, error: 'server_error' });
   }
 }
