@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
 
     // Query by Shopify customer ID (no Admin token)
     const { data, error } = await supabase
-      .from('submissions')
+      .from('psa_submissions')
       .select(`
         submission_id,
         created_at,
