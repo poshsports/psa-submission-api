@@ -84,21 +84,23 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Server misconfigured' });
   }
 
-  // STEP 2: build row
-  const row = {
-    submission_id,
-    cards: parsedCards,
-    evaluation: parsedEvaluation,
-    status: payload.status ?? null,
-    submitted_via: payload.submitted_via ?? null,
-    submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
-    customer_email: payload.customer_email ?? null,
-    address: payload.address ?? null,       // jsonb
-    totals: payload.totals ?? null,         // jsonb
-    card_info: payload.card_info ?? null,   // jsonb
-    shopify: payload.shopify ?? null,       // jsonb
-    raw: payload ?? null,                   // jsonb audit copy
-  };
+// STEP 2: build row
+const row = {
+  submission_id,
+  cards: parsedCards,
+  evaluation: parsedEvaluation,
+  status: payload.status ?? null,
+  submitted_via: payload.submitted_via ?? null,
+  submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
+  customer_email: payload.customer_email ?? null,
+  address: payload.address ?? null,       // jsonb
+  totals: payload.totals ?? null,         // jsonb
+  card_info: payload.card_info ?? null,   // jsonb
+  shopify_customer_id: payload.shopify_customer_id ?? null, // NEW
+  shopify: payload.shopify ?? null,       // jsonb
+  raw: payload ?? null,                   // jsonb audit copy
+};
+
 
   try {
     const { error } = await supabase
