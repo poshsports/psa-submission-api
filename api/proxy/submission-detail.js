@@ -1,0 +1,108 @@
+// /api/proxy/submission-detail.js (ESM)
+import crypto from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
+
+const { SHOPIFY_API_SECRET, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+function verifyProxyHmac(query = {}) {
+  const { signature, ...rest } = query;
+  const msg = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('');
+  const digest = crypto.createHmac('sha256', SHOPIFY_API_SECRET).update(msg).digest('hex');
+  return digest === signature;
+}
+
+export default async function handler(req, res) {
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json');
+
+    // health check
+    if (req.query.ping) {
+      return res.status(200).json({ ok: true, where: '/api/proxy/submission-detail', query: req.query });
+    }
+
+    const devBypass =
+      process.env.NODE_ENV !== 'production' && req.query.dev_skip_sig === '1';
+    if (!devBypass && !verifyProxyHmac(req.query)) {
+      return res.status(403).json({ ok: false, error: 'invalid_signature' });
+    }
+
+    // Accept either your friendly submission_id or the row uuid id
+    const sid = String(req.query.sid || req.query.id || req.query.submission_id || '').trim();
+    if (!sid) return res.status(400).json({ ok: false, error: 'missing_id' });
+
+    // must belong to the logged-in customer
+    const customerIdRaw =
+      req.query.logged_in_customer_id ||
+      req.headers['x-shopify-customer-id'] ||
+      req.headers['x-shopify-logged-in-customer-id'];
+    const customerIdNum = Number(customerIdRaw);
+    if (!Number.isFinite(customerIdNum)) {
+      return res.status(401).json({ ok: false, error: 'not_logged_in' });
+    }
+
+    // fetch one record (only columns you have)
+    const { data, error } = await supabase
+      .from('psa_submissions')
+      .select(`
+        id,
+        submission_id,
+        created_at,
+        submitted_at_iso,
+        submitted_at,
+        status,
+        cards,
+        evaluation,
+        totals,
+        address,
+        card_info,
+        paid_at_iso,
+        paid_amount,
+        submitted_via,
+        shop_domain,
+        shopify_customer_id
+      `)
+      .eq('shopify_customer_id', customerIdNum)
+      .or(`id.eq.${sid},submission_id.eq.${sid}`)
+      .limit(1);
+
+    if (error) {
+      console.error('Supabase single query error:', error);
+      return res.status(500).json({ ok: false, error: 'db_error' });
+    }
+    if (!data || !data.length) {
+      return res.status(404).json({ ok: false, error: 'not_found' });
+    }
+
+    const r = data[0];
+    const display_id = r.submission_id || r.id;
+    const created_at = r.submitted_at_iso || r.submitted_at || r.created_at;
+
+    return res.status(200).json({
+      ok: true,
+      submission: {
+        id: r.id,
+        display_id,
+        created_at,
+        status: r.status || 'received',
+        cards: r.cards ?? 0,
+        evaluation: r.evaluation ?? 0,
+        totals: r.totals || {},
+        address: r.address || null,
+        card_info: r.card_info || [],
+        paid_at_iso: r.paid_at_iso || null,
+        paid_amount: r.paid_amount || null,
+        submitted_via: r.submitted_via || null,
+      }
+    });
+  } catch (e) {
+    console.error('proxy/submission-detail error', e);
+    return res.status(500).json({ ok: false, error: 'server_error' });
+  }
+}
