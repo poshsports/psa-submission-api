@@ -73,26 +73,20 @@ if (error) {
 }
 
 // Normalize to what the front-end expects
-const submissions = (data || []).map(r => {
-  // keep the raw/internal id exactly as before
-  const rawId = r.submission_id || r.submission_no || r.number || r.code || r.id;
+const submissions = (data || []).map(r => ({
+  // keep the DB uuid stable/untouched
+  id: r.id,
+  // what the UI shows as "Submission #"
+  // (use your friendly submission_id if present, else fall back to uuid)
+  display_id: r.submission_id || r.id,
 
-  // build a friendly display id like: SUB-YYYYMMDD-ABCDE
-  const dateIso = (r.submitted_at_iso || r.created_at || '').toString();
-  const datePart = dateIso ? dateIso.slice(0, 10).replaceAll('-', '') : '';
-  const tail = (rawId || '').replace(/[^a-f0-9]/gi, '').slice(-5).toUpperCase(); // last 5 hex chars
-  const display_id = datePart ? `SUB-${datePart}-${tail}` : `SUB-${tail}`;
+  created_at: r.submitted_at_iso || r.created_at,
+  cards: r.cards ?? 0,
+  grading_total: (r.totals && r.totals.grading) ?? null,
+  status: r.status || 'received',
+  totals: r.totals || null,
+}));
 
-  return {
-    id: rawId,                      // <— unchanged for compatibility
-    display_id,                     // <— NEW friendly value
-    created_at: r.submitted_at_iso || r.created_at,
-    cards: r.cards ?? 0,
-    grading_total: r?.totals?.grading ?? null,
-    status: r.status || 'received',
-    totals: r.totals || null,
-  };
-});
 
 
 return res.status(200).json({
