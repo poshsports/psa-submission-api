@@ -1,4 +1,4 @@
-// /api/proxy/submissions.js  (ESM version)
+// /api/proxy/submissions.js  (ESM)
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
@@ -13,7 +13,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 // Verify Shopify App Proxy signature (query contains `signature`)
 function verifyProxyHmac(query = {}) {
   const { signature, ...rest } = query;
-  const msg = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('');
+  const msg = Object.keys(rest)
+    .sort()
+    .map((k) => `${k}=${rest[k]}`)
+    .join('');
   const digest = crypto.createHmac('sha256', SHOPIFY_API_SECRET).update(msg).digest('hex');
   return digest === signature;
 }
@@ -29,8 +32,12 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
 
-    // 1) signature check
-    if (!verifyProxyHmac(req.query)) {
+    // --- DEV BYPASS (remove after testing) ---
+    const devBypass =
+      process.env.NODE_ENV !== 'production' && req.query.dev_skip_sig === '1';
+
+    // 1) Signature check unless bypassed
+    if (!devBypass && !verifyProxyHmac(req.query)) {
       return res.status(403).json({ ok: false, error: 'invalid_signature' });
     }
 
@@ -45,7 +52,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // 3) fetch from Supabase
+    // 3) Fetch from Supabase
     const { data, error } = await supabase
       .from('psa_submissions')
       .select(`
