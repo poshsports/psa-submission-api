@@ -3,14 +3,13 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const {
-  SHOPIFY_API_SECRET,   // App Proxy secret from your custom app
+  SHOPIFY_API_SECRET,
   SUPABASE_URL,
-  SUPABASE_SERVICE_KEY, // service role key
+  SUPABASE_SERVICE_KEY,
 } = process.env;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-// Verify Shopify App Proxy signature: query contains `signature`
 function verifyProxyHmac(query = {}) {
   const { signature, ...rest } = query;
   const msg = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('');
@@ -25,11 +24,9 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: 'method_not_allowed' });
     }
 
-    // App Proxy responses should not be cached
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
 
-    // --- Health / signature debug ---
     if (req.query.ping) {
       return res.status(200).json({
         ok: true,
@@ -38,15 +35,12 @@ export default async function handler(req, res) {
       });
     }
 
-    // TEMP bypass to help debug locally in preview (do NOT leave enabled in prod)
     const devBypass =
       process.env.NODE_ENV !== 'production' && req.query.dev_skip_sig === '1';
-
     if (!devBypass && !verifyProxyHmac(req.query)) {
       return res.status(403).json({ ok: false, error: 'invalid_signature' });
     }
 
-    // Shopify injects this when the customer is logged in
     const customerIdRaw =
       req.query.logged_in_customer_id ||
       req.headers['x-shopify-customer-id'] ||
@@ -57,15 +51,12 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // Select columns we use. Added common human-friendly ids:
-    // submission_no / number / code
+    // ✅ Only columns we’re sure exist
     const { data, error } = await supabase
       .from('psa_submissions')
       .select(`
         id,
         submission_id,
-        submission_no,
-        number,
         code,
         created_at,
         submitted_at_iso,
@@ -82,16 +73,13 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: 'db_error' });
     }
 
-    // Normalize to what the front-end expects
     const submissions = (data || []).map(r => ({
-      // prefer friendly fields; fall back to UUID
-      id: r.submission_id || r.submission_no || r.number || r.code || r.id,
+      // Friendly display order: submission_id → code → UUID
+      id: r.submission_id || r.code || r.id,
       created_at: r.submitted_at_iso || r.created_at,
       cards: r.cards ?? 0,
-      // your UI shows “GRADING TOTAL”; pull it from totals JSON
       grading_total: r?.totals?.grading ?? null,
       status: r.status || 'received',
-      // include raw totals for future use
       totals: r.totals || null,
     }));
 
