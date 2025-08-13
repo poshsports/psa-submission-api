@@ -57,12 +57,16 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // Select ONLY columns we know exist. (No grading_total/card_count, etc.)
+    // Select columns we use. Added common human-friendly ids:
+    // submission_no / number / code
     const { data, error } = await supabase
       .from('psa_submissions')
       .select(`
         id,
         submission_id,
+        submission_no,
+        number,
+        code,
         created_at,
         submitted_at_iso,
         cards,
@@ -80,8 +84,8 @@ export default async function handler(req, res) {
 
     // Normalize to what the front-end expects
     const submissions = (data || []).map(r => ({
-      // the table’s human id if present, else UUID
-      id: r.submission_id || r.id,
+      // prefer friendly fields; fall back to UUID
+      id: r.submission_id || r.submission_no || r.number || r.code || r.id,
       created_at: r.submitted_at_iso || r.created_at,
       cards: r.cards ?? 0,
       // your UI shows “GRADING TOTAL”; pull it from totals JSON
