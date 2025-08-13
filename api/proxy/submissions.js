@@ -65,7 +65,7 @@ export default async function handler(req, res) {
         code,
         shopify_customer_id
       `)
-      .eq('shopify_customer_id', idNum)
+      .eq('shopify_customer_id', String(idNum))
       .order('submitted_at_iso', { ascending: false });
 
     if (error) {
