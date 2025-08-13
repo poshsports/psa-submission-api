@@ -47,28 +47,35 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // fetch one record — only columns that exist in your table
-    const { data, error } = await supabase
-      .from('psa_submissions')
-      .select(`
-        id,
-        submission_id,
-        created_at,
-        submitted_at_iso,
-        status,
-        cards,
-        evaluation,
-        totals,
-        address,
-        card_info,
-        paid_at_iso,
-        paid_amount,
-        shop_domain,
-        shopify_customer_id
-      `)
-      .eq('shopify_customer_id', customerIdNum)
-      .or(`id.eq.${sid},submission_id.eq.${sid}`)
-      .limit(1);
+// fetch one record — only columns you actually have
+const base = supabase
+  .from('psa_submissions')
+  .select(`
+    id,
+    submission_id,
+    created_at,
+    submitted_at_iso,
+    status,
+    cards,
+    evaluation,
+    totals,
+    address,
+    card_info,
+    paid_at_iso,
+    paid_amount,
+    shopify_customer_id
+  `)
+  .eq('shopify_customer_id', customerIdNum)
+  .limit(1);
+
+// Only query id when sid is a real UUID; otherwise match submission_id
+const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sid);
+const q = isUuid
+  ? base.or(`id.eq.${sid},submission_id.eq.${sid}`)
+  : base.eq('submission_id', sid);
+
+const { data, error } = await q;
+
 
     if (error) {
       console.error('Supabase single query error:', error);
