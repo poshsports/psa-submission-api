@@ -40,6 +40,36 @@ function ensureUuid(v) {
   return crypto.randomUUID();
 }
 
+// NEW: normalize grading service coming from the form (top-level or per-card)
+function pickGradingService(payload = {}) {
+  // prefer a single top-level field if your form sends one
+  const direct =
+    payload.psa_grading ||
+    payload.grading_service ||
+    payload.service_level ||
+    payload.service ||
+    null;
+  if (direct) return String(direct).trim();
+
+  // otherwise, look through card_info for a consistent value
+  const items = Array.isArray(payload.card_info) ? payload.card_info : [];
+  const vals = [];
+  for (const o of items) {
+    const v =
+      o?.psa_grading ||
+      o?.grading_service ||
+      o?.service_level ||
+      o?.service ||
+      o?.tier ||
+      o?.level;
+    if (v) vals.push(String(v).trim());
+  }
+  if (!vals.length) return null;
+
+  const uniq = [...new Set(vals)];
+  return uniq.length === 1 ? uniq[0] : `Mixed: ${uniq.slice(0,3).join(', ')}${uniq.length>3 ? '…' : ''}`;
+}
+
 export default async function handler(req, res) {
   cors(res, req.headers.origin || '');
 
@@ -84,23 +114,25 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Server misconfigured' });
   }
 
-// STEP 2: build row
-const row = {
-  submission_id,
-  cards: parsedCards,
-  evaluation: parsedEvaluation,
-  status: payload.status ?? null,
-  submitted_via: payload.submitted_via ?? null,
-  submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
-  customer_email: payload.customer_email ?? null,
-  address: payload.address ?? null,       // jsonb
-  totals: payload.totals ?? null,         // jsonb
-  card_info: payload.card_info ?? null,   // jsonb
-  shopify_customer_id: payload.shopify_customer_id ?? null, // NEW
-  shopify: payload.shopify ?? null,       // jsonb
-  raw: payload ?? null,                   // jsonb audit copy
-};
+  // STEP 2: build row
+  const row = {
+    submission_id,
+    cards: parsedCards,
+    evaluation: parsedEvaluation,
+    status: payload.status ?? null,
+    // submitted_via: (REMOVED — column not in table)
+    submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
+    customer_email: payload.customer_email ?? null,
+    address: payload.address ?? null,       // jsonb
+    totals: payload.totals ?? null,         // jsonb
+    card_info: payload.card_info ?? null,   // jsonb
+    shopify_customer_id: payload.shopify_customer_id ?? null,
+    shopify: payload.shopify ?? null,       // jsonb
+    raw: payload ?? null,                   // jsonb audit copy
 
+    // NEW: write the normalized grading service
+    grading_service: pickGradingService(payload),
+  };
 
   try {
     const { error } = await supabase
