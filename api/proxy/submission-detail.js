@@ -5,11 +5,31 @@ import { createClient } from '@supabase/supabase-js';
 const { SHOPIFY_API_SECRET, SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+// App Proxy signature check
 function verifyProxyHmac(query = {}) {
   const { signature, ...rest } = query;
   const msg = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('');
   const digest = crypto.createHmac('sha256', SHOPIFY_API_SECRET).update(msg).digest('hex');
   return digest === signature;
+}
+
+// Fallback: derive a service string from card_info if the column is empty (older rows)
+function deriveServiceFromCards(cardInfo) {
+  const items = Array.isArray(cardInfo) ? cardInfo : [];
+  const vals = [];
+  for (const o of items) {
+    const v =
+      o?.psa_grading ||
+      o?.grading_service ||
+      o?.service_level ||
+      o?.service ||
+      o?.tier ||
+      o?.level;
+    if (v) vals.push(String(v).trim());
+  }
+  if (!vals.length) return null;
+  const uniq = [...new Set(vals)];
+  return uniq.length === 1 ? uniq[0] : `Mixed: ${uniq.slice(0,3).join(', ')}${uniq.length>3 ? '…' : ''}`;
 }
 
 export default async function handler(req, res) {
@@ -22,13 +42,12 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
 
-    // health check
+    // simple health check
     if (req.query.ping) {
       return res.status(200).json({ ok: true, where: '/api/proxy/submission-detail', query: req.query });
     }
 
-    const devBypass =
-      process.env.NODE_ENV !== 'production' && req.query.dev_skip_sig === '1';
+    const devBypass = process.env.NODE_ENV !== 'production' && req.query.dev_skip_sig === '1';
     if (!devBypass && !verifyProxyHmac(req.query)) {
       return res.status(403).json({ ok: false, error: 'invalid_signature' });
     }
@@ -47,35 +66,35 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-// fetch one record — only columns you actually have
-const base = supabase
-  .from('psa_submissions')
-  .select(`
-    id,
-    submission_id,
-    created_at,
-    submitted_at_iso,
-    status,
-    cards,
-    evaluation,
-    totals,
-    address,
-    card_info,
-    paid_at_iso,
-    paid_amount,
-    shopify_customer_id
-  `)
-  .eq('shopify_customer_id', customerIdNum)
-  .limit(1);
+    // fetch one record — include grading_service in the selection
+    const base = supabase
+      .from('psa_submissions')
+      .select(`
+        id,
+        submission_id,
+        created_at,
+        submitted_at_iso,
+        status,
+        cards,
+        evaluation,
+        totals,
+        address,
+        card_info,
+        paid_at_iso,
+        paid_amount,
+        shopify_customer_id,
+        grading_service
+      `)
+      .eq('shopify_customer_id', customerIdNum)
+      .limit(1);
 
-// Only query id when sid is a real UUID; otherwise match submission_id
-const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sid);
-const q = isUuid
-  ? base.or(`id.eq.${sid},submission_id.eq.${sid}`)
-  : base.eq('submission_id', sid);
+    // Match by id or submission_id if sid looks like a UUID; else only submission_id
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sid);
+    const q = isUuid
+      ? base.or(`id.eq.${sid},submission_id.eq.${sid}`)
+      : base.eq('submission_id', sid);
 
-const { data, error } = await q;
-
+    const { data, error } = await q;
 
     if (error) {
       console.error('Supabase single query error:', error);
@@ -88,6 +107,9 @@ const { data, error } = await q;
     const r = data[0];
     const display_id = r.submission_id || r.id;
     const created_at = r.submitted_at_iso || r.created_at;
+
+    // Prefer column; fall back to deriving from card_info for legacy rows
+    const service = r.grading_service || deriveServiceFromCards(r.card_info) || null;
 
     return res.status(200).json({
       ok: true,
@@ -102,8 +124,8 @@ const { data, error } = await q;
         address: r.address || null,
         card_info: r.card_info || [],
         paid_at_iso: r.paid_at_iso || null,
-        paid_amount: r.paid_amount || null
-        // submitted_via: removed
+        paid_amount: r.paid_amount || null,
+        grading_service: service
       }
     });
   } catch (e) {
