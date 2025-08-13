@@ -47,7 +47,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // fetch one record (only columns you have)
+    // fetch one record — only columns that exist in your table
     const { data, error } = await supabase
       .from('psa_submissions')
       .select(`
@@ -55,7 +55,6 @@ export default async function handler(req, res) {
         submission_id,
         created_at,
         submitted_at_iso,
-        submitted_at,
         status,
         cards,
         evaluation,
@@ -64,7 +63,6 @@ export default async function handler(req, res) {
         card_info,
         paid_at_iso,
         paid_amount,
-        submitted_via,
         shop_domain,
         shopify_customer_id
       `)
@@ -82,7 +80,7 @@ export default async function handler(req, res) {
 
     const r = data[0];
     const display_id = r.submission_id || r.id;
-    const created_at = r.submitted_at_iso || r.submitted_at || r.created_at;
+    const created_at = r.submitted_at_iso || r.created_at;
 
     return res.status(200).json({
       ok: true,
@@ -97,8 +95,8 @@ export default async function handler(req, res) {
         address: r.address || null,
         card_info: r.card_info || [],
         paid_at_iso: r.paid_at_iso || null,
-        paid_amount: r.paid_amount || null,
-        submitted_via: r.submitted_via || null,
+        paid_amount: r.paid_amount || null
+        // submitted_via: removed
       }
     });
   } catch (e) {
