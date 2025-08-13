@@ -85,8 +85,11 @@ const submissions = (data || []).map((r) => {
 
   // If no friendly submission_id, synthesize one like SUB-YYYYMMDD-ABCDE
   if (!display_id) {
-    const dateIso = (r.submitted_at_iso || r.created_at || "").toString();
-    const datePart = dateIso ? dateIso.slice(0, 10).replace(/-/g, "") : "";
+    const dt = new Date(r.submitted_at_iso || r.created_at || Date.now());
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    const datePart = `${y}${m}${d}`; // matches the table's displayed date
     const tail = String(r.submission_id || rawId)
       .replace(/[^a-z0-9]/gi, "")
       .slice(-5)
