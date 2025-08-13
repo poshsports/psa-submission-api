@@ -51,43 +51,44 @@ export default async function handler(req, res) {
       return res.status(401).json({ ok: false, error: 'not_logged_in' });
     }
 
-    // ✅ Only columns we’re sure exist
-    const { data, error } = await supabase
-      .from('psa_submissions')
-      .select(`
-        id,
-        submission_id,
-        code,
-        created_at,
-        submitted_at_iso,
-        cards,
-        status,
-        totals,
-        shopify_customer_id
-      `)
-      .eq('shopify_customer_id', customerIdNum)
-      .order('submitted_at_iso', { ascending: false });
+// Select columns we use. Keep only columns we KNOW exist.
+const { data, error } = await supabase
+  .from('psa_submissions')
+  .select(`
+    id,
+    submission_id,
+    created_at,
+    submitted_at_iso,
+    cards,
+    status,
+    totals,
+    shopify_customer_id
+  `)
+  .eq('shopify_customer_id', customerIdNum)
+  .order('submitted_at_iso', { ascending: false });
 
-    if (error) {
-      console.error('Supabase query error:', error);
-      return res.status(500).json({ ok: false, error: 'db_error' });
-    }
+if (error) {
+  console.error('Supabase query error:', error);
+  return res.status(500).json({ ok: false, error: 'db_error' });
+}
 
-    const submissions = (data || []).map(r => ({
-      // Friendly display order: submission_id → code → UUID
-      id: r.submission_id || r.code || r.id,
-      created_at: r.submitted_at_iso || r.created_at,
-      cards: r.cards ?? 0,
-      grading_total: r?.totals?.grading ?? null,
-      status: r.status || 'received',
-      totals: r.totals || null,
-    }));
+// Normalize to what the front-end expects
+const submissions = (data || []).map(r => ({
+  // prefer friendly fields; fall back to UUID
+  id: r.submission_id || r.code || r.id,
+  created_at: r.submitted_at_iso || r.created_at,
+  cards: r.cards ?? 0,
+  grading_total: r?.totals?.grading ?? null,
+  status: r.status || 'received',
+  totals: r.totals || null,
+}));
 
-    return res.status(200).json({
-      ok: true,
-      customerId: String(customerIdNum),
-      submissions,
-    });
+return res.status(200).json({
+  ok: true,
+  customerId: String(customerIdNum),
+  submissions,
+});
+
   } catch (e) {
     console.error('proxy/submissions error', e);
     return res.status(500).json({ ok: false, error: 'server_error' });
