@@ -21,9 +21,13 @@
     .hide{display:none}
     table{width:100%;border-collapse:collapse}
     th,td{padding:10px 12px;border-bottom:1px solid #f1f5f9;white-space:nowrap}
-    th{text-align:left;background:#fafafa;border-bottom:1px solid #e5e7eb}
+    th{text-align:left;background:#fafafa;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none}
     code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
+    .controls{display:flex;gap:8px;align-items:center}
+    .pill{padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;font-size:12px;color:#64748b}
+    .th-btn{display:flex;align-items:center;gap:6px}
+    .arrow{font-size:11px;color:#94a3b8}
   </style>
 </head>
 <body>
@@ -51,7 +55,7 @@
   <main id="shell" class="hide">
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. Load real submissions from Supabase.</p>
+        <p style="margin:0">✅ You’re in. Search + sorting are now available.</p>
         <div>
           <button id="btnLogout">Sign out</button>
         </div>
@@ -62,8 +66,10 @@
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
         <h3 style="margin:0">Submissions</h3>
-        <div class="row">
-          <button id="btnLoadReal">Load real submissions</button>
+        <div class="controls">
+          <input id="q" placeholder="Search email or submission_id" style="width:320px" />
+          <span class="pill" id="countPill">0</span>
+          <button id="btnLoadReal">Load real</button>
           <button id="btnLoadSample">Load sample</button>
         </div>
       </div>
@@ -72,13 +78,13 @@
         <table>
           <thead>
             <tr>
-              <th>Created</th>
+              <th id="thCreated" data-key="created_at" class="th-btn">Created <span class="arrow" id="arCreated"></span></th>
               <th>Submission</th>
               <th>Email</th>
-              <th>Status</th>
-              <th>Cards</th>
-              <th>Grand</th>
-              <th>Updated</th>
+              <th id="thStatus" data-key="status" class="th-btn">Status <span class="arrow" id="arStatus"></span></th>
+              <th id="thCards" data-key="cards" class="th-btn">Cards <span class="arrow" id="arCards"></span></th>
+              <th id="thGrand" data-key="grand" class="th-btn">Grand <span class="arrow" id="arGrand"></span></th>
+              <th id="thUpdated" data-key="last_updated_at" class="th-btn">Updated <span class="arrow" id="arUpdated"></span></th>
             </tr>
           </thead>
           <tbody id="subsTbody"></tbody>
@@ -134,58 +140,137 @@
       window.location.replace('/admin');
     });
 
-    // --- Submissions ---
+    // --- data state ---
+    let allRows = [];       // raw from server
+    let viewRows = [];      // filtered + sorted
+    let sortKey = 'created_at';
+    let sortDir = 'desc';   // 'asc' | 'desc'
+
     const subsWrap = document.getElementById('subsWrap');
     const subsEmpty = document.getElementById('subsEmpty');
     const subsErr = document.getElementById('subsErr');
     const subsTbody = document.getElementById('subsTbody');
+    const countPill = document.getElementById('countPill');
+    const qInput = document.getElementById('q');
 
     document.getElementById('btnLoadReal').addEventListener('click', loadReal);
     document.getElementById('btnLoadSample').addEventListener('click', loadSample);
 
-      async function loadReal(){
-    subsErr.classList.add('hide'); subsErr.textContent = '';
-    try {
-      const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
-      const txt = await res.text();            // read raw
-      let j = null;
-      try { j = JSON.parse(txt); } catch {}
-      if (!res.ok || !j?.ok) {
-        const detail = (j && (j.detail || j.error)) || txt || 'Failed to load';
-        throw new Error(detail);
-      }
-      renderTable(Array.isArray(j.items) ? j.items : []);
-    } catch (e) {
-      subsErr.textContent = String(e.message || e);
-      subsErr.classList.remove('hide');
+    // sort header clicks
+    document.getElementById('thCreated').addEventListener('click', () => toggleSort('created_at'));
+    document.getElementById('thStatus').addEventListener('click', () => toggleSort('status'));
+    document.getElementById('thCards').addEventListener('click', () => toggleSort('cards'));
+    document.getElementById('thGrand').addEventListener('click', () => toggleSort('grand'));
+    document.getElementById('thUpdated').addEventListener('click', () => toggleSort('last_updated_at'));
+
+    // search (debounced)
+    qInput.addEventListener('input', debounce(applyFilters, 200));
+
+    function toggleSort(key){
+      if (sortKey === key) sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
+      else { sortKey = key; sortDir = 'desc'; }
+      applyFilters();
+      paintSortArrows();
     }
-  }
+
+    function paintSortArrows(){
+      const arrows = {
+        created_at: document.getElementById('arCreated'),
+        status: document.getElementById('arStatus'),
+        cards: document.getElementById('arCards'),
+        grand: document.getElementById('arGrand'),
+        last_updated_at: document.getElementById('arUpdated')
+      };
+      Object.values(arrows).forEach(el => el.textContent = '');
+      const active = arrows[sortKey];
+      if (active) active.textContent = sortDir === 'asc' ? '↑' : '↓';
+    }
+    paintSortArrows();
+
+    async function loadReal(){
+      subsErr.classList.add('hide'); subsErr.textContent = '';
+      try {
+        const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
+        allRows = Array.isArray(j.items) ? j.items.map(normalizeRow) : [];
+        applyFilters(true);
+      } catch (e) {
+        subsErr.textContent = e.message || 'Load failed';
+        subsErr.classList.remove('hide');
+      }
+    }
 
     function loadSample(){
-      const data = {
-        ok: true,
-        items: [
-          {
-            submission_id: "a9cb9edf-d6ed-4ddd-a7f9-6fbf9ad8dd3f",
-            customer_email: "dbposhsports@gmail.com",
-            cards: 2,
-            totals: { grand: 46, grading: 40, evaluation: 6 },
-            status: "submitted_paid",
-            created_at: "2025-08-01T15:22:00.000Z",
-            last_updated_at: "2025-08-11T20:10:00.000Z"
-          },
-          {
-            submission_id: "b2f1c7a4-1234-4b55-8a88-09c5d3c9e111",
-            customer_email: "user@example.com",
-            cards: 3,
-            totals: { grand: 84, grading: 75, evaluation: 9 },
-            status: "intake_received",
-            created_at: "2025-08-09T19:03:00.000Z",
-            last_updated_at: "2025-08-12T13:40:00.000Z"
-          }
-        ]
+      const items = [
+        {
+          submission_id: "a9cb9edf-d6ed-4ddd-a7f9-6fbf9ad8dd3f",
+          customer_email: "dbposhsports@gmail.com",
+          cards: 2,
+          totals: { grand: 46, grading: 40, evaluation: 6 },
+          status: "submitted_paid",
+          created_at: "2025-08-01T15:22:00.000Z",
+          last_updated_at: "2025-08-11T20:10:00.000Z"
+        },
+        {
+          submission_id: "b2f1c7a4-1234-4b55-8a88-09c5d3c9e111",
+          customer_email: "user@example.com",
+          cards: 3,
+          totals: { grand: 84, grading: 75, evaluation: 9 },
+          status: "intake_received",
+          created_at: "2025-08-09T19:03:00.000Z",
+          last_updated_at: "2025-08-12T13:40:00.000Z"
+        }
+      ];
+      allRows = items.map(normalizeRow);
+      applyFilters(true);
+    }
+
+    function normalizeRow(r){
+      return {
+        submission_id: r.submission_id || r.id || '',
+        customer_email: r.customer_email || r.email || '',
+        cards: Number(r.cards ?? (Array.isArray(r.card_info) ? r.card_info.length : 0)) || 0,
+        grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
+        status: r.status || '',
+        created_at: r.created_at || r.inserted_at || r.submitted_at_iso || '',
+        last_updated_at: r.last_updated_at || r.updated_at || r.updated_at_iso || ''
       };
-      renderTable(data.items);
+    }
+
+    function applyFilters(resetPage){
+      const q = qInput.value.trim().toLowerCase();
+      // filter by email or submission_id substring
+      viewRows = allRows.filter(r => {
+        if (!q) return true;
+        return (r.customer_email && r.customer_email.toLowerCase().includes(q))
+            || (r.submission_id && r.submission_id.toLowerCase().includes(q));
+      });
+
+      // sort
+      const dir = sortDir === 'asc' ? 1 : -1;
+      viewRows.sort((a, b) => {
+        const ka = getKey(a, sortKey), kb = getKey(b, sortKey);
+        if (ka == null && kb == null) return 0;
+        if (ka == null) return 1;
+        if (kb == null) return -1;
+        if (sortKey === 'cards' || sortKey === 'grand') {
+          return (Number(ka) - Number(kb)) * dir;
+        }
+        // dates or strings
+        const na = new Date(ka).getTime();
+        const nb = new Date(kb).getTime();
+        if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+        return String(ka).localeCompare(String(kb)) * dir;
+      });
+
+      renderTable(viewRows);
+      countPill.textContent = String(viewRows.length);
+    }
+
+    function getKey(row, key){
+      if (key === 'grand') return row.grand;
+      return row[key];
     }
 
     function renderTable(rows){
@@ -201,7 +286,6 @@
       subsTbody.innerHTML = rows.map(r => {
         const created = fmtDate(r.created_at);
         const updated = fmtDate(r.last_updated_at);
-        const grand = (r?.totals?.grand ?? 0);
         return `
           <tr>
             <td>${created}</td>
@@ -209,7 +293,7 @@
             <td>${r.customer_email || ''}</td>
             <td>${r.status || ''}</td>
             <td align="right">${r.cards ?? ''}</td>
-            <td align="right">$${Number(grand).toLocaleString()}</td>
+            <td align="right">$${Number(r.grand).toLocaleString()}</td>
             <td>${updated}</td>
           </tr>
         `;
@@ -223,6 +307,11 @@
         if (isNaN(d.getTime())) return '';
         return d.toLocaleString();
       } catch { return ''; }
+    }
+
+    // debounce helper
+    function debounce(fn, ms){
+      let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
     }
   </script>
 </body>
