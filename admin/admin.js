@@ -52,7 +52,7 @@ if (authed) {
   });
 
   // Data load, search
-  $('btnLoadReal').addEventListener('click', loadReal);
+  $('btnRefresh').addEventListener('click', loadReal);
   $('q').addEventListener('input', debounce(applyFilters, 200));
 
   // Sorting: handled on dynamic header render
