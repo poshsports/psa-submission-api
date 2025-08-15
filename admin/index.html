@@ -156,4 +156,69 @@
       }
     }
 
-    function loadS
+    function loadSample(){
+      const data = {
+        ok: true,
+        items: [
+          {
+            submission_id: "a9cb9edf-d6ed-4ddd-a7f9-6fbf9ad8dd3f",
+            customer_email: "dbposhsports@gmail.com",
+            cards: 2,
+            totals: { grand: 46, grading: 40, evaluation: 6 },
+            status: "submitted_paid",
+            created_at: "2025-08-01T15:22:00.000Z",
+            last_updated_at: "2025-08-11T20:10:00.000Z"
+          },
+          {
+            submission_id: "b2f1c7a4-1234-4b55-8a88-09c5d3c9e111",
+            customer_email: "user@example.com",
+            cards: 3,
+            totals: { grand: 84, grading: 75, evaluation: 9 },
+            status: "intake_received",
+            created_at: "2025-08-09T19:03:00.000Z",
+            last_updated_at: "2025-08-12T13:40:00.000Z"
+          }
+        ]
+      };
+      renderTable(data.items);
+    }
+
+    function renderTable(rows){
+      if (!rows.length) {
+        subsWrap.classList.add('hide');
+        subsEmpty.classList.remove('hide');
+        subsTbody.innerHTML = '';
+        return;
+      }
+      subsEmpty.classList.add('hide');
+      subsWrap.classList.remove('hide');
+
+      subsTbody.innerHTML = rows.map(r => {
+        const created = fmtDate(r.created_at);
+        const updated = fmtDate(r.last_updated_at);
+        const grand = (r?.totals?.grand ?? 0);
+        return `
+          <tr>
+            <td>${created}</td>
+            <td><code>${r.submission_id || ''}</code></td>
+            <td>${r.customer_email || ''}</td>
+            <td>${r.status || ''}</td>
+            <td align="right">${r.cards ?? ''}</td>
+            <td align="right">$${Number(grand).toLocaleString()}</td>
+            <td>${updated}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function fmtDate(iso){
+      try {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleString();
+      } catch { return ''; }
+    }
+  </script>
+</body>
+</html>
