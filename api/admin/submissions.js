@@ -26,9 +26,9 @@ export default async function handler(req, res) {
   const TABLE = process.env.SUBMISSIONS_TABLE || 'psa_submissions';
 
   // Use select=* to avoid column-name errors while we normalize on the server
-  const endpoint =
-    `${URL.replace(/\/+$/, '')}/rest/v1/${encodeURIComponent(TABLE)}` +
-    `?select=*&limit=50`;
+const endpoint =
+  `${URL.replace(/\/+$/, '')}/rest/v1/${encodeURIComponent(TABLE)}`
+  + `?select=*&order=created_at.desc&limit=100`; // was just ?select=*&limit=50
 
   try {
     const r = await fetch(endpoint, {
@@ -56,22 +56,18 @@ export default async function handler(req, res) {
         { grand: row.grand_total ?? row.total ?? row.total_amount ?? null };
 
       return {
-        submission_id:
-          row.submission_id ?? row.id ?? row.uuid ?? row.submissionId ?? null,
-        customer_email:
-          row.customer_email ?? row.email ?? (row.customer && row.customer.email) ?? null,
-        cards:
-          row.cards ?? row.card_count ?? (Array.isArray(row.card_info) ? row.card_info.length : null),
+        return {
+        submission_id: row.submission_id ?? row.id ?? row.uuid ?? row.submissionId ?? null,
+        customer_email: row.customer_email ?? row.email ?? (row.customer && row.customer.email) ?? null,
+        cards: row.cards ?? row.card_count ?? (Array.isArray(row.card_info) ? row.card_info.length : null),
         totals,
-        status:
-          row.status ?? row.current_status ?? row.state ?? null,
-        created_at:
-          row.created_at ?? row.inserted_at ?? row.submitted_at_iso ?? row.createdAt ?? null,
-        last_updated_at:
-          row.last_updated_at ?? row.updated_at ?? row.updated_at_iso ?? row.updatedAt ?? null,
-        // keep a copy of the raw row for future mapping if we need it
+        status: row.status ?? row.current_status ?? row.state ?? null,
+        grading_service: row.grading_service ?? row.grading_services ?? row.grading_servi ?? row.service ?? row.grading ?? null,
+        created_at: row.created_at ?? row.inserted_at ?? row.submitted_at_iso ?? row.createdAt ?? null,
+        last_updated_at: row.last_updated_at ?? row.updated_at ?? row.updated_at_iso ?? row.updatedAt ?? null,
         _raw: row
       };
+
     });
 
     return res.status(200).json({ ok: true, items });
