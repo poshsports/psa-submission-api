@@ -71,9 +71,6 @@ async function doLogin(){
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
 
-    document.getElementById('auth-note-top')?.textContent = 'passcode session';
-    document.getElementById('auth-note')?.textContent = 'passcode session';
-
 
     // Wire the rest of the app now that we’re “authed”
     wireUI();
