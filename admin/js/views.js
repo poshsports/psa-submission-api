@@ -24,8 +24,9 @@ export function initViews(){
   }
   currentView = getCur();
   if (!all[currentView]) currentView = 'Default';
+
   applyView(currentView);
-  renderViewsBar();
+  renderViewsBar(); // will no-op if #views-bar not mounted yet
 }
 
 export function applyView(name){
@@ -51,6 +52,8 @@ export function applyView(name){
 
 export function renderViewsBar(){
   const bar = $('#views-bar');
+  if (!bar) return;            // guard: shell not mounted yet
+
   bar.innerHTML = '';
   const all = readViews();
 
@@ -67,6 +70,7 @@ export function renderViewsBar(){
     bar.appendChild(pill);
   });
 
+  // “Save view” pill
   const plus = document.createElement('button');
   plus.className = 'view-plus';
   plus.textContent = '＋ Save view';
@@ -74,10 +78,12 @@ export function renderViewsBar(){
     const name = prompt('Save current view as:');
     if (!name) return;
     if (name === 'Default') { alert('“Default” is reserved.'); return; }
+
     const state = currentHeaderState();
     const { sortKey, sortDir } = tbl.getSort();
-    all[name] = { ...state, sortKey, sortDir };
-    writeViews(all);
+    const views = readViews();
+    views[name] = { ...state, sortKey, sortDir };
+    writeViews(views);
     currentView = name; setCur(name);
     renderViewsBar();
   };
@@ -101,6 +107,8 @@ export function openColumnsPanel(){
   pendingHidden = new Set(hidden);
 
   const list = $('#columns-list');
+  if (!list) return; // guard
+
   list.innerHTML = '';
   const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
 
@@ -117,6 +125,7 @@ export function openColumnsPanel(){
         <span>${c.label}</span>
       </label>
     `;
+
     // drag
     row.addEventListener('dragstart', (e)=>{ e.dataTransfer.setData('text/plain', key); });
     row.addEventListener('dragover', (e)=>{ e.preventDefault(); });
@@ -130,26 +139,33 @@ export function openColumnsPanel(){
       pendingOrder.splice(to,0, pendingOrder.splice(from,1)[0]);
       openColumnsPanel(); // re-render
     });
+
     // visibility
-    row.querySelector('input').onchange = (ev)=>{
-      if (ev.target.checked) pendingHidden.delete(key);
-      else pendingHidden.add(key);
-    };
+    const cb = row.querySelector('input');
+    if (cb) {
+      cb.onchange = (ev)=>{
+        if (ev.target.checked) pendingHidden.delete(key);
+        else pendingHidden.add(key);
+      };
+    }
+
     list.appendChild(row);
   });
 
-  $('#columns-backdrop').style.display='flex';
+  const backdrop = $('#columns-backdrop');
+  if (backdrop) backdrop.style.display='flex';
 }
 
 export function closeColumnsPanel(){
-  $('#columns-backdrop').style.display='none';
+  const backdrop = $('#columns-backdrop');
+  if (backdrop) backdrop.style.display='none';
   pendingOrder = null;
   pendingHidden = null;
 }
 
 export function saveColumnsPanel(){
   if(!pendingOrder) return closeColumnsPanel();
-  const hidden = Array.from(pendingHidden);
+  const hidden = Array.from(pendingHidden || []);
 
   // write into current view
   const all = readViews();
