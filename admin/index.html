@@ -11,7 +11,7 @@
     h1{margin:0;font-size:20px}
     .note{color:var(--sub)}
     main{padding:20px}
-    .card{max-width:920px;margin:20px auto;padding:24px;border:1px solid var(--bd);border-radius:12px;background:#fff}
+    .card{max-width:1000px;margin:20px auto;padding:24px;border:1px solid var(--bd);border-radius:12px;background:#fff}
     .narrow{max-width:560px}
     label{display:block;margin:8px 0 6px}
     input{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px}
@@ -19,7 +19,10 @@
     .err{color:var(--err);margin-top:8px}
     .ok{color:var(--ok)}
     .hide{display:none}
-    pre{background:#f6f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:auto;max-height:360px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px 12px;border-bottom:1px solid #f1f5f9;white-space:nowrap}
+    th{text-align:left;background:#fafafa;border-bottom:1px solid #e5e7eb}
+    code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
   </style>
 </head>
@@ -48,23 +51,41 @@
   <main id="shell" class="hide">
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. (Next we’ll render real data, but first: verify API connectivity.)</p>
+        <p style="margin:0">✅ You’re in. Next: render a read-only submissions table (dev data).</p>
         <div>
           <button id="btnLogout">Sign out</button>
         </div>
       </div>
     </div>
 
-    <!-- API Connectivity Panel -->
+    <!-- Submissions (dev) -->
     <div class="card">
-      <h3 style="margin-top:0">API connectivity</h3>
-      <div class="row" style="margin-bottom:12px">
-        <button id="btnPingOk">Check /api/ok</button>
-        <button id="btnPingProxy">Check /api/proxy/ping</button>
-        <button id="btnLoadSubs">Load submissions (/api/proxy/submissions)</button>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0">Submissions (dev)</h3>
+        <div class="row">
+          <button id="btnLoadDev">Load dev submissions</button>
+        </div>
       </div>
-      <div id="apiStatus" class="note">No requests yet.</div>
-      <pre id="apiOut" class="hide"></pre>
+
+      <div id="subsWrap" class="hide">
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Submission</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Cards</th>
+              <th>Grand</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="subsTbody"></tbody>
+        </table>
+      </div>
+
+      <div id="subsEmpty" class="note">No data loaded yet.</div>
+      <div id="subsErr" class="err hide"></div>
     </div>
   </main>
 
@@ -112,55 +133,64 @@
       window.location.replace('/admin');
     });
 
-    // --- API panel ---
-    const apiStatus = document.getElementById('apiStatus');
-    const apiOut = document.getElementById('apiOut');
+    // --- Submissions (dev) ---
+    const subsWrap = document.getElementById('subsWrap');
+    const subsEmpty = document.getElementById('subsEmpty');
+    const subsErr = document.getElementById('subsErr');
+    const subsTbody = document.getElementById('subsTbody');
 
-    function writeStatus(msg, ok){
-      apiStatus.textContent = msg;
-      apiStatus.className = ok ? 'ok' : 'err';
-    }
-    function writeOut(obj){
-      apiOut.classList.remove('hide');
-      try {
-        apiOut.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-      } catch {
-        apiOut.textContent = String(obj);
-      }
-    }
+    document.getElementById('btnLoadDev').addEventListener('click', loadDev);
 
-    async function hit(url, options){
+    async function loadDev(){
+      subsErr.classList.add('hide'); subsErr.textContent = '';
       try {
-        const res = await fetch(url, { cache:'no-store', credentials:'same-origin', ...(options||{}) });
-        const txt = await res.text();
-        let json = null;
-        try { json = JSON.parse(txt); } catch { /* not JSON */ }
-        return { ok: res.ok, status: res.status, json, body: txt };
+        const res = await fetch('/api/admin/dev-submissions', { cache: 'no-store' });
+        const j = await res.json();
+        if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
+        const items = Array.isArray(j.items) ? j.items : [];
+        renderTable(items);
       } catch (e) {
-        return { ok: false, status: 0, json: null, body: String(e) };
+        subsErr.textContent = e.message || 'Load failed';
+        subsErr.classList.remove('hide');
       }
     }
 
-    document.getElementById('btnPingOk').addEventListener('click', async () => {
-      writeStatus('Requesting /api/ok …', true);
-      const r = await hit('/api/ok');
-      writeStatus(`/api/ok → ${r.status} ${r.ok ? 'OK' : 'ERROR'}`, r.ok);
-      writeOut(r.json || r.body);
-    });
+    function renderTable(rows){
+      if (!rows.length) {
+        subsWrap.classList.add('hide');
+        subsEmpty.classList.remove('hide');
+        subsTbody.innerHTML = '';
+        return;
+      }
+      subsEmpty.classList.add('hide');
+      subsWrap.classList.remove('hide');
 
-    document.getElementById('btnPingProxy').addEventListener('click', async () => {
-      writeStatus('Requesting /api/proxy/ping …', true);
-      const r = await hit('/api/proxy/ping');
-      writeStatus(`/api/proxy/ping → ${r.status} ${r.ok ? 'OK' : 'ERROR'}`, r.ok);
-      writeOut(r.json || r.body);
-    });
+      subsTbody.innerHTML = rows.map(r => {
+        const created = fmtDate(r.created_at);
+        const updated = fmtDate(r.last_updated_at);
+        const grand = (r?.totals?.grand ?? 0);
+        return `
+          <tr>
+            <td>${created}</td>
+            <td><code>${r.submission_id || ''}</code></td>
+            <td>${r.customer_email || ''}</td>
+            <td>${r.status || ''}</td>
+            <td align="right">${r.cards ?? ''}</td>
+            <td align="right">$${Number(grand).toLocaleString()}</td>
+            <td>${updated}</td>
+          </tr>
+        `;
+      }).join('');
+    }
 
-    document.getElementById('btnLoadSubs').addEventListener('click', async () => {
-      writeStatus('Requesting /api/proxy/submissions …', true);
-      const r = await hit('/api/proxy/submissions');
-      writeStatus(`/api/proxy/submissions → ${r.status} ${r.ok ? 'OK' : 'ERROR'}`, r.ok);
-      writeOut(r.json || r.body);
-    });
+    function fmtDate(iso){
+      try {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleString();
+      } catch { return ''; }
+    }
   </script>
 </body>
 </html>
