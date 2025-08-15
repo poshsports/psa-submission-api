@@ -2,10 +2,8 @@
   "version": 2,
   "routes": [
     { "handle": "filesystem" },
-
     { "src": "^/admin/?$", "dest": "/admin/index.html" },
-    { "src": "^/$",         "dest": "/admin/index.html" },
-
+    { "src": "^/$", "dest": "/admin/index.html" },
     { "src": "^/api/submit$", "methods": ["POST"], "dest": "/api/submit.js" }
   ]
 }
