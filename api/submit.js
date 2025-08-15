@@ -40,9 +40,8 @@ function ensureUuid(v) {
   return crypto.randomUUID();
 }
 
-// NEW: normalize grading service coming from the form (top-level or per-card)
+// Normalize grading service coming from the form (top-level or per-card)
 function pickGradingService(payload = {}) {
-  // prefer a single top-level field if your form sends one
   const direct =
     payload.psa_grading ||
     payload.grading_service ||
@@ -51,7 +50,6 @@ function pickGradingService(payload = {}) {
     null;
   if (direct) return String(direct).trim();
 
-  // otherwise, look through card_info for a consistent value
   const items = Array.isArray(payload.card_info) ? payload.card_info : [];
   const vals = [];
   for (const o of items) {
@@ -72,7 +70,6 @@ function pickGradingService(payload = {}) {
 
 export default async function handler(req, res) {
   cors(res, req.headers.origin || '');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') {
@@ -80,70 +77,74 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
+  if (!supabase) {
+    console.error('[submit] Missing SUPABASE_URL or key');
+    return res.status(500).json({ ok: false, error: 'Server misconfigured' });
+  }
+
   // Parse JSON safely
-  let payload;
+  let payload = {};
   try {
     payload = typeof req.body === 'object' ? req.body : JSON.parse(req.body || '{}');
   } catch {
     return res.status(400).json({ ok: false, error: 'Invalid JSON' });
   }
 
-  // Always use a valid UUID for the DB
-  const submission_id = ensureUuid(payload.submission_id);
-
-  // STEP 1: parse/normalize `cards` with a safe default
+  // ---- Inputs / normalization ----
+  const email = (payload.customer_email || '').trim().toLowerCase();
   const cardsNumRaw = Number(payload.cards);
-  const parsedCards = Number.isFinite(cardsNumRaw)
+  const cards = Number.isFinite(cardsNumRaw)
     ? Math.max(0, Math.trunc(cardsNumRaw))
-    : 1; // default to 1 if not provided
-  console.log('[submit] cards payload=', payload.cards, 'parsed=', parsedCards);
+    : (Array.isArray(payload.card_info) ? payload.card_info.length : 1);
 
-  // STEP 1b: parse/normalize `evaluation` with a safe default
-  const evalNumRaw =
+  const totals = payload.totals || {};
+  const evalAmtRaw =
     typeof payload.evaluation === 'number'
       ? payload.evaluation
-      : payload?.totals?.evaluation; // fallback if you pass it inside totals
-
-  const parsedEvaluation = Number.isFinite(Number(evalNumRaw))
-    ? Math.max(0, Math.trunc(Number(evalNumRaw)))
+      : totals?.evaluation;
+  const evaluation = Number.isFinite(Number(evalAmtRaw))
+    ? Math.max(0, Math.trunc(Number(evalAmtRaw)))
     : 0;
-  console.log('[submit] evaluation payload=', payload.evaluation, 'parsed=', parsedEvaluation);
 
-  if (!supabase) {
-    console.error('[submit] Missing SUPABASE_URL or key');
-    return res.status(500).json({ ok: false, error: 'Server misconfigured' });
+  if (!email || !cards) {
+    return res.status(400).json({ ok: false, error: 'bad_request', detail: 'Missing email or cards' });
   }
 
-  // STEP 2: build row
-  const row = {
-    submission_id,
-    cards: parsedCards,
-    evaluation: parsedEvaluation,
-    status: payload.status ?? null,
-    // submitted_via: (REMOVED — column not in table)
-    submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
-    customer_email: payload.customer_email ?? null,
-    address: payload.address ?? null,       // jsonb
-    totals: payload.totals ?? null,         // jsonb
-    card_info: payload.card_info ?? null,   // jsonb
-    shopify_customer_id: payload.shopify_customer_id ?? null,
-    shopify: payload.shopify ?? null,       // jsonb
-    raw: payload ?? null,                   // jsonb audit copy
+  // ---- IMPORTANT: compute status on the server (ignore client status) ----
+  const isEval = evaluation > 0;
+  const status = isEval ? 'pending_payment' : 'submitted';
+  const submitted_via = isEval ? 'form_precheckout' : 'form_no_payment';
 
-    // NEW: write the normalized grading service
+  // ---- Build row (do NOT set submission_id; DB will assign psa-###) ----
+  const row = {
+    cards,
+    evaluation,
+    status,
+    submitted_via,
+    submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
+    customer_email: email,
+    address: payload.address ?? null,      // jsonb
+    totals,                                // jsonb
+    card_info: payload.card_info ?? null,  // jsonb
+    shopify_customer_id: payload.shopify_customer_id ?? null,
+    shopify: payload.shopify ?? null,      // jsonb
+    raw: payload ?? null,                  // jsonb audit copy
     grading_service: pickGradingService(payload),
   };
 
   try {
-    const { error } = await supabase
+    // Plain insert so the DB trigger can assign psa-### and handle dedupe/upgrade
+    const { data, error } = await supabase
       .from('psa_submissions')
-      .upsert(row, { onConflict: 'submission_id' });
+      .insert(row)
+      .select('submission_id')  // return the real psa-### id
+      .single();
 
     if (error) {
-      console.error('[submit] Supabase upsert error:', error);
+      console.error('[submit] insert error:', error);
       return res.status(500).json({
         ok: false,
-        error: 'Database error',
+        error: 'insert_failed',
         code: error.code,
         message: error.message,
         details: error.details,
@@ -151,7 +152,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ ok: true, id: submission_id });
+    return res.status(200).json({ ok: true, id: data?.submission_id || null });
   } catch (e) {
     console.error('[submit] Unexpected error:', e);
     return res.status(500).json({
