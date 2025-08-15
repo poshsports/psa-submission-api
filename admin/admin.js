@@ -13,7 +13,6 @@ let sortDir = 'desc'; // 'asc' | 'desc'
 function paintCarets() {
   const ids = {
     created_at: 'carCreated',
-    friendly_id: 'carFriendly',
     submission_id: 'carSubmission',
     customer_email: 'carEmail',
     status: 'carStatus',
@@ -29,8 +28,6 @@ function paintCarets() {
 function normalizeRow(r){
   return {
     submission_id: r.submission_id || r.id || '',
-    // Friendly ID stays empty for now; we’ll wire the real field next step
-    friendly_id: r.friendly_id || r.friendly || r.short_id || r.display_id || r.friendly_submission_id || r.submission_friendly_id || '',
     customer_email: r.customer_email || r.email || '',
     cards: Number(r.cards ?? (Array.isArray(r.card_info) ? r.card_info.length : 0)) || 0,
     grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
@@ -46,8 +43,7 @@ function applyFilters(){
   viewRows = allRows.filter(r => {
     if (!q) return true;
     return (r.customer_email && r.customer_email.toLowerCase().includes(q))
-        || (r.submission_id && r.submission_id.toLowerCase().includes(q))
-        || (r.friendly_id && r.friendly_id.toLowerCase().includes(q));
+        || (r.submission_id && r.submission_id.toLowerCase().includes(q));
   });
 
   const dir = sortDir === 'asc' ? 1 : -1;
@@ -84,7 +80,6 @@ function renderTable(rows){
     return `
       <tr>
         <td>${created}</td>
-        <td>${r.friendly_id ? `<code>${r.friendly_id}</code>` : ''}</td>
         <td><code>${r.submission_id || ''}</code></td>
         <td>${r.customer_email || ''}</td>
         <td>${r.status || ''}</td>
@@ -107,11 +102,9 @@ function fmtDate(iso){
 
 // ----- events / bootstrap -----
 document.addEventListener('DOMContentLoaded', () => {
-  // auth shell
   $('auth-note').textContent = hasCookie('psa_admin') ? 'passcode session' : 'not signed in';
   if (hasCookie('psa_admin')) { show('shell'); hide('login'); } else { show('login'); hide('shell'); }
 
-  // login
   $('btnLogin')?.addEventListener('click', doLogin);
   $('pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   async function doLogin(){
@@ -125,13 +118,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { $('err').textContent = e.message || 'Login failed'; }
   }
 
-  // logout
   $('btnLogout').addEventListener('click', async () => {
     try { await fetch('/api/admin-logout', { method:'POST', cache:'no-store', credentials:'same-origin' }); } catch {}
     window.location.replace('/admin');
   });
 
-  // sort header clicks
   document.querySelectorAll('th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.key;
@@ -143,10 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   paintCarets();
 
-  // search
   $('q').addEventListener('input', debounce(applyFilters, 200));
-
-  // load real
   $('btnLoadReal').addEventListener('click', loadReal);
 });
 
