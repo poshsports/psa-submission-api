@@ -13,14 +13,17 @@ let currentView = 'Default';
 
 // Column registry (add new columns here later; UI auto-updates)
 const COLUMNS = [
-  { key:'created_at',       label:'Created',          sortable:true,  align:'left',  format: fmtDate },
-  { key:'submission_id',    label:'Submission',       sortable:true,  align:'left',  format: fmtCode },
-  { key:'customer_email',   label:'Email',            sortable:true,  align:'left' },
-  { key:'status',           label:'Status',           sortable:true,  align:'left' },
-  { key:'cards',            label:'Cards',            sortable:true,  align:'right', format: fmtNum },
-  { key:'evaluation',       label:'Evaluation',       sortable:true,  align:'left'  }, // 'Yes'/'No'
-  { key:'grand',            label:'Grand',            sortable:true,  align:'right', format: fmtMoney },
-  { key:'grading_service',  label:'Grading Service',  sortable:true,  align:'left' }
+  { key:'created_at',          label:'Created',          sortable:true,  align:'left',  format: fmtDate },
+  { key:'submission_id',       label:'Submission',       sortable:true,  align:'left',  format: fmtCode },
+  { key:'customer_email',      label:'Email',            sortable:true,  align:'left' },
+  { key:'status',              label:'Status',           sortable:true,  align:'left' },
+  { key:'cards',               label:'Cards',            sortable:true,  align:'right', format: fmtNum },
+  { key:'evaluation',          label:'Evaluation',       sortable:true,  align:'left'  }, // Yes/No
+  { key:'grand',               label:'Grand',            sortable:true,  align:'right', format: fmtMoney },
+  { key:'grading_service',     label:'Grading Service',  sortable:true,  align:'left' },
+  { key:'paid_at_iso',         label:'Paid',             sortable:true,  align:'left',  format: fmtDate },
+  { key:'paid_amount',         label:'Paid $',           sortable:true,  align:'right', format: fmtMoney },
+  { key:'shopify_order_name',  label:'Order',            sortable:true,  align:'left',  format: fmtCode }
 ];
 
 // Default order/visibility derived from the registry
@@ -53,7 +56,7 @@ if (authed) {
 
   // Data load, search
   $('btnRefresh').addEventListener('click', loadReal);
-  $('q').addEventListener('input', debounce(applyFilters, 200));
+  $('q').addEventListener('input', debounce(loadReal, 250)); // ask server to filter
 
   // Sorting: handled on dynamic header render
 
@@ -334,12 +337,12 @@ function paintCarets(){
 
 // ===== Data normalize / render =====
 function normalizeRow(r){
-  const evalAmt = Number(
+  const evalAmtNum = Number(
     (r.evaluation ?? 0) ||
     (r.eval_line_sub ?? 0) ||
     (r?.totals?.evaluation ?? 0)
   ) || 0;
-  const evalBool = evalAmt > 0;
+  const evalBool = evalAmtNum > 0;
 
   return {
     submission_id: r.submission_id || r.id || '',
@@ -350,7 +353,12 @@ function normalizeRow(r){
     grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
     status: r.status || '',
     grading_service: String(r.grading_service ?? r.grading_services ?? r.grading_servi ?? r.service ?? r.grading ?? '').trim(),
-    created_at: r.created_at || r.inserted_at || r.submitted_at_iso || ''
+    created_at: r.created_at || r.inserted_at || r.submitted_at_iso || '',
+
+    // NEW fields coming from /api/admin/submissions
+    paid_at_iso: r.paid_at_iso || '',
+    paid_amount: Number(r.paid_amount || 0) || 0,
+    shopify_order_name: r.shopify_order_name || ''
   };
 }
 
@@ -427,7 +435,19 @@ function renderTable(rows, visibleKeys){
 async function loadReal(){
   const err = $('subsErr'); err.classList.add('hide'); err.textContent = '';
   try {
-    const res = await fetch('/api/admin/submissions', { cache:'no-store', credentials:'same-origin' });
+    const q = ($('q')?.value || '').trim();
+    // If you later add a <select id="status"> in the UI, this will automatically work:
+    const status = ($('status')?.value || '').trim();
+
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+
+    const url = params.toString()
+      ? `/api/admin/submissions?${params.toString()}`
+      : `/api/admin/submissions`;
+
+    const res = await fetch(url, { cache:'no-store', credentials:'same-origin' });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
     allRows = Array.isArray(j.items) ? j.items.map(normalizeRow) : [];
