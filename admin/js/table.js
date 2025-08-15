@@ -120,11 +120,26 @@ export function applyFilters(){
 
 export function renderTable(visibleKeys){
   const body = $('subsTbody');
+  const emptyEl = $('subsEmpty');
+
+  // If the table body isn't mounted yet, safely bail (e.g., mid-login transition)
+  if (!body) {
+    // still try to keep pagination label sane if present
+    const total = viewRows.length;
+    const start = pageIndex * pageSize;
+    const end   = Math.min(start + pageSize, total);
+    const pageRange = $('page-range');
+    if (pageRange) {
+      pageRange.textContent = total ? `${start + 1}–${end} of ${total}` : '0–0 of 0';
+    }
+    return;
+  }
+
   if (!viewRows.length) {
     body.innerHTML = '';
-    $('subsEmpty').classList.remove('hide');
+    if (emptyEl) emptyEl.classList.remove('hide');
   } else {
-    $('subsEmpty').classList.add('hide');
+    if (emptyEl) emptyEl.classList.add('hide');
   }
 
   const colMap = new Map(COLUMNS.map(c => [c.key, c]));
@@ -146,9 +161,14 @@ export function renderTable(visibleKeys){
     </tr>
   `).join('');
 
-  // pagination UI
+  // pagination UI (null-safe)
   const total = viewRows.length;
-  $('#page-range').textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
-  $('#prev-page').disabled = pageIndex === 0;
-  $('#next-page').disabled = end >= total;
+  const pageRange = $('page-range');
+  if (pageRange) {
+    pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
+  }
+  const prevBtn = $('prev-page');
+  if (prevBtn) prevBtn.disabled = pageIndex === 0;
+  const nextBtn = $('next-page');
+  if (nextBtn) nextBtn.disabled = end >= total;
 }
