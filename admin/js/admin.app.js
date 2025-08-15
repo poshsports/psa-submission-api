@@ -65,9 +65,20 @@ async function loadReal(){
 document.addEventListener('DOMContentLoaded', () => {
   // Auth gate
   const authed = hasCookie('psa_admin');
-  $('#auth-note').textContent = authed ? 'passcode session' : 'not signed in';
-  $('#auth-note-top').textContent = authed ? 'passcode session' : 'not signed in';
-  if (authed) { show('shell'); hide('login'); } else { show('login'); hide('shell'); }
+
+  const authNote = $('#auth-note');
+  if (authNote) authNote.textContent = authed ? 'passcode session' : 'not signed in';
+
+  const authNoteTop = $('#auth-note-top');
+  if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
+
+  const hasLogin = !!$('#login');
+  const hasShell = !!$('#shell');
+
+  if (hasLogin && hasShell) {
+    if (authed) { show('shell'); hide('login'); }
+    else { show('login'); hide('shell'); }
+  }
 
   // Login
   $('#btnLogin')?.addEventListener('click', doLogin);
