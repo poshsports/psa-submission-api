@@ -1,11 +1,8 @@
 {
   "version": 2,
-  "redirects": [
-    { "source": "/", "destination": "/admin", "permanent": false }
-  ],
   "routes": [
-    { "handle": "filesystem" },
+    { "src": "^/api/submit$", "methods": ["POST"], "dest": "/api/submit.js" },
     { "src": "^/admin/?$", "dest": "/admin/index.html" },
-    { "src": "^/api/submit$", "methods": ["POST"], "dest": "/api/submit.js" }
+    { "src": "^/(?:index\\.html)?$", "dest": "/admin/index.html" }
   ]
 }
