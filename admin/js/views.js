@@ -1,4 +1,4 @@
-import { $, debounce, show, hide } from './util.js';
+import { $ } from './util.js';
 import { COLUMNS, defaultOrder, defaultHidden } from './columns.js';
 import * as tbl from './table.js';
 
@@ -17,8 +17,9 @@ function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
 export function initViews(){
   const all = readViews();
+  const { sortKey, sortDir } = tbl.getSort();
   if (!all['Default']) {
-    all['Default'] = { order: defaultOrder, hidden: defaultHidden, sortKey: tbl.sortKey, sortDir: tbl.sortDir };
+    all['Default'] = { order: defaultOrder, hidden: defaultHidden, sortKey, sortDir };
     writeViews(all);
   }
   currentView = getCur();
@@ -40,8 +41,8 @@ export function applyView(name){
 
   const hidden = (v.hidden || defaultHidden).filter(k => knownKeys.has(k));
 
-  tbl.sortKey = v.sortKey || 'created_at';
-  tbl.sortDir = v.sortDir || 'desc';
+  // set sort via setter (can’t write to module namespace)
+  tbl.setSort(v.sortKey || 'created_at', v.sortDir || 'desc');
 
   // paint header with this view and render
   tbl.renderHead(order, hidden);
@@ -74,7 +75,8 @@ export function renderViewsBar(){
     if (!name) return;
     if (name === 'Default') { alert('“Default” is reserved.'); return; }
     const state = currentHeaderState();
-    all[name] = { ...state, sortKey: tbl.sortKey, sortDir: tbl.sortDir };
+    const { sortKey, sortDir } = tbl.getSort();
+    all[name] = { ...state, sortKey, sortDir };
     writeViews(all);
     currentView = name; setCur(name);
     renderViewsBar();
@@ -148,11 +150,14 @@ export function closeColumnsPanel(){
 export function saveColumnsPanel(){
   if(!pendingOrder) return closeColumnsPanel();
   const hidden = Array.from(pendingHidden);
+
   // write into current view
   const all = readViews();
   const v = all[currentView] || {};
-  all[currentView] = { ...(v||{}), order: pendingOrder.slice(), hidden, sortKey: tbl.sortKey, sortDir: tbl.sortDir };
+  const { sortKey, sortDir } = tbl.getSort();
+  all[currentView] = { ...(v||{}), order: pendingOrder.slice(), hidden, sortKey, sortDir };
   writeViews(all);
+
   // apply and close
   tbl.renderHead(pendingOrder.slice(), hidden);
   tbl.applyFilters();
