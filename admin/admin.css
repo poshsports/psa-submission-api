@@ -42,3 +42,7 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
 .modal-panel{width:680px;max-width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
 .cols-list{display:grid;grid-template-columns:repeat(2,minmax(200px,1fr));gap:8px}
 .cols-list label{display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid #f1f5f9;border-radius:8px;background:#fafafa}
+
+/* Ensure hidden modals actually hide, even though .modal sets display:flex */
+.modal.hide { display: none !important; }
+
