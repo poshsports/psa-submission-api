@@ -134,28 +134,66 @@ function applyView(name){
   $('viewName').value = name === 'Default' ? '' : name;
 }
 
-// Save current header config into the active view
-function saveView(){
-  const name = currentView;
-  if (name === 'Default') {
-    // Allow updating default as well
+function saveView() {
+  // You cannot overwrite the Default view
+  if (currentView === 'Default') {
+    alert('You can’t overwrite the Default view.\nUse “Save As” to create a new view.');
+    $('viewName').focus();
+    return;
   }
+
+  // Ask to overwrite or branch to Save As
+  const ok = confirm(`Overwrite the view “${currentView}” with the current settings?`);
+  if (ok) {
+    saveViewWithName(currentView);
+    closeCustomize();
+  } else {
+    // Save As flow via prompt
+    let name = prompt('Save as new view. Enter a name:', `${currentView} (copy)`);
+    if (!name) return;
+    name = name.trim();
+    if (!name) { alert('View name is required.'); return; }
+    if (name === 'Default') { alert('The name “Default” is reserved. Choose another.'); return; }
+
+    const all = readViews();
+    if (all[name]) {
+      const ok2 = confirm(`A view named “${name}” already exists. Overwrite it?`);
+      if (!ok2) return;
+    }
+    saveViewWithName(name);
+    currentView = name;
+    renderViewSelect();
+    closeCustomize();
+  }
+}
+
+function saveAsView() {
+  let name = ($('viewName').value || '').trim();
+  if (!name) {
+    name = prompt('Enter a name for the new view:') || '';
+    name = name.trim();
+  }
+  if (!name) { alert('View name is required.'); return; }
+  if (name === 'Default') { alert('The name “Default” is reserved. Choose another.'); return; }
+
   const all = readViews();
-  all[name] = currentHeaderState();
-  writeViews(all);
+  if (all[name]) {
+    const ok = confirm(`A view named “${name}” already exists. Overwrite it?`);
+    if (!ok) return;
+  }
+
+  saveViewWithName(name);
+  currentView = name;
   renderViewSelect();
   closeCustomize();
 }
 
-function saveAsView(){
-  const name = ($('viewName').value || '').trim();
-  if (!name) { alert('Enter a view name first.'); return; }
+// Helper to persist the current header/order/hidden/sort into a named view
+function saveViewWithName(name) {
   const all = readViews();
-  all[name] = currentHeaderState();
+  all[name] = currentHeaderState(); // { order, hidden, sortKey, sortDir }
   writeViews(all);
-  currentView = name;
-  renderViewSelect();
-  closeCustomize();
+  applyView(name);
 }
 
 function deleteView(){
