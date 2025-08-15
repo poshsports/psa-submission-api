@@ -90,9 +90,17 @@
     }
 
     document.getElementById('btnLogout').addEventListener('click', async () => {
-      await fetch('/api/admin-logout');
-      location.reload();
+  try {
+    await fetch('/api/admin-logout', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin'
     });
+  } catch {}
+  // Force a real navigation (avoids bfcache)
+  window.location.replace('/admin');
+});
+
   </script>
 </body>
 </html>
