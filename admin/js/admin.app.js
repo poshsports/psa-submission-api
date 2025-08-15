@@ -47,14 +47,39 @@ async function doLogout(e){
 }
 
 async function doLogin(){
-  const pass = $('#pass')?.value.trim() || '';
-  $('#err') && ($('#err').textContent = '');
+  const passEl = $('#pass');
+  const pass = passEl?.value?.trim() || '';
+  if ($('#err')) $('#err').textContent = '';
+
+  // quick guard so clicks always do something visible in DevTools
+  console.debug('[PSA Admin] Sign in clicked');
+
   const { ok, error } = await login(pass);
   if (!ok) {
-    if ($('#err')) $('#err').textContent = (error === 'invalid_pass' ? 'Invalid passcode' : (error || 'Login failed'));
+    if ($('#err')) {
+      $('#err').textContent = (error === 'invalid_pass' ? 'Invalid passcode' : (error || 'Login failed'));
+    }
     return;
   }
   location.replace('/admin');
+}
+
+// extra-defensive: wire both addEventListener and onclick, plus an Enter key handler
+function bindLoginHandlers(){
+  const btn = $('#btnLogin');
+  const passEl = $('#pass');
+
+  // console fallback so you can trigger manually if needed
+  // in DevTools:  __psaLogin()
+  window.__psaLogin = doLogin;
+
+  if (btn) {
+    btn.addEventListener('click', doLogin);
+    btn.onclick = doLogin; // belt + suspenders in case something removes listeners
+  }
+  if (passEl) {
+    passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  }
 }
 
 async function loadReal(){
@@ -95,8 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Login handlers (always wired)
-  $('#btnLogin')?.addEventListener('click', doLogin);
-  $('#pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  bindLoginHandlers();
 
   // If not authed, stop here (login UI is visible)
   if (!authed) return;
