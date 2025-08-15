@@ -5,29 +5,38 @@ import * as views from './views.js';
 
 function wireUI(){
   // sign out buttons
-  $('#top-signout').onclick = doLogout;
-  $('#sidebar-signout').onclick = doLogout;
+  $('#top-signout')?.addEventListener('click', doLogout);
+  $('#sidebar-signout')?.addEventListener('click', doLogout);
 
   // refresh + search
-  $('#btnRefresh').onclick = loadReal;
-  $('#q').addEventListener('input', debounce(loadReal, 250));
+  $('#btnRefresh')?.addEventListener('click', loadReal);
+  $('#q')?.addEventListener('input', debounce(loadReal, 250));
 
   // pagination
-  $('#prev-page').onclick = () => { if (tbl.pageIndex>0){ tbl.pageIndex--; tbl.renderTable(currentVisibleKeys()); } };
-  $('#next-page').onclick = () => {
-    const totalPages = Math.ceil(tbl.viewRows.length / tbl.pageSize);
-    if (tbl.pageIndex < totalPages-1){ tbl.pageIndex++; tbl.renderTable(currentVisibleKeys()); }
-  };
+  $('#prev-page')?.addEventListener('click', () => {
+    if (tbl.pageIndex > 0){
+      tbl.pageIndex--;
+      tbl.renderTable(currentVisibleKeys());
+    }
+  });
+  $('#next-page')?.addEventListener('click', () => {
+    const totalPages = Math.ceil(tbl.viewRows.length / tbl.pageSize) || 1;
+    if (tbl.pageIndex < totalPages - 1){
+      tbl.pageIndex++;
+      tbl.renderTable(currentVisibleKeys());
+    }
+  });
 
   // columns panel
-  $('#btnColumns').onclick = views.openColumnsPanel;
-  $('#close-columns').onclick = views.closeColumnsPanel;
-  $('#columns-cancel').onclick = views.closeColumnsPanel;
-  $('#columns-save').onclick = views.saveColumnsPanel;
+  $('#btnColumns')?.addEventListener('click', views.openColumnsPanel);
+  $('#close-columns')?.addEventListener('click', views.closeColumnsPanel);
+  $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
+  $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
 
 function currentVisibleKeys(){
-  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]')).filter(th => th.style.display !== 'none');
+  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
+    .filter(th => th.style.display !== 'none');
   return ths.map(th => th.dataset.key);
 }
 
@@ -38,15 +47,19 @@ async function doLogout(e){
 }
 
 async function doLogin(){
-  const pass = $('#pass').value.trim();
-  $('#err').textContent = '';
+  const pass = $('#pass')?.value.trim() || '';
+  $('#err') && ($('#err').textContent = '');
   const { ok, error } = await login(pass);
-  if (!ok) { $('#err').textContent = (error === 'invalid_pass' ? 'Invalid passcode' : (error || 'Login failed')); return; }
+  if (!ok) {
+    if ($('#err')) $('#err').textContent = (error === 'invalid_pass' ? 'Invalid passcode' : (error || 'Login failed'));
+    return;
+  }
   location.replace('/admin');
 }
 
 async function loadReal(){
-  const err = $('#subsErr'); err.classList.add('hide'); err.textContent = '';
+  const err = $('#subsErr');
+  if (err) { err.classList.add('hide'); err.textContent = ''; }
   try {
     const q = ($('#q')?.value || '').trim();
     const items = await fetchSubmissions(q);
@@ -55,38 +68,40 @@ async function loadReal(){
     // ensure header exists per current view, then filter/sort and paint
     views.applyView(views.currentView);
     tbl.applyFilters();
-    $('#countPill').textContent = String(tbl.viewRows.length);
+    if ($('#countPill')) $('#countPill').textContent = String(tbl.viewRows.length);
   } catch (e) {
-    err.textContent = e.message || 'Load failed';
-    err.classList.remove('hide');
+    if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Auth gate
   const authed = hasCookie('psa_admin');
 
+  // Fail-safe: default to showing login so the page is never blank during setup
+  const loginEl = $('#login');
+  const shellEl = $('#shell');
+  if (loginEl && shellEl) { show('login'); hide('shell'); }
+
+  // Auth note labels (guarded)
   const authNote = $('#auth-note');
   if (authNote) authNote.textContent = authed ? 'passcode session' : 'not signed in';
-
   const authNoteTop = $('#auth-note-top');
   if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
 
-  const hasLogin = !!$('#login');
-  const hasShell = !!$('#shell');
-
-  if (hasLogin && hasShell) {
+  // Toggle shell/login based on cookie
+  if (loginEl && shellEl) {
     if (authed) { show('shell'); hide('login'); }
     else { show('login'); hide('shell'); }
   }
 
-  // Login
+  // Login handlers (always wired)
   $('#btnLogin')?.addEventListener('click', doLogin);
   $('#pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
+  // If not authed, stop here (login UI is visible)
   if (!authed) return;
 
-  // Wire UI + views and load data
+  // Authed: wire UI + views and load data
   wireUI();
   views.initViews();
   loadReal();
