@@ -21,17 +21,20 @@
     .hide{display:none}
 
     /* Table */
-    table{width:100%;border-collapse:collapse;table-layout:auto}
+    .table-wrap{width:100%;overflow-x:auto;border:1px solid #f1f5f9;border-radius:10px}
+    table{width:100%;border-collapse:collapse;table-layout:auto;min-width:1100px}
     th,td{
       padding:10px 12px;
       border-bottom:1px solid #f1f5f9;
       white-space:nowrap;
       vertical-align:middle;
+      background:#fff;
     }
     thead th{
       background:#fafafa;
       border-bottom:1px solid #e5e7eb;
       font-weight:600;
+      position:sticky; top:0; z-index:1;
     }
     th.sortable{cursor:pointer; user-select:none;}
     th .caret{
@@ -73,7 +76,7 @@
   <main id="shell" class="hide">
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. Header distortion fixed; search + sorting still work.</p>
+        <p style="margin:0">✅ You’re in. Added horizontal scrolling, sorting on Submission & Email, and a Friendly ID column.</p>
         <div>
           <button id="btnLogout">Sign out</button>
         </div>
@@ -93,20 +96,23 @@
       </div>
 
       <div id="subsWrap" class="hide">
-        <table>
-          <thead>
-            <tr>
-              <th id="thCreated" class="sortable" data-key="created_at">Created <span class="caret" id="carCreated"></span></th>
-              <th>Submission</th>
-              <th>Email</th>
-              <th id="thStatus" class="sortable" data-key="status">Status <span class="caret" id="carStatus"></span></th>
-              <th id="thCards" class="sortable" data-key="cards">Cards <span class="caret" id="carCards"></span></th>
-              <th id="thGrand" class="sortable" data-key="grand">Grand <span class="caret" id="carGrand"></span></th>
-              <th id="thUpdated" class="sortable" data-key="last_updated_at">Updated <span class="caret" id="carUpdated"></span></th>
-            </tr>
-          </thead>
-          <tbody id="subsTbody"></tbody>
-        </table>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th id="thCreated" class="sortable" data-key="created_at">Created <span class="caret" id="carCreated"></span></th>
+                <th id="thFriendly" class="sortable" data-key="friendly_id">Friendly ID <span class="caret" id="carFriendly"></span></th>
+                <th id="thSubmission" class="sortable" data-key="submission_id">Submission <span class="caret" id="carSubmission"></span></th>
+                <th id="thEmail" class="sortable" data-key="customer_email">Email <span class="caret" id="carEmail"></span></th>
+                <th id="thStatus" class="sortable" data-key="status">Status <span class="caret" id="carStatus"></span></th>
+                <th id="thCards" class="sortable" data-key="cards">Cards <span class="caret" id="carCards"></span></th>
+                <th id="thGrand" class="sortable" data-key="grand">Grand <span class="caret" id="carGrand"></span></th>
+                <th id="thUpdated" class="sortable" data-key="last_updated_at">Updated <span class="caret" id="carUpdated"></span></th>
+              </tr>
+            </thead>
+            <tbody id="subsTbody"></tbody>
+          </table>
+        </div>
       </div>
 
       <div id="subsEmpty" class="note">No data loaded yet.</div>
@@ -174,7 +180,7 @@
     document.getElementById('btnLoadReal').addEventListener('click', loadReal);
     document.getElementById('btnLoadSample').addEventListener('click', loadSample);
 
-    // sort header clicks (use a single class "sortable" to keep styling consistent)
+    // sort header clicks
     document.querySelectorAll('th.sortable').forEach(th => {
       th.addEventListener('click', () => toggleSort(th.dataset.key));
     });
@@ -192,6 +198,9 @@
     function paintCarets(){
       const ids = {
         created_at: 'carCreated',
+        friendly_id: 'carFriendly',
+        submission_id: 'carSubmission',
+        customer_email: 'carEmail',
         status: 'carStatus',
         cards: 'carCards',
         grand: 'carGrand',
@@ -221,6 +230,7 @@
       const items = [
         {
           submission_id: "a9cb9edf-d6ed-4ddd-a7f9-6fbf9ad8dd3f",
+          friendly_id: "PSA-10001",
           customer_email: "dbposhsports@gmail.com",
           cards: 2,
           totals: { grand: 46, grading: 40, evaluation: 6 },
@@ -230,6 +240,7 @@
         },
         {
           submission_id: "b2f1c7a4-1234-4b55-8a88-09c5d3c9e111",
+          friendly_id: "PSA-10002",
           customer_email: "user@example.com",
           cards: 3,
           totals: { grand: 84, grading: 75, evaluation: 9 },
@@ -245,6 +256,8 @@
     function normalizeRow(r){
       return {
         submission_id: r.submission_id || r.id || '',
+        // try common variants for your “friendly” id
+        friendly_id: r.friendly_id || r.friendly || r.short_id || r.display_id || r.friendly_submission_id || r.submission_friendly_id || '',
         customer_email: r.customer_email || r.email || '',
         cards: Number(r.cards ?? (Array.isArray(r.card_info) ? r.card_info.length : 0)) || 0,
         grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
@@ -256,11 +269,12 @@
 
     function applyFilters(){
       const q = qInput.value.trim().toLowerCase();
-      // filter by email or submission_id substring
+      // filter by email, submission_id, or friendly_id substring
       viewRows = allRows.filter(r => {
         if (!q) return true;
         return (r.customer_email && r.customer_email.toLowerCase().includes(q))
-            || (r.submission_id && r.submission_id.toLowerCase().includes(q));
+            || (r.submission_id && r.submission_id.toLowerCase().includes(q))
+            || (r.friendly_id && r.friendly_id.toLowerCase().includes(q));
       });
 
       // sort
@@ -305,6 +319,7 @@
         return `
           <tr>
             <td>${created}</td>
+            <td>${r.friendly_id ? `<code>${r.friendly_id}</code>` : ''}</td>
             <td><code>${r.submission_id || ''}</code></td>
             <td>${r.customer_email || ''}</td>
             <td>${r.status || ''}</td>
