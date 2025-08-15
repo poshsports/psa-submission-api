@@ -32,8 +32,16 @@ const LS_KEY = 'psa_admin_table_views_v1';
 
 // ===== Boot =====
 document.addEventListener('DOMContentLoaded', () => {
-  $('auth-note').textContent = hasCookie('psa_admin') ? 'passcode session' : 'not signed in';
-  if (hasCookie('psa_admin')) { show('shell'); hide('login'); } else { show('login'); hide('shell'); }
+  const authed = hasCookie('psa_admin');
+$('auth-note').textContent = authed ? 'passcode session' : 'not signed in';
+if (authed) {
+  show('shell');
+  hide('login');
+  loadReal();           // auto-load after sign-in
+} else {
+  show('login');
+  hide('shell');
+}
 
   // Auth
   $('btnLogin')?.addEventListener('click', doLogin);
