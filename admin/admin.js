@@ -10,6 +10,7 @@ let viewRows = [];
 let sortKey = 'created_at';
 let sortDir = 'desc'; // 'asc' | 'desc'
 
+// Carets for the current sort column
 function paintCarets() {
   const ids = {
     created_at: 'carCreated',
@@ -17,26 +18,39 @@ function paintCarets() {
     customer_email: 'carEmail',
     status: 'carStatus',
     cards: 'carCards',
+    evaluation: 'carEvaluation',
     grand: 'carGrand',
-    last_updated_at: 'carUpdated'
+    grading_service: 'carService'
   };
   Object.values(ids).forEach(id => { const el = $(id); if (el) el.textContent = ''; });
   const active = $(ids[sortKey]);
   if (active) active.textContent = sortDir === 'asc' ? '↑' : '↓';
 }
 
+// Normalize a row from Supabase into what we render
 function normalizeRow(r){
+  // evaluation should be Yes/No for the table; compute truthy if any known field > 0
+  const evalAmt = Number(
+    (r.evaluation ?? 0) ||
+    (r.eval_line_sub ?? 0) ||
+    (r?.totals?.evaluation ?? 0)
+  ) || 0;
+  const evalBool = evalAmt > 0;
+
   return {
     submission_id: r.submission_id || r.id || '',
-    customer_email: r.customer_email || r.email || '',
+    customer_email: r.customer_email || r.customer_em || r.email || '',
     cards: Number(r.cards ?? (Array.isArray(r.card_info) ? r.card_info.length : 0)) || 0,
+    evaluation_bool: evalBool,
+    evaluation: evalBool ? 'Yes' : 'No',
     grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
     status: r.status || '',
-    created_at: r.created_at || r.inserted_at || r.submitted_at_iso || '',
-    last_updated_at: r.last_updated_at || r.updated_at || r.updated_at_iso || ''
+    grading_service: r.grading_service || r.grading_servi || r.service || r.grading || '',
+    created_at: r.created_at || r.inserted_at || r.submitted_at_iso || ''
   };
 }
 
+// Filter + sort, then render
 function applyFilters(){
   const q = $('q').value.trim().toLowerCase();
 
@@ -48,24 +62,33 @@ function applyFilters(){
 
   const dir = sortDir === 'asc' ? 1 : -1;
   viewRows.sort((a, b) => {
-    const ka = (sortKey === 'grand') ? a.grand : a[sortKey];
-    const kb = (sortKey === 'grand') ? b.grand : b[sortKey];
-    if (ka == null && kb == null) return 0;
-    if (ka == null) return 1;
-    if (kb == null) return -1;
-    if (sortKey === 'cards' || sortKey === 'grand') {
-      return (Number(ka) - Number(kb)) * dir;
+    // Special sort for evaluation (sort by boolean), and grand/cards as numbers
+    if (sortKey === 'evaluation') {
+      return ((a.evaluation_bool ? 1 : 0) - (b.evaluation_bool ? 1 : 0)) * dir;
     }
-    const na = new Date(ka).getTime();
-    const nb = new Date(kb).getTime();
-    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
-    return String(ka).localeCompare(String(kb)) * dir;
+    if (sortKey === 'cards' || sortKey === 'grand') {
+      return (Number(a[sortKey]) - Number(b[sortKey])) * dir;
+    }
+
+    const ka = a[sortKey];
+    const kb = b[sortKey];
+
+    // dates
+    if (sortKey === 'created_at') {
+      const na = new Date(ka).getTime();
+      const nb = new Date(kb).getTime();
+      if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+    }
+
+    // strings
+    return String(ka ?? '').localeCompare(String(kb ?? '')) * dir;
   });
 
   renderTable(viewRows);
   $('countPill').textContent = String(viewRows.length);
 }
 
+// Render table body
 function renderTable(rows){
   const wrap = $('subsWrap'), empty = $('subsEmpty'), body = $('subsTbody');
   if (!rows.length) {
@@ -74,21 +97,18 @@ function renderTable(rows){
   }
   hide('subsEmpty'); show('subsWrap');
 
-  body.innerHTML = rows.map(r => {
-    const created = fmtDate(r.created_at);
-    const updated = fmtDate(r.last_updated_at);
-    return `
-      <tr>
-        <td>${created}</td>
-        <td><code>${r.submission_id || ''}</code></td>
-        <td>${r.customer_email || ''}</td>
-        <td>${r.status || ''}</td>
-        <td align="right">${r.cards ?? ''}</td>
-        <td align="right">$${Number(r.grand).toLocaleString()}</td>
-        <td>${updated}</td>
-      </tr>
-    `;
-  }).join('');
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td>${fmtDate(r.created_at)}</td>
+      <td><code>${r.submission_id || ''}</code></td>
+      <td>${r.customer_email || ''}</td>
+      <td>${r.status || ''}</td>
+      <td align="right">${r.cards ?? ''}</td>
+      <td>${r.evaluation}</td>
+      <td align="right">$${Number(r.grand).toLocaleString()}</td>
+      <td>${r.grading_service || ''}</td>
+    </tr>
+  `).join('');
 }
 
 function fmtDate(iso){
@@ -123,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.replace('/admin');
   });
 
+  // sort header clicks
   document.querySelectorAll('th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.key;
@@ -134,10 +155,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   paintCarets();
 
+  // search & load
   $('q').addEventListener('input', debounce(applyFilters, 200));
   $('btnLoadReal').addEventListener('click', loadReal);
 });
 
+// Fetch from our server-side API
 async function loadReal(){
   const err = $('subsErr'); err.classList.add('hide'); err.textContent = '';
   try {
