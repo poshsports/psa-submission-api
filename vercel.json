@@ -1,6 +1,7 @@
 {
   "version": 2,
   "routes": [
+    { "src": "^/$", "dest": "/admin" },
     {
       "src": "/api/submit",
       "methods": ["POST"],
@@ -8,4 +9,3 @@
     }
   ]
 }
-
