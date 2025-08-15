@@ -56,14 +56,25 @@ async function doLogin(){
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ pass }) // post the exact field value
+      body: JSON.stringify({ pass })
     });
     const j = await res.json().catch(() => ({}));
+
     if (!res.ok || j.ok !== true) {
       if (errEl) errEl.textContent = (j.error === 'invalid_pass' ? 'Invalid passcode' : (j.error || 'Login failed'));
       return;
     }
-    location.replace('/admin');
+
+    // Cookie is set. Flip UI in place and initialize the shell (no reload).
+    const loginEl = document.getElementById('login');
+    const shellEl = document.getElementById('shell');
+    if (loginEl) loginEl.classList.add('hide');
+    if (shellEl) shellEl.classList.remove('hide');
+
+    // Wire the rest of the app now that we’re “authed”
+    wireUI();
+    views.initViews();
+    loadReal();
   } catch (e) {
     if (errEl) errEl.textContent = 'Network error';
   }
@@ -105,33 +116,36 @@ async function loadReal(){
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const authed = hasCookie('psa_admin');
+  // Detect auth strictly from the cookie
+  const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
 
-  // Fail-safe: default to showing login so the page is never blank during setup
-  const loginEl = $('#login');
-  const shellEl = $('#shell');
-  if (loginEl && shellEl) { show('login'); hide('shell'); }
+  const loginEl = document.getElementById('login');
+  const shellEl = document.getElementById('shell');
 
   // Auth note labels (guarded)
-  const authNote = $('#auth-note');
+  const authNote = document.getElementById('auth-note');
   if (authNote) authNote.textContent = authed ? 'passcode session' : 'not signed in';
-  const authNoteTop = $('#auth-note-top');
+  const authNoteTop = document.getElementById('auth-note-top');
   if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
 
-  // Toggle shell/login based on cookie
-  if (loginEl && shellEl) {
-    if (authed) { show('shell'); hide('login'); }
-    else { show('login'); hide('shell'); }
+  // Always wire login controls
+  const btn = document.getElementById('btnLogin');
+  const passEl = document.getElementById('pass');
+  window.__psaLogin = doLogin;  // console fallback
+  if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
+  if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+  if (authed) {
+    // Show shell and load content
+    if (loginEl) loginEl.classList.add('hide');
+    if (shellEl) shellEl.classList.remove('hide');
+
+    wireUI();
+    views.initViews();
+    loadReal();
+  } else {
+    // Show login only
+    if (loginEl) loginEl.classList.remove('hide');
+    if (shellEl) shellEl.classList.add('hide');
   }
-
-  // Login handlers (always wired)
-  bindLoginHandlers();
-
-  // If not authed, stop here (login UI is visible)
-  if (!authed) return;
-
-  // Authed: wire UI + views and load data
-  wireUI();
-  views.initViews();
-  loadReal();
 });
