@@ -29,7 +29,6 @@ function paintCarets() {
 
 // Normalize a row from Supabase into what we render
 function normalizeRow(r){
-  // evaluation should be Yes/No for the table; compute truthy if any known field > 0
   const evalAmt = Number(
     (r.evaluation ?? 0) ||
     (r.eval_line_sub ?? 0) ||
@@ -45,10 +44,14 @@ function normalizeRow(r){
     evaluation: evalBool ? 'Yes' : 'No',
     grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
     status: r.status || '',
-    grading_service: r.grading_service || r.grading_servi || r.service || r.grading || '',
+    // 👇 handles both spellings just in case, and trims
+    grading_service: String(
+      r.grading_service ?? r.grading_services ?? r.grading_servi ?? r.service ?? r.grading ?? ''
+    ).trim(),
     created_at: r.created_at || r.inserted_at || r.submitted_at_iso || ''
   };
 }
+
 
 // Filter + sort, then render
 function applyFilters(){
