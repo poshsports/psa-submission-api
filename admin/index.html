@@ -16,7 +16,14 @@
       <div id="auth-note" class="muted">not signed in</div>
       <div class="login-row">
         <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password" />
-        <button id="btnLogin" class="btn primary">Sign in</button>
+        <button
+          id="btnLogin"
+          class="btn primary"
+          type="button"
+          onclick="window.__psaLogin && window.__psaLogin()"
+        >
+          Sign in
+        </button>
       </div>
       <div id="err" class="error"></div>
     </div>
