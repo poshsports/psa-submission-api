@@ -342,18 +342,14 @@ export default async function handler(req, res) {
 
   const updatedCount = Array.isArray(updRows) ? updRows.length : 0;
 
-  if (updatedCount === 0) {
-    // not found -> INSERT (rare, but handles cases where pre-submit never ran)
-    const toInsert = { submission_id: submissionId, ...common };
-    const { error: insErr } = await supabase.from("psa_submissions").insert(toInsert);
-    if (insErr) {
-      console.error("[PSA v3] Supabase insert error:", insErr);
-      return res.status(500).send("Insert failed");
-    }
-    dlog("inserted new row", submissionId);
-  } else {
-    dlog("updated existing row", { submissionId, updatedCount });
-  }
+if (updatedCount === 0) {
+  // No pre-submit row found. Do NOT insert (avoids address NOT NULL issues).
+  dlog("no pre-submit row found; skipping insert", { submissionId, order: order?.name });
+  return res.status(200).json({ ok: true, updated: 0, not_found: true, submission_id: submissionId });
+} else {
+  dlog("updated existing row", { submissionId, updatedCount });
+}
+
 
   console.log("[PSA v3] OK", { order: order?.name, submissionId, evalQty, cardsToUse });
   return res.status(200).json({ ok: true, updated_submission_id: submissionId });
