@@ -51,13 +51,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Views & customize
   initViews();
-  $('btnCustomize').addEventListener('click', openCustomize);
-  $('btnCloseModal').addEventListener('click', closeCustomize);
-  $('btnSave').addEventListener('click', saveView);
-  $('btnSaveAs').addEventListener('click', saveAsView);
-  $('btnDelete').addEventListener('click', deleteView);
-  $('btnResetView').addEventListener('click', resetToDefault);
+  const modalEl = $('modal');
+
+  $('btnCustomize')?.addEventListener('click', openCustomize);
+  $('btnCloseModal')?.addEventListener('click', closeCustomize);
+  $('btnSave')?.addEventListener('click', saveView);
+  $('btnSaveAs')?.addEventListener('click', saveAsView);
+  $('btnDelete')?.addEventListener('click', deleteView);
+  $('btnResetView')?.addEventListener('click', resetToDefault);
+
+  // Extra modal UX: close on ESC and on backdrop click
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalEl && !modalEl.classList.contains('hide')) {
+      closeCustomize();
+    }
+  });
+  modalEl?.addEventListener('click', (e) => {
+    // Only close if the click is on the dim backdrop, not inside the panel
+    if (e.target === modalEl) closeCustomize();
+  });
 });
+
 
 // ===== Auth =====
 async function doLogin(){
