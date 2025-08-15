@@ -8,6 +8,13 @@ export let sortKey = 'created_at';
 export let sortDir = 'desc';
 export let pageSize = 50;
 export let pageIndex = 0;
+export function setSort(key, dir) {
+  if (key) sortKey = key;
+  if (dir) sortDir = dir;
+}
+export function getSort() {
+  return { sortKey, sortDir };
+}
 
 // normalize server rows into stable table shape
 export function normalizeRow(r){
