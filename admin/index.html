@@ -63,18 +63,31 @@
     }
     render();
 
-    document.getElementById('btnLogin').addEventListener('click', async () => {
+    // Submit on click
+    document.getElementById('btnLogin').addEventListener('click', doLogin);
+    // Submit on Enter
+    document.getElementById('pass').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin();
+    });
+
+    async function doLogin(){
       const pass = document.getElementById('pass').value.trim();
       document.getElementById('err').textContent = '';
       try {
-        const res = await fetch('/api/admin-login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass }) });
-        const j = await res.json();
-        if (!res.ok || !j.ok) throw new Error('Invalid passcode');
+        const res = await fetch('/api/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pass })
+        });
+        const j = await res.json().catch(() => ({})); // <- safe JSON parse
+        if (!res.ok || !j.ok) {
+          throw new Error(j.error === 'invalid_pass' ? 'Invalid passcode' : 'Login failed');
+        }
         location.reload();
       } catch (e) {
         document.getElementById('err').textContent = e.message || 'Login failed';
       }
-    });
+    }
 
     document.getElementById('btnLogout').addEventListener('click', async () => {
       await fetch('/api/admin-logout');
