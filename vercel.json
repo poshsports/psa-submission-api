@@ -3,11 +3,9 @@
   "routes": [
     { "handle": "filesystem" },
 
-    // Serve the Admin UI
     { "src": "^/admin/?$", "dest": "/admin/index.html" },
     { "src": "^/$",         "dest": "/admin/index.html" },
 
-    // Explicit POST route you already had (optional; safe to keep)
     { "src": "^/api/submit$", "methods": ["POST"], "dest": "/api/submit.js" }
   ]
 }
