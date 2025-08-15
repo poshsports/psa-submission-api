@@ -3,53 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>PSA Admin — Shell</title>
-  <style>
-    :root { --fg:#111; --sub:#64748b; --bd:#eee; --ok:#16a34a; --err:#b91c1c; }
-    body{margin:0;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--fg)}
-    header{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--bd)}
-    h1{margin:0;font-size:20px}
-    .note{color:var(--sub)}
-    main{padding:20px}
-    .card{max-width:1000px;margin:20px auto;padding:24px;border:1px solid var(--bd);border-radius:12px;background:#fff}
-    .narrow{max-width:560px}
-    label{display:block;margin:8px 0 6px}
-    input{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px}
-    button{padding:10px 14px;border:1px solid var(--bd);border-radius:8px;background:#fff;cursor:pointer}
-    .err{color:var(--err);margin-top:8px}
-    .ok{color:var(--ok)}
-    .hide{display:none}
-
-    /* Table */
-    .table-wrap{width:100%;overflow-x:auto;border:1px solid #f1f5f9;border-radius:10px}
-    table{width:100%;border-collapse:collapse;table-layout:auto;min-width:1100px}
-    th,td{
-      padding:10px 12px;
-      border-bottom:1px solid #f1f5f9;
-      white-space:nowrap;
-      vertical-align:middle;
-      background:#fff;
-    }
-    thead th{
-      background:#fafafa;
-      border-bottom:1px solid #e5e7eb;
-      font-weight:600;
-      position:sticky; top:0; z-index:1;
-    }
-    th.sortable{cursor:pointer; user-select:none;}
-    th .caret{
-      display:inline-block;
-      margin-left:6px;
-      font-size:11px;
-      color:#94a3b8;
-      width:10px; /* keep width stable so header height doesn’t jump */
-      text-align:center;
-    }
-    code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    .controls{display:flex;gap:8px;align-items:center}
-    .pill{padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;font-size:12px;color:#64748b}
-  </style>
+  <title>PSA Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css" />
 </head>
 <body>
   <header>
@@ -59,39 +14,33 @@
 
   <!-- Login -->
   <main id="login" class="card narrow hide">
-    <h2 style="margin-top:0">Admin login</h2>
+    <h2>Admin login</h2>
     <p class="note">Enter the passcode to access /admin.</p>
     <label>Passcode</label>
     <input id="pass" type="password" autocomplete="current-password" />
-    <div style="margin-top:12px">
+    <div class="row">
       <button id="btnLogin">Sign in</button>
     </div>
     <div id="err" class="err"></div>
-    <p class="note" style="margin-top:12px">
-      Default passcode: <code>psaadmin</code> (you can set <code>ADMIN_PORTAL_PASS</code> in Vercel later).
-    </p>
   </main>
 
   <!-- Shell -->
   <main id="shell" class="hide">
     <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. Added horizontal scrolling, sorting on Submission & Email, and a Friendly ID column.</p>
-        <div>
-          <button id="btnLogout">Sign out</button>
-        </div>
+      <div class="row between">
+        <p class="ok">✅ You’re in.</p>
+        <button id="btnLogout">Sign out</button>
       </div>
     </div>
 
     <!-- Submissions -->
     <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h3 style="margin:0">Submissions</h3>
+      <div class="row between">
+        <h3>Submissions</h3>
         <div class="controls">
-          <input id="q" placeholder="Search email or submission_id" style="width:320px" />
+          <input id="q" placeholder="Search email, submission_id, or friendly id" />
           <span class="pill" id="countPill">0</span>
-          <button id="btnLoadReal">Load real</button>
-          <button id="btnLoadSample">Load sample</button>
+          <button id="btnLoadReal">Load</button>
         </div>
       </div>
 
@@ -120,230 +69,6 @@
     </div>
   </main>
 
-  <script>
-    // --- auth helpers ---
-    function hasCookie(name){
-      return document.cookie.split(';').some(v => v.trim().startsWith(name + '='));
-    }
-    function show(id){ document.getElementById(id).classList.remove('hide'); }
-    function hide(id){ document.getElementById(id).classList.add('hide'); }
-
-    function render(){
-      const authed = hasCookie('psa_admin');
-      document.getElementById('auth-note').textContent = authed ? 'passcode session' : 'not signed in';
-      if (authed) { show('shell'); hide('login'); }
-      else { show('login'); hide('shell'); }
-    }
-    render();
-
-    // --- login/logout ---
-    document.getElementById('btnLogin')?.addEventListener('click', doLogin);
-    document.getElementById('pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-
-    async function doLogin(){
-      const pass = document.getElementById('pass').value.trim();
-      document.getElementById('err').textContent = '';
-      try {
-        const res = await fetch('/api/admin-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pass })
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.ok) throw new Error(j.error === 'invalid_pass' ? 'Invalid passcode' : 'Login failed');
-        location.replace('/admin');
-      } catch (e) {
-        document.getElementById('err').textContent = e.message || 'Login failed';
-      }
-    }
-
-    document.getElementById('btnLogout').addEventListener('click', async () => {
-      try {
-        await fetch('/api/admin-logout', { method: 'POST', cache: 'no-store', credentials: 'same-origin' });
-      } catch {}
-      window.location.replace('/admin');
-    });
-
-    // --- data state ---
-    let allRows = [];       // raw from server
-    let viewRows = [];      // filtered + sorted
-    let sortKey = 'created_at';
-    let sortDir = 'desc';   // 'asc' | 'desc'
-
-    const subsWrap = document.getElementById('subsWrap');
-    const subsEmpty = document.getElementById('subsEmpty');
-    const subsErr = document.getElementById('subsErr');
-    const subsTbody = document.getElementById('subsTbody');
-    const countPill = document.getElementById('countPill');
-    const qInput = document.getElementById('q');
-
-    document.getElementById('btnLoadReal').addEventListener('click', loadReal);
-    document.getElementById('btnLoadSample').addEventListener('click', loadSample);
-
-    // sort header clicks
-    document.querySelectorAll('th.sortable').forEach(th => {
-      th.addEventListener('click', () => toggleSort(th.dataset.key));
-    });
-
-    // search (debounced)
-    qInput.addEventListener('input', debounce(applyFilters, 200));
-
-    function toggleSort(key){
-      if (sortKey === key) sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
-      else { sortKey = key; sortDir = 'desc'; }
-      applyFilters();
-      paintCarets();
-    }
-
-    function paintCarets(){
-      const ids = {
-        created_at: 'carCreated',
-        friendly_id: 'carFriendly',
-        submission_id: 'carSubmission',
-        customer_email: 'carEmail',
-        status: 'carStatus',
-        cards: 'carCards',
-        grand: 'carGrand',
-        last_updated_at: 'carUpdated'
-      };
-      Object.values(ids).forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ''; });
-      const active = document.getElementById(ids[sortKey]);
-      if (active) active.textContent = sortDir === 'asc' ? '↑' : '↓';
-    }
-    paintCarets();
-
-    async function loadReal(){
-      subsErr.classList.add('hide'); subsErr.textContent = '';
-      try {
-        const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
-        allRows = Array.isArray(j.items) ? j.items.map(normalizeRow) : [];
-        applyFilters(true);
-      } catch (e) {
-        subsErr.textContent = e.message || 'Load failed';
-        subsErr.classList.remove('hide');
-      }
-    }
-
-    function loadSample(){
-      const items = [
-        {
-          submission_id: "a9cb9edf-d6ed-4ddd-a7f9-6fbf9ad8dd3f",
-          friendly_id: "PSA-10001",
-          customer_email: "dbposhsports@gmail.com",
-          cards: 2,
-          totals: { grand: 46, grading: 40, evaluation: 6 },
-          status: "submitted_paid",
-          created_at: "2025-08-01T15:22:00.000Z",
-          last_updated_at: "2025-08-11T20:10:00.000Z"
-        },
-        {
-          submission_id: "b2f1c7a4-1234-4b55-8a88-09c5d3c9e111",
-          friendly_id: "PSA-10002",
-          customer_email: "user@example.com",
-          cards: 3,
-          totals: { grand: 84, grading: 75, evaluation: 9 },
-          status: "intake_received",
-          created_at: "2025-08-09T19:03:00.000Z",
-          last_updated_at: "2025-08-12T13:40:00.000Z"
-        }
-      ];
-      allRows = items.map(normalizeRow);
-      applyFilters(true);
-    }
-
-    function normalizeRow(r){
-      return {
-        submission_id: r.submission_id || r.id || '',
-        // try common variants for your “friendly” id
-        friendly_id: r.friendly_id || r.friendly || r.short_id || r.display_id || r.friendly_submission_id || r.submission_friendly_id || '',
-        customer_email: r.customer_email || r.email || '',
-        cards: Number(r.cards ?? (Array.isArray(r.card_info) ? r.card_info.length : 0)) || 0,
-        grand: Number(r?.totals?.grand ?? r.grand_total ?? r.total ?? 0) || 0,
-        status: r.status || '',
-        created_at: r.created_at || r.inserted_at || r.submitted_at_iso || '',
-        last_updated_at: r.last_updated_at || r.updated_at || r.updated_at_iso || ''
-      };
-    }
-
-    function applyFilters(){
-      const q = qInput.value.trim().toLowerCase();
-      // filter by email, submission_id, or friendly_id substring
-      viewRows = allRows.filter(r => {
-        if (!q) return true;
-        return (r.customer_email && r.customer_email.toLowerCase().includes(q))
-            || (r.submission_id && r.submission_id.toLowerCase().includes(q))
-            || (r.friendly_id && r.friendly_id.toLowerCase().includes(q));
-      });
-
-      // sort
-      const dir = sortDir === 'asc' ? 1 : -1;
-      viewRows.sort((a, b) => {
-        const ka = getKey(a, sortKey), kb = getKey(b, sortKey);
-        if (ka == null && kb == null) return 0;
-        if (ka == null) return 1;
-        if (kb == null) return -1;
-        if (sortKey === 'cards' || sortKey === 'grand') {
-          return (Number(ka) - Number(kb)) * dir;
-        }
-        // dates or strings
-        const na = new Date(ka).getTime();
-        const nb = new Date(kb).getTime();
-        if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
-        return String(ka).localeCompare(String(kb)) * dir;
-      });
-
-      renderTable(viewRows);
-      countPill.textContent = String(viewRows.length);
-    }
-
-    function getKey(row, key){
-      if (key === 'grand') return row.grand;
-      return row[key];
-    }
-
-    function renderTable(rows){
-      if (!rows.length) {
-        subsWrap.classList.add('hide');
-        subsEmpty.classList.remove('hide');
-        subsTbody.innerHTML = '';
-        return;
-      }
-      subsEmpty.classList.add('hide');
-      subsWrap.classList.remove('hide');
-
-      subsTbody.innerHTML = rows.map(r => {
-        const created = fmtDate(r.created_at);
-        const updated = fmtDate(r.last_updated_at);
-        return `
-          <tr>
-            <td>${created}</td>
-            <td>${r.friendly_id ? `<code>${r.friendly_id}</code>` : ''}</td>
-            <td><code>${r.submission_id || ''}</code></td>
-            <td>${r.customer_email || ''}</td>
-            <td>${r.status || ''}</td>
-            <td align="right">${r.cards ?? ''}</td>
-            <td align="right">$${Number(r.grand).toLocaleString()}</td>
-            <td>${updated}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function fmtDate(iso){
-      try {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '';
-        return d.toLocaleString();
-      } catch { return ''; }
-    }
-
-    // debounce helper
-    function debounce(fn, ms){
-      let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
-    }
-  </script>
+  <script src="/admin/admin.js"></script>
 </body>
 </html>
