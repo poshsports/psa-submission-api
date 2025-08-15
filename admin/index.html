@@ -143,18 +143,23 @@
     document.getElementById('btnLoadReal').addEventListener('click', loadReal);
     document.getElementById('btnLoadSample').addEventListener('click', loadSample);
 
-    async function loadReal(){
-      subsErr.classList.add('hide'); subsErr.textContent = '';
-      try {
-        const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
-        renderTable(Array.isArray(j.items) ? j.items : []);
-      } catch (e) {
-        subsErr.textContent = e.message || 'Load failed';
-        subsErr.classList.remove('hide');
+      async function loadReal(){
+    subsErr.classList.add('hide'); subsErr.textContent = '';
+    try {
+      const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
+      const txt = await res.text();            // read raw
+      let j = null;
+      try { j = JSON.parse(txt); } catch {}
+      if (!res.ok || !j?.ok) {
+        const detail = (j && (j.detail || j.error)) || txt || 'Failed to load';
+        throw new Error(detail);
       }
+      renderTable(Array.isArray(j.items) ? j.items : []);
+    } catch (e) {
+      subsErr.textContent = String(e.message || e);
+      subsErr.classList.remove('hide');
     }
+  }
 
     function loadSample(){
       const data = {
