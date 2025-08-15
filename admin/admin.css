@@ -46,3 +46,10 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
 /* Ensure hidden modals actually hide, even though .modal sets display:flex */
 .modal.hide { display: none !important; }
 
+/* Make the modal sit above sticky headers */
+.modal { z-index: 2000; }
+.modal-panel { position: relative; z-index: 2001; }
+
+/* keep hiding working even though .modal uses flex */
+.modal.hide { display: none !important; }
+
