@@ -47,21 +47,26 @@ async function doLogout(e){
 }
 
 async function doLogin(){
-  const passEl = $('#pass');
-  const pass = passEl?.value?.trim() || '';
-  if ($('#err')) $('#err').textContent = '';
+  const pass = document.getElementById('pass')?.value?.trim() || '';
+  const errEl = document.getElementById('err');
+  if (errEl) errEl.textContent = '';
 
-  // quick guard so clicks always do something visible in DevTools
-  console.debug('[PSA Admin] Sign in clicked');
-
-  const { ok, error } = await login(pass);
-  if (!ok) {
-    if ($('#err')) {
-      $('#err').textContent = (error === 'invalid_pass' ? 'Invalid passcode' : (error || 'Login failed'));
+  try {
+    const res = await fetch('/api/admin-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ pass }) // post the exact field value
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok !== true) {
+      if (errEl) errEl.textContent = (j.error === 'invalid_pass' ? 'Invalid passcode' : (j.error || 'Login failed'));
+      return;
     }
-    return;
+    location.replace('/admin');
+  } catch (e) {
+    if (errEl) errEl.textContent = 'Network error';
   }
-  location.replace('/admin');
 }
 
 // extra-defensive: wire both addEventListener and onclick, plus an Enter key handler
