@@ -51,19 +51,20 @@
   <main id="shell" class="hide">
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. Next: render a read-only submissions table (dev data).</p>
+        <p style="margin:0">✅ You’re in. Load real submissions from Supabase.</p>
         <div>
           <button id="btnLogout">Sign out</button>
         </div>
       </div>
     </div>
 
-    <!-- Submissions (dev) -->
+    <!-- Submissions -->
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h3 style="margin:0">Submissions (dev)</h3>
+        <h3 style="margin:0">Submissions</h3>
         <div class="row">
-          <button id="btnLoadDev">Load dev submissions</button>
+          <button id="btnLoadReal">Load real submissions</button>
+          <button id="btnLoadSample">Load sample</button>
         </div>
       </div>
 
@@ -133,64 +134,26 @@
       window.location.replace('/admin');
     });
 
-    // --- Submissions (dev) ---
+    // --- Submissions ---
     const subsWrap = document.getElementById('subsWrap');
     const subsEmpty = document.getElementById('subsEmpty');
     const subsErr = document.getElementById('subsErr');
     const subsTbody = document.getElementById('subsTbody');
 
-    document.getElementById('btnLoadDev').addEventListener('click', loadDev);
+    document.getElementById('btnLoadReal').addEventListener('click', loadReal);
+    document.getElementById('btnLoadSample').addEventListener('click', loadSample);
 
-    async function loadDev(){
+    async function loadReal(){
       subsErr.classList.add('hide'); subsErr.textContent = '';
       try {
-        const res = await fetch('/api/admin/dev-submissions', { cache: 'no-store' });
-        const j = await res.json();
+        const res = await fetch('/api/admin/submissions', { cache: 'no-store', credentials: 'same-origin' });
+        const j = await res.json().catch(() => ({}));
         if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load');
-        const items = Array.isArray(j.items) ? j.items : [];
-        renderTable(items);
+        renderTable(Array.isArray(j.items) ? j.items : []);
       } catch (e) {
         subsErr.textContent = e.message || 'Load failed';
         subsErr.classList.remove('hide');
       }
     }
 
-    function renderTable(rows){
-      if (!rows.length) {
-        subsWrap.classList.add('hide');
-        subsEmpty.classList.remove('hide');
-        subsTbody.innerHTML = '';
-        return;
-      }
-      subsEmpty.classList.add('hide');
-      subsWrap.classList.remove('hide');
-
-      subsTbody.innerHTML = rows.map(r => {
-        const created = fmtDate(r.created_at);
-        const updated = fmtDate(r.last_updated_at);
-        const grand = (r?.totals?.grand ?? 0);
-        return `
-          <tr>
-            <td>${created}</td>
-            <td><code>${r.submission_id || ''}</code></td>
-            <td>${r.customer_email || ''}</td>
-            <td>${r.status || ''}</td>
-            <td align="right">${r.cards ?? ''}</td>
-            <td align="right">$${Number(grand).toLocaleString()}</td>
-            <td>${updated}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function fmtDate(iso){
-      try {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '';
-        return d.toLocaleString();
-      } catch { return ''; }
-    }
-  </script>
-</body>
-</html>
+    function loadS
