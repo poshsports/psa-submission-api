@@ -53,6 +53,7 @@ function normalizeRow(r){
 }
 
 
+
 // Filter + sort, then render
 function applyFilters(){
   const q = $('q').value.trim().toLowerCase();
