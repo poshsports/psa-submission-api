@@ -2,94 +2,112 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PSA Admin</title>
-  <link rel="stylesheet" href="/admin/admin.css" />
+  <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
-  <header>
-    <h1>PSA Admin</h1>
-    <div class="note" id="auth-note">checking…</div>
-  </header>
 
-  <!-- Login -->
-  <main id="login" class="card narrow hide">
-    <h2>Admin login</h2>
-    <p class="note">Enter the passcode to access /admin.</p>
-    <label>Passcode</label>
-    <input id="pass" type="password" autocomplete="current-password" />
-    <div class="row">
-      <button id="btnLogin">Sign in</button>
-    </div>
-    <div id="err" class="err"></div>
-  </main>
-
-  <!-- Shell -->
-  <main id="shell" class="hide">
-    <div class="card">
-      <div class="row between">
-        <p class="ok">✅ You’re in.</p>
-        <button id="btnLogout">Sign out</button>
+  <!-- LOGIN -->
+  <div id="login" class="hide" style="display:none;">
+    <div class="psa-login">
+      <h1>PSA Admin</h1>
+      <div id="auth-note" class="muted">not signed in</div>
+      <div class="login-row">
+        <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password" />
+        <button id="btnLogin" class="btn primary">Sign in</button>
       </div>
+      <div id="err" class="error"></div>
     </div>
+  </div>
 
-    <!-- Submissions -->
-    <div class="card">
-      <div class="row between">
-        <h3>Submissions</h3>
-        <div class="controls">
-          <input id="q" placeholder="Search email or submission_id" />
-          <span class="pill" id="countPill">0</span>
+  <!-- APP SHELL -->
+  <div id="shell" class="hide" style="display:none;">
+    <div class="admin-shell">
+      <!-- Sidebar -->
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a id="nav-active" class="sidebar-item active" href="#">Active submissions</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item" href="#" title="Coming soon">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
 
-          <!-- Views -->
-          <select id="viewSelect" title="Saved views"></select>
-          <button id="btnCustomize">Customize</button>
-          <button id="btnRefresh">Refresh</button>
+      <!-- Main -->
+      <main class="admin-main">
+        <!-- Top bar -->
+        <div class="topbar">
+          <div class="brand">
+            <span class="dot"></span>
+            <strong>Active submissions</strong>
+          </div>
+          <div class="top-actions">
+            <span id="auth-note-top" class="muted">passcode session</span>
+            <button id="btnColumns" class="btn">Columns</button>
+            <button id="top-signout" class="btn">Sign out</button>
+          </div>
         </div>
-      </div>
 
-      <div id="subsWrap" class="hide">
+        <!-- Views pills -->
+        <div class="views-bar" id="views-bar">
+          <!-- rendered by JS -->
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <input id="q" type="search" placeholder="Search email or submission…" />
+          <span class="count-pill"><span id="countPill">0</span></span>
+          <div class="spacer"></div>
+          <button id="btnRefresh" class="btn">Refresh</button>
+        </div>
+
+        <!-- Error line -->
+        <div id="subsErr" class="error hide"></div>
+
+        <!-- Table -->
         <div class="table-wrap">
-          <table id="subsTable">
-            <thead id="subsHead"></thead>
-            <tbody id="subsTbody"></tbody>
-          </table>
+          <div class="table-scroller">
+            <table class="table" id="subsTable">
+              <thead id="subsHead"></thead>
+              <tbody id="subsTbody"></tbody>
+            </table>
+          </div>
+          <div id="subsEmpty" class="empty hide">No submissions found.</div>
         </div>
-      </div>
 
-      <div id="subsEmpty" class="note">No data loaded yet.</div>
-      <div id="subsErr" class="err hide"></div>
+        <!-- Pagination -->
+        <div class="pagination">
+          <span class="page-range" id="page-range">0–0 of 0</span>
+          <button class="page-btn" id="prev-page">‹</button>
+          <button class="page-btn" id="next-page">›</button>
+        </div>
+      </main>
     </div>
-  </main>
+  </div>
 
-  <!-- Customize Modal -->
-  <div id="modal" class="modal hide" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-panel">
-      <div class="row between" style="margin-bottom:10px">
-        <h3 id="modalTitle" style="margin:0">Customize table</h3>
-        <button id="btnCloseModal" class="ghost">Close</button>
+  <!-- Columns Panel -->
+  <div class="columns-panel-backdrop" id="columns-backdrop" aria-hidden="true">
+    <div class="columns-panel">
+      <div class="columns-head">
+        <div style="font-weight:700">Columns</div>
+        <button id="close-columns" class="btn">Close</button>
       </div>
-
-      <p class="note" style="margin-top:0">Show/hide columns. Reorder by dragging the table headers.</p>
-
-      <div id="colsList" class="cols-list">
-        <!-- checkboxes injected -->
+      <div class="columns-body">
+        <div id="columns-list"></div>
       </div>
-
-      <div class="row between" style="margin-top:14px">
-        <div class="row">
-          <button id="btnResetView" class="ghost">Reset to default</button>
-        </div>
-        <div class="row">
-          <input id="viewName" placeholder="View name (for Save As)" style="width:220px" />
-          <button id="btnSave">Save</button>
-          <button id="btnSaveAs">Save As</button>
-          <button id="btnDelete" class="danger">Delete</button>
-        </div>
+      <div class="columns-foot">
+        <button id="columns-cancel" class="btn">Cancel</button>
+        <button id="columns-save" class="btn primary">Save</button>
       </div>
     </div>
   </div>
 
+  <!-- New module entrypoint -->
+  <script type="module" src="/admin/js/admin.app.js"></script>
+
+  <!-- (Optional) Keep legacy for instant rollback:
   <script src="/admin/admin.js"></script>
+  -->
 </body>
 </html>
