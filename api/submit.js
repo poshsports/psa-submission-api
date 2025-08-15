@@ -132,27 +132,57 @@ export default async function handler(req, res) {
     grading_service: pickGradingService(payload),
   };
 
-  try {
-    // Plain insert so the DB trigger can assign psa-### and handle dedupe/upgrade
-    const { data, error } = await supabase
+    try {
+    // Insert and try to get back the id.
+    // If the trigger swallows/merges the row, PostgREST can return 0 rows (PGRST116).
+    let id = null;
+
+    const ins = await supabase
       .from('psa_submissions')
       .insert(row)
-      .select('submission_id')  // return the real psa-### id
-      .single();
+      .select('submission_id, created_at')
+      .maybeSingle(); // <-- allows 0 or 1 rows
 
-    if (error) {
-      console.error('[submit] insert error:', error);
+    if (ins.error && ins.error.code !== 'PGRST116') {
+      console.error('[submit] insert error:', ins.error);
       return res.status(500).json({
         ok: false,
         error: 'insert_failed',
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
+        code: ins.error.code,
+        message: ins.error.message,
+        details: ins.error.details,
+        hint: ins.error.hint,
       });
     }
 
-    return res.status(200).json({ ok: true, id: data?.submission_id || null });
+    if (ins.data?.submission_id) {
+      id = ins.data.submission_id;
+    } else {
+      // Fallback: if the trigger deduped/upgraded an existing row, fetch the most recent match.
+      const since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // last 5 minutes
+
+      let sel = supabase
+        .from('psa_submissions')
+        .select('submission_id, created_at')
+        .eq('customer_email', email)
+        .eq('cards', cards)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // include grading_service in the match; handle NULL vs non-NULL correctly
+      if (row.grading_service == null) {
+        sel = sel.is('grading_service', null);
+      } else {
+        sel = sel.eq('grading_service', row.grading_service);
+      }
+
+      const { data: found, error: selErr } = await sel;
+      if (!selErr && found) id = found.submission_id;
+    }
+
+    return res.status(200).json({ ok: true, id });
   } catch (e) {
     console.error('[submit] Unexpected error:', e);
     return res.status(500).json({
@@ -161,4 +191,5 @@ export default async function handler(req, res) {
       message: e?.message || String(e),
     });
   }
+
 }
