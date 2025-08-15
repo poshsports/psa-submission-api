@@ -19,15 +19,33 @@
     .err{color:var(--err);margin-top:8px}
     .ok{color:var(--ok)}
     .hide{display:none}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:10px 12px;border-bottom:1px solid #f1f5f9;white-space:nowrap}
-    th{text-align:left;background:#fafafa;border-bottom:1px solid #e5e7eb;cursor:pointer;user-select:none}
+
+    /* Table */
+    table{width:100%;border-collapse:collapse;table-layout:auto}
+    th,td{
+      padding:10px 12px;
+      border-bottom:1px solid #f1f5f9;
+      white-space:nowrap;
+      vertical-align:middle;
+    }
+    thead th{
+      background:#fafafa;
+      border-bottom:1px solid #e5e7eb;
+      font-weight:600;
+    }
+    th.sortable{cursor:pointer; user-select:none;}
+    th .caret{
+      display:inline-block;
+      margin-left:6px;
+      font-size:11px;
+      color:#94a3b8;
+      width:10px; /* keep width stable so header height doesn’t jump */
+      text-align:center;
+    }
     code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
     .row{display:flex;gap:10px;flex-wrap:wrap}
     .controls{display:flex;gap:8px;align-items:center}
     .pill{padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;font-size:12px;color:#64748b}
-    .th-btn{display:flex;align-items:center;gap:6px}
-    .arrow{font-size:11px;color:#94a3b8}
   </style>
 </head>
 <body>
@@ -55,7 +73,7 @@
   <main id="shell" class="hide">
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <p style="margin:0">✅ You’re in. Search + sorting are now available.</p>
+        <p style="margin:0">✅ You’re in. Header distortion fixed; search + sorting still work.</p>
         <div>
           <button id="btnLogout">Sign out</button>
         </div>
@@ -78,13 +96,13 @@
         <table>
           <thead>
             <tr>
-              <th id="thCreated" data-key="created_at" class="th-btn">Created <span class="arrow" id="arCreated"></span></th>
+              <th id="thCreated" class="sortable" data-key="created_at">Created <span class="caret" id="carCreated"></span></th>
               <th>Submission</th>
               <th>Email</th>
-              <th id="thStatus" data-key="status" class="th-btn">Status <span class="arrow" id="arStatus"></span></th>
-              <th id="thCards" data-key="cards" class="th-btn">Cards <span class="arrow" id="arCards"></span></th>
-              <th id="thGrand" data-key="grand" class="th-btn">Grand <span class="arrow" id="arGrand"></span></th>
-              <th id="thUpdated" data-key="last_updated_at" class="th-btn">Updated <span class="arrow" id="arUpdated"></span></th>
+              <th id="thStatus" class="sortable" data-key="status">Status <span class="caret" id="carStatus"></span></th>
+              <th id="thCards" class="sortable" data-key="cards">Cards <span class="caret" id="carCards"></span></th>
+              <th id="thGrand" class="sortable" data-key="grand">Grand <span class="caret" id="carGrand"></span></th>
+              <th id="thUpdated" class="sortable" data-key="last_updated_at">Updated <span class="caret" id="carUpdated"></span></th>
             </tr>
           </thead>
           <tbody id="subsTbody"></tbody>
@@ -156,12 +174,10 @@
     document.getElementById('btnLoadReal').addEventListener('click', loadReal);
     document.getElementById('btnLoadSample').addEventListener('click', loadSample);
 
-    // sort header clicks
-    document.getElementById('thCreated').addEventListener('click', () => toggleSort('created_at'));
-    document.getElementById('thStatus').addEventListener('click', () => toggleSort('status'));
-    document.getElementById('thCards').addEventListener('click', () => toggleSort('cards'));
-    document.getElementById('thGrand').addEventListener('click', () => toggleSort('grand'));
-    document.getElementById('thUpdated').addEventListener('click', () => toggleSort('last_updated_at'));
+    // sort header clicks (use a single class "sortable" to keep styling consistent)
+    document.querySelectorAll('th.sortable').forEach(th => {
+      th.addEventListener('click', () => toggleSort(th.dataset.key));
+    });
 
     // search (debounced)
     qInput.addEventListener('input', debounce(applyFilters, 200));
@@ -170,22 +186,22 @@
       if (sortKey === key) sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
       else { sortKey = key; sortDir = 'desc'; }
       applyFilters();
-      paintSortArrows();
+      paintCarets();
     }
 
-    function paintSortArrows(){
-      const arrows = {
-        created_at: document.getElementById('arCreated'),
-        status: document.getElementById('arStatus'),
-        cards: document.getElementById('arCards'),
-        grand: document.getElementById('arGrand'),
-        last_updated_at: document.getElementById('arUpdated')
+    function paintCarets(){
+      const ids = {
+        created_at: 'carCreated',
+        status: 'carStatus',
+        cards: 'carCards',
+        grand: 'carGrand',
+        last_updated_at: 'carUpdated'
       };
-      Object.values(arrows).forEach(el => el.textContent = '');
-      const active = arrows[sortKey];
+      Object.values(ids).forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ''; });
+      const active = document.getElementById(ids[sortKey]);
       if (active) active.textContent = sortDir === 'asc' ? '↑' : '↓';
     }
-    paintSortArrows();
+    paintCarets();
 
     async function loadReal(){
       subsErr.classList.add('hide'); subsErr.textContent = '';
@@ -238,7 +254,7 @@
       };
     }
 
-    function applyFilters(resetPage){
+    function applyFilters(){
       const q = qInput.value.trim().toLowerCase();
       // filter by email or submission_id substring
       viewRows = allRows.filter(r => {
