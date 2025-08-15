@@ -40,25 +40,18 @@
         <div class="controls">
           <input id="q" placeholder="Search email or submission_id" />
           <span class="pill" id="countPill">0</span>
+
+          <!-- Views -->
+          <select id="viewSelect" title="Saved views"></select>
+          <button id="btnCustomize">Customize</button>
           <button id="btnLoadReal">Load</button>
         </div>
       </div>
 
       <div id="subsWrap" class="hide">
         <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th id="thCreated" class="sortable" data-key="created_at">Created <span class="caret" id="carCreated"></span></th>
-                <th id="thSubmission" class="sortable" data-key="submission_id">Submission <span class="caret" id="carSubmission"></span></th>
-                <th id="thEmail" class="sortable" data-key="customer_email">Email <span class="caret" id="carEmail"></span></th>
-                <th id="thStatus" class="sortable" data-key="status">Status <span class="caret" id="carStatus"></span></th>
-                <th id="thCards" class="sortable" data-key="cards">Cards <span class="caret" id="carCards"></span></th>
-                <th id="thEvaluation" class="sortable" data-key="evaluation">Evaluation <span class="caret" id="carEvaluation"></span></th>
-                <th id="thGrand" class="sortable" data-key="grand">Grand <span class="caret" id="carGrand"></span></th>
-                <th id="thService" class="sortable" data-key="grading_service">Grading Service <span class="caret" id="carService"></span></th>
-              </tr>
-            </thead>
+          <table id="subsTable">
+            <thead id="subsHead"></thead>
             <tbody id="subsTbody"></tbody>
           </table>
         </div>
@@ -68,6 +61,34 @@
       <div id="subsErr" class="err hide"></div>
     </div>
   </main>
+
+  <!-- Customize Modal -->
+  <div id="modal" class="modal hide" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-panel">
+      <div class="row between" style="margin-bottom:10px">
+        <h3 id="modalTitle" style="margin:0">Customize table</h3>
+        <button id="btnCloseModal" class="ghost">Close</button>
+      </div>
+
+      <p class="note" style="margin-top:0">Show/hide columns. Reorder by dragging the table headers.</p>
+
+      <div id="colsList" class="cols-list">
+        <!-- checkboxes injected -->
+      </div>
+
+      <div class="row between" style="margin-top:14px">
+        <div class="row">
+          <button id="btnResetView" class="ghost">Reset to default</button>
+        </div>
+        <div class="row">
+          <input id="viewName" placeholder="View name (for Save As)" style="width:220px" />
+          <button id="btnSave">Save</button>
+          <button id="btnSaveAs">Save As</button>
+          <button id="btnDelete" class="danger">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/admin/admin.js"></script>
 </body>
