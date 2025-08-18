@@ -13,17 +13,17 @@ let currentView = 'Default';
 
 // Column registry (add new columns here later; UI auto-updates)
 const COLUMNS = [
-  { key:'created_at',          label:'Created',          sortable:true,  align:'left',  format: fmtDate },
-  { key:'submission_id',       label:'Submission',       sortable:true,  align:'left',  format: fmtCode },
-  { key:'customer_email',      label:'Email',            sortable:true,  align:'left' },
-  { key:'status',              label:'Status',           sortable:true,  align:'left' },
+  { key:'created_at',          label:'Created',          sortable:true,  align:'center',  format: fmtDate },
+  { key:'submission_id',       label:'Submission',       sortable:true,  align:'center',  format: fmtCode },
+  { key:'customer_email',      label:'Email',            sortable:true,  align:'center' },
+  { key:'status',              label:'Status',           sortable:true,  align:'center' },
   { key:'cards',               label:'Cards',            sortable:true,  align:'right', format: fmtNum },
-  { key:'evaluation',          label:'Evaluation',       sortable:true,  align:'left'  }, // Yes/No
+  { key:'evaluation',          label:'Evaluation',       sortable:true,  align:'center'  }, // Yes/No
   { key:'grand',               label:'Grand',            sortable:true,  align:'right', format: fmtMoney },
-  { key:'grading_service',     label:'Grading Service',  sortable:true,  align:'left' },
-  { key:'paid_at_iso',         label:'Paid',             sortable:true,  align:'left',  format: fmtDate },
+  { key:'grading_service',     label:'Grading Service',  sortable:true,  align:'center' },
+  { key:'paid_at_iso',         label:'Paid',             sortable:true,  align:'center',  format: fmtDate },
   { key:'paid_amount',         label:'Paid $',           sortable:true,  align:'right', format: fmtMoney },
-  { key:'shopify_order_name',  label:'Order',            sortable:true,  align:'left',  format: fmtCode }
+  { key:'shopify_order_name',  label:'Order',            sortable:true,  align:'center',  format: fmtCode }
 ];
 
 // Default order/visibility derived from the registry
