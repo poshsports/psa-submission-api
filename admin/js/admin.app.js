@@ -1,3 +1,4 @@
+// /admin/js/admin.app.js
 import { $, debounce } from './util.js';
 import { fetchSubmissions, logout } from './api.js';
 import * as tbl from './table.js';
@@ -76,15 +77,17 @@ function updateDateButtonLabel(){
 function openDatePopover(){
   const pop = $('date-popover'); const btn = $('btnDate');
   if (!pop || !btn) return;
+  if (!pop.classList.contains('hide')) { closeDatePopover(); return; } // toggle
+
   pop.classList.remove('hide');
   positionPopover(pop, btn);
 
-  // close on clicks outside / Esc
-  const onDoc = (e) => {
-    if (!pop.contains(e.target) && e.target !== btn) { closeDatePopover(); }
-  };
+  const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== btn) closeDatePopover(); };
   const onEsc = (e) => { if (e.key === 'Escape') closeDatePopover(); };
-  pop.__off = () => { document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onEsc, true); };
+  pop.__off = () => {
+    document.removeEventListener('mousedown', onDoc, true);
+    document.removeEventListener('keydown', onEsc, true);
+  };
   document.addEventListener('mousedown', onDoc, true);
   document.addEventListener('keydown', onEsc, true);
 }
@@ -127,25 +130,31 @@ function wireUI(){
 
   // NEW: date popover wiring
   $('btnDate')?.addEventListener('click', openDatePopover);
-  $('datePresetToday')?.addEventListener('click', () => { setPreset(1); });
-  $('datePreset7')?.addEventListener('click',    () => { setPreset(7); });
-  $('datePreset30')?.addEventListener('click',   () => { setPreset(30); });
-  $('dateClear')?.addEventListener('click', () => { $('dateFrom').value=''; $('dateTo').value=''; });
+  $('datePresetToday')?.addEventListener('click', () => { setPreset(1);  updateDateButtonLabel(); });
+  $('datePreset7')?.addEventListener('click',    () => { setPreset(7);  updateDateButtonLabel(); });
+  $('datePreset30')?.addEventListener('click',   () => { setPreset(30); updateDateButtonLabel(); });
+  $('dateClear')?.addEventListener('click', () => {
+    $('dateFrom').value=''; $('dateTo').value='';
+    updateDateButtonLabel();
+  });
   $('dateCancel')?.addEventListener('click', closeDatePopover);
   $('dateApply')?.addEventListener('click', applyDateAndFilter);
 
-// pagination
-$('prev-page')?.addEventListener('click', () => {
-  tbl.prevPage();                              // <-- helper, not direct write
-  tbl.renderTable(currentVisibleKeys());
-  updateCountPill();
-});
-$('next-page')?.addEventListener('click', () => {
-  tbl.nextPage();                              // <-- helper, not direct write
-  tbl.renderTable(currentVisibleKeys());
-  updateCountPill();
-});
+  // Optional: live label while typing custom dates (no filtering yet)
+  $('dateFrom')?.addEventListener('change', updateDateButtonLabel);
+  $('dateTo')?.addEventListener('change', updateDateButtonLabel);
 
+  // pagination
+  $('prev-page')?.addEventListener('click', () => {
+    tbl.prevPage();                              // <-- helper, not direct write
+    tbl.renderTable(currentVisibleKeys());
+    updateCountPill();
+  });
+  $('next-page')?.addEventListener('click', () => {
+    tbl.nextPage();                              // <-- helper, not direct write
+    tbl.renderTable(currentVisibleKeys());
+    updateCountPill();
+  });
 
   // columns panel (open + close/save)
   $('btnColumns')?.addEventListener('click', views.openColumnsPanel);
@@ -204,6 +213,7 @@ async function doLogin(){
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
+    updateDateButtonLabel();   // <<<<<<<<<<<<<<<<<<<<<< ADDED
     views.initViews();
     loadReal();
   } catch (e) {
@@ -214,8 +224,8 @@ async function doLogin(){
 // console fallback so you can trigger manually if needed
 // in DevTools:  __psaLogin()
 function bindLoginHandlers(){
-    const btn = $('btnLogin');
-    const passEl = $('pass');
+  const btn = $('btnLogin');
+  const passEl = $('pass');
   window.__psaLogin = doLogin;
   if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
   if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
@@ -227,7 +237,7 @@ function updateCountPill(){
 }
 
 async function loadReal(){
-  const err = $('#subsErr');
+  const err = $('subsErr');
   if (err) { err.classList.add('hide'); err.textContent = ''; }
 
   try {
@@ -264,6 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
+    updateDateButtonLabel();   // <<<<<<<<<<<<<<<<<<<<<< ADDED
     views.initViews();
     loadReal();
   } else {
