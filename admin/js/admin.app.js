@@ -21,6 +21,14 @@ function ensureSignoutWired(){
   el.onclick = doLogout;
 }
 
+// Single place to run client-side filters + update count
+function runFilter(){
+  tbl.pageIndex = 0;
+  tbl.applyFilters();
+  const pill = $('#countPill');
+  if (pill) pill.textContent = String(tbl.viewRows.length);
+}
+
 function wireUI(){
   // sign out (sidebar only)
   ensureSignoutWired();
@@ -28,24 +36,11 @@ function wireUI(){
   // refresh (re-fetch)
   $('#btnRefresh')?.addEventListener('click', loadReal);
 
-  // search: client-side filter for instant feedback
-  $('#q')?.addEventListener('input', debounce(() => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
-  }, 200));
-
-  // filters: client-side
-  $('#fStatus')?.addEventListener('change', () => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
-  });
-  $('#fEval')?.addEventListener('change', () => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
-  });
+  // ---- local filtering (instant; no network) ----
+  const debouncedFilter = debounce(runFilter, 150);
+  $('#q')?.addEventListener('input', debouncedFilter);
+  $('#fStatus')?.addEventListener('change', runFilter);
+  $('#fEval')?.addEventListener('change', runFilter);
 
   // pagination
   $('#prev-page')?.addEventListener('click', () => {
@@ -70,6 +65,16 @@ function wireUI(){
   $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
+
+// Fallback delegation: if toolbar nodes are re-rendered, filtering still works
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'q') runFilter();
+}, true);
+
+document.addEventListener('change', (e) => {
+  const id = e.target && e.target.id;
+  if (id === 'fStatus' || id === 'fEval') runFilter();
+}, true);
 
 // Global backstop: if something re-renders the sidebar, this still works
 document.addEventListener('click', (e) => {
