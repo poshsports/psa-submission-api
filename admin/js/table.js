@@ -1,13 +1,15 @@
+// /admin/js/table.js
 import { $, escapeHtml } from './util.js';
 import { COLUMNS } from './columns.js';
 
-// table state
+// ===== table state =====
 export let allRows = [];
 export let viewRows = [];
 export let sortKey = 'created_at';
 export let sortDir = 'desc';
 export let pageSize = 50;
 export let pageIndex = 0;
+
 export function setSort(key, dir) {
   if (key) sortKey = key;
   if (dir) sortDir = dir;
@@ -20,7 +22,7 @@ export function getSort() {
   return { sortKey, sortDir };
 }
 
-// normalize server rows into stable table shape
+// ===== row normalization (stable shape for table) =====
 export function normalizeRow(r){
   const evalAmtNum = Number(
     (r.evaluation ?? 0) ||
@@ -45,7 +47,7 @@ export function normalizeRow(r){
   };
 }
 
-// header render (no drag here; drag only in Columns panel)
+// ===== header render (no drag here; drag only in Columns panel) =====
 export function renderHead(order, hidden){
   const hiddenSet = new Set(hidden || []);
   const head = $('subsHead');
@@ -87,18 +89,51 @@ export function paintCarets(){
   if (el) el.textContent = sortDir === 'asc' ? '▲' : '▼';
 }
 
+// ===== core: filter + sort + paginate =====
 export function applyFilters(){
+  // free-text query
   const q = ($('#q')?.value || '').trim().toLowerCase();
 
+  // toolbar filters (null = not applied)
+  const statusSel = $('#fil-status');
+  const evalSel   = $('#fil-eval');
+
+  const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
+    ? statusSel.value.toLowerCase()
+    : null;
+
+  const evalFilter = (evalSel && evalSel.value && evalSel.value.toLowerCase() !== 'all')
+    ? evalSel.value.toLowerCase() // 'yes' | 'no'
+    : null;
+
   // determine visible columns from header
-  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]')).filter(th => th.style.display !== 'none');
+  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
+    .filter(th => th.style.display !== 'none');
   const visibleKeys = ths.map(th => th.dataset.key);
 
-  // filter (email or submission id)
+  // filter (search + status + evaluation)
   viewRows = allRows.filter(r => {
-    if (!q) return true;
-    return (r.customer_email && r.customer_email.toLowerCase().includes(q))
-        || (r.submission_id && r.submission_id.toLowerCase().includes(q));
+    // text match (email or submission id)
+    if (q) {
+      const matchText =
+        (r.customer_email && r.customer_email.toLowerCase().includes(q)) ||
+        (r.submission_id && r.submission_id.toLowerCase().includes(q));
+      if (!matchText) return false;
+    }
+
+    // status exact match (case-insensitive)
+    if (statusFilter) {
+      const st = String(r.status || '').toLowerCase();
+      if (st !== statusFilter) return false;
+    }
+
+    // evaluation yes/no
+    if (evalFilter) {
+      if (evalFilter === 'yes' && !r.evaluation_bool) return false;
+      if (evalFilter === 'no'  &&  r.evaluation_bool) return false;
+    }
+
+    return true;
   });
 
   // sort (with paid fields handled correctly)
@@ -118,6 +153,7 @@ export function applyFilters(){
     return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir;
   });
 
+  // clamp page index and render
   pageIndex = Math.min(pageIndex, Math.floor(Math.max(0, viewRows.length - 1) / pageSize));
   renderTable(visibleKeys);
 }
