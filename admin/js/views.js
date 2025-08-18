@@ -17,6 +17,13 @@ function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
 function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
 function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
+/* Capture current UI state (order/hidden + sort) WITHOUT persisting */
+function captureState(){
+  const { order, hidden } = currentHeaderState();
+  const { sortKey, sortDir } = tbl.getSort();
+  return { order, hidden, sortKey, sortDir };
+}
+
 /* ---------- public API ---------- */
 export function initViews(){
   const all = readViews();
@@ -93,18 +100,51 @@ export function renderViewsBar(){
   plus.className = 'view-plus';
   plus.textContent = '＋ Save view';
   plus.onclick = () => {
+    const allNow = readViews();
+    const snapshot = captureState();
+
+    if (currentView === 'Default') {
+      // Default can never be overwritten; always Save As
+      const name = prompt('Save current view as:');
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
+
+      if (allNow[trimmed]) {
+        const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
+        if (!ok) return;
+      }
+      allNow[trimmed] = snapshot;
+      writeViews(allNow);
+      currentView = trimmed; setCur(trimmed);
+      renderViewsBar();
+      return;
+    }
+
+    // In a saved view: offer overwrite or Save As
+    const overwrite = confirm(`Save changes to “${currentView}”?\nOK = Overwrite,  Cancel = Save As new`);
+    if (overwrite) {
+      allNow[currentView] = snapshot;
+      writeViews(allNow);
+      renderViewsBar();
+      return;
+    }
+
+    // Save As
     const name = prompt('Save current view as:');
     if (!name) return;
-    if (name === 'Default') { alert('“Default” is reserved.'); return; }
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
 
-    const state = currentHeaderState();
-    const { sortKey, sortDir } = tbl.getSort();
-
-    const allNow = readViews();
-    allNow[name] = { ...state, sortKey, sortDir };
+    if (allNow[trimmed]) {
+      const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
+      if (!ok) return;
+    }
+    allNow[trimmed] = snapshot;
     writeViews(allNow);
-
-    currentView = name; setCur(name);
+    currentView = trimmed; setCur(trimmed);
     renderViewsBar();
   };
 
@@ -176,13 +216,7 @@ export function saveColumnsPanel(){
   const { order } = currentHeaderState();
   const hidden = pendingHidden ? Array.from(pendingHidden) : [];
 
-  const all = readViews();
-  const v = all[currentView] || {};
-  const { sortKey, sortDir } = tbl.getSort();
-
-  all[currentView] = { ...(v||{}), order, hidden, sortKey, sortDir };
-  writeViews(all);
-
+  // IMPORTANT: Do NOT persist here. Only update the working UI.
   tbl.renderHead(order, hidden);
   tbl.applyFilters();
   closeColumnsPanel();
