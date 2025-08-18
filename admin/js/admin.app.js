@@ -25,7 +25,7 @@ function ensureSignoutWired(){
 function runFilter(){
   tbl.setPageIndex(0);     // <-- instead of tbl.pageIndex = 0
   tbl.applyFilters();
-  const pill = $('#countPill');
+  const pill = $('countPill');
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
@@ -123,15 +123,15 @@ async function doLogin(){
 // console fallback so you can trigger manually if needed
 // in DevTools:  __psaLogin()
 function bindLoginHandlers(){
-  const btn = $('#btnLogin');
-  const passEl = $('#pass');
+    const btn = $('btnLogin');
+    const passEl = $('pass');
   window.__psaLogin = doLogin;
   if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
   if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 }
 
 function updateCountPill(){
-  const pill = $('#countPill');
+  const pill = $('countPill')
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
