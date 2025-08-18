@@ -44,12 +44,12 @@ function wireUI(){
 
 // pagination
 $('#prev-page')?.addEventListener('click', () => {
-  tbl.prevPage();
+  tbl.prevPage();                              // <-- helper, not direct write
   tbl.renderTable(currentVisibleKeys());
   updateCountPill();
 });
 $('#next-page')?.addEventListener('click', () => {
-  tbl.nextPage();
+  tbl.nextPage();                              // <-- helper, not direct write
   tbl.renderTable(currentVisibleKeys());
   updateCountPill();
 });
