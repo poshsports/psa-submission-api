@@ -260,7 +260,7 @@ export function renderTable(visibleKeys){
   const rows = viewRows.slice(start, end);
 
   body.innerHTML = rows.map(r => `
-    <tr>
+    <tr data-id="${escapeHtml(String(r.submission_id || ''))}">
       ${visibleKeys.map(key => {
         const col = colMap.get(key);
         const val = r[key];
