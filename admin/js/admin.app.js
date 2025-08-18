@@ -114,7 +114,7 @@ async function loadReal(){
     console.debug('[admin] fetch ok, items:', items.length, items[0]);
 
     // 2) Normalize + assign to table state
-    tbl.allRows = items.map(tbl.normalizeRow);
+    tbl.setRows(items.map(tbl.normalizeRow));
     console.debug('[admin] normalized rows:', tbl.allRows.length, tbl.allRows[0]);
 
     // 3) Ensure header + render
