@@ -97,8 +97,30 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 .view-pill:hover{background:var(--row-hover)}
 .view-pill.active{background:var(--accent-50);border-color:var(--accent);font-weight:600}
 .view-plus{padding:6px 10px;border-radius:999px;border:1px dashed var(--line);color:var(--muted);background:transparent}
-.toolbar input[type="search"]{min-width:320px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text)}
+
+/* Search smaller so Dates fits; Date button stays single-line */
+.toolbar input[type="search"]{
+  min-width:240px;              /* was 320px */
+  padding:8px 10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+  color:var(--text);
+}
 .toolbar input[type="search"]:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(38,128,235,.15)}
+
+#btnDate{
+  height:36px;                  /* match <select> height */
+  min-width:180px;              /* prevent wrap */
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  padding:6px 10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+}
+
 .toolbar .spacer{flex:1}
 .count-pill{padding:4px 8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font-size:12px;color:var(--muted)}
 .toolbar select{height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text)}
@@ -164,14 +186,13 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 a,button,[role="button"],input{outline-offset:2px}
 a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--focus)}
 
+/* ===== Edit Columns mode ===== */
 .table.edit-cols th,
 .table.edit-cols td {
   border-right: 10px solid var(--line); /* darker gutter, matches table borders */
 }
-
 .table.edit-cols th:last-child,
 .table.edit-cols td:last-child { border-right: 0; }
-
 
 .table.edit-cols th {
   background: var(--surface-2);
@@ -212,29 +233,21 @@ a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outl
 }
 
 /* gray out columns marked to be hidden */
-.table.edit-cols th.is-off {
-  opacity: .7;
-  background: var(--surface-2);
-}
-.table.edit-cols td.col-off {
-  opacity: .5;
-  background: var(--surface-2);
-}
+.table.edit-cols th.is-off { opacity: .7; background: var(--surface-2); }
+.table.edit-cols td.col-off { opacity: .5; background: var(--surface-2); }
 
 /* subtle animation while columns reflow during drag */
-.table.edit-cols th,
-.table.edit-cols td {
-  transition: background-color .12s ease, opacity .12s ease;
-}
+.table.edit-cols th,.table.edit-cols td { transition: background-color .12s ease, opacity .12s ease; }
 body.col-dragging { cursor: grabbing; }
-.drag-handle { cursor: grab; }
 
 /* --- Date popover --- */
-.popover{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);
-  border-radius:10px;box-shadow:var(--shadow-1);padding:12px;min-width:290px;}
+.popover{
+  position:absolute;z-index:60;background:#fff;border:1px solid var(--line);
+  border-radius:10px;box-shadow:var(--shadow-1);padding:12px;min-width:320px;
+}
 .popover.hide{display:none;}
 /* make date inputs look like the rest */
-.popover input[type="date"]{padding:8px 10px;border:1px solid var(--line);
-  border-radius:10px;background:#fff;color:var(--text);}
-
-
+.popover input[type="date"]{
+  padding:8px 10px;border:1px solid var(--line);
+  border-radius:10px;background:#fff;color:var(--text);
+}
