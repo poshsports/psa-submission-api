@@ -17,18 +17,16 @@ function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
 function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
 function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
-/* ---------- lightweight UI helpers (no new CSS needed) ---------- */
+/* ---------- lightweight UI helpers ---------- */
 
-// Small anchored menu beside a button/span
+// Small anchored menu beside an element
 function openViewActionsMenu(anchorEl, viewName){
-  // Backdrop to capture outside clicks
   const back = document.createElement('div');
   back.style.position = 'fixed';
   back.style.inset = '0';
   back.style.zIndex = '70';
   back.style.background = 'transparent';
 
-  // Floating menu
   const menu = document.createElement('div');
   menu.style.position = 'absolute';
   menu.style.minWidth = '200px';
@@ -53,30 +51,24 @@ function openViewActionsMenu(anchorEl, viewName){
     return btn;
   };
 
-  // Position next to anchor, aligned under it
   const r = anchorEl.getBoundingClientRect();
   const top = window.scrollY + r.bottom + 6;
   const left = Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - 220));
   menu.style.top = `${top}px`;
   menu.style.left = `${left}px`;
 
-  // Build items
   menu.append(
     item('Rename view', () => doRenameView(viewName)),
     item('Duplicate view', () => doDuplicateView(viewName)),
     item('Delete view', () => doDeleteView(viewName), true)
   );
 
-  function cleanup(){
-    back.remove();
-    menu.remove();
-  }
+  function cleanup(){ back.remove(); menu.remove(); }
   back.onclick = cleanup;
-
   document.body.append(back, menu);
 }
 
-// Modal: two-button confirm for Overwrite/Save New (used by Save View)
+// Custom Overwrite / Save New dialog
 function confirmOverwriteOrSaveAs(viewName){
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -109,7 +101,7 @@ function confirmOverwriteOrSaveAs(viewName){
   });
 }
 
-// Modal: prompt for a view name. Returns string | null
+// Prompt for a view name (rename/duplicate/save-as)
 function promptViewName({ title, submitLabel, initial }){
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -150,7 +142,7 @@ function promptViewName({ title, submitLabel, initial }){
   });
 }
 
-// Modal: confirm delete (returns true/false)
+// Confirm delete
 function confirmDeleteView(name){
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -188,6 +180,53 @@ function captureState(){
   const { order, hidden } = currentHeaderState();
   const { sortKey, sortDir } = tbl.getSort();
   return { order, hidden, sortKey, sortDir };
+}
+
+/* Persist a snapshot according to our Saved-View rules */
+async function saveSnapshotToViews(snapshot){
+  const allNow = readViews();
+
+  if (currentView === 'Default') {
+    const name = prompt('Save current view as:');
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
+
+    if (allNow[trimmed]) {
+      const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
+      if (!ok) return;
+    }
+    allNow[trimmed] = snapshot;
+    writeViews(allNow);
+    currentView = trimmed; setCur(trimmed);
+    renderViewsBar();
+    return;
+  }
+
+  const choice = await confirmOverwriteOrSaveAs(currentView);
+  if (choice === 'overwrite') {
+    allNow[currentView] = snapshot;
+    writeViews(allNow);
+    renderViewsBar();
+    return;
+  }
+  if (choice !== 'saveas') return;
+
+  const name = prompt('Save current view as:');
+  if (!name) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
+
+  if (allNow[trimmed]) {
+    const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
+    if (!ok) return;
+  }
+  allNow[trimmed] = snapshot;
+  writeViews(allNow);
+  currentView = trimmed; setCur(trimmed);
+  renderViewsBar();
 }
 
 /* ---------- public API ---------- */
@@ -228,6 +267,141 @@ export function applyView(name){
   tbl.applyFilters();
 }
 
+/* ---------- EDIT COLUMNS MODE (Shopify-style) ---------- */
+let editMode = false;
+let baselineOrder = null;
+let baselineHidden = null;
+let editOrder = null;
+let editHidden = null;
+
+function renderEditHead(){
+  // Render header with current edit state, then wire drag + eye toggles
+  tbl.renderHead(editOrder.slice(), Array.from(editHidden));
+  tbl.applyFilters();
+
+  const thead = document.querySelector('#subsHead');
+  const ths = Array.from(thead?.querySelectorAll('th[data-key]') || []);
+
+  // Tag thead so CSS can style differently
+  thead?.classList.add('edit-cols');
+
+  const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
+
+  ths.forEach(th => {
+    const key = th.dataset.key;
+    const meta = byKey[key];
+    if (!meta) return;
+
+    // Disable sorting while editing
+    th.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); }, true);
+    th.style.userSelect = 'none';
+    th.style.cursor = 'default';
+
+    // Build tools container
+    let tools = th.querySelector('.th-tools');
+    if (!tools) {
+      tools = document.createElement('span');
+      tools.className = 'th-tools';
+      th.appendChild(tools);
+    }
+    tools.innerHTML = '';
+
+    // Drag handle
+    const drag = document.createElement('span');
+    drag.className = 'drag-handle';
+    drag.title = 'Drag to reorder';
+    drag.textContent = '⠿';
+    drag.draggable = true;
+
+    drag.addEventListener('dragstart', (e)=>{
+      e.dataTransfer.setData('text/plain', key);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    th.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+
+    th.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      const srcKey = e.dataTransfer.getData('text/plain');
+      const dstKey = key;
+      if (!srcKey || !dstKey || srcKey === dstKey) return;
+      const from = editOrder.indexOf(srcKey);
+      const to = editOrder.indexOf(dstKey);
+      if (from === -1 || to === -1) return;
+      editOrder.splice(to, 0, editOrder.splice(from,1)[0]);
+      renderEditHead(); // re-render and rewire
+    });
+
+    // Eye toggle
+    const eye = document.createElement('button');
+    eye.className = 'th-eye btn';
+    const isHidden = editHidden.has(key);
+    eye.title = isHidden ? 'Show column' : 'Hide column';
+    eye.textContent = isHidden ? '🙈' : '👁';
+    eye.setAttribute('aria-pressed', String(!isHidden));
+    eye.onclick = (e)=>{
+      e.stopPropagation();
+      if (editHidden.has(key)) editHidden.delete(key);
+      else editHidden.add(key);
+      renderEditHead();
+    };
+
+    tools.append(drag, eye);
+  });
+}
+
+export function openColumnsPanel(){
+  // Enter edit mode
+  const { order, hidden } = currentHeaderState();
+  baselineOrder = order.slice();
+  baselineHidden = new Set(hidden);
+
+  editOrder = order.slice();
+  editHidden = new Set(hidden);
+
+  editMode = true;
+  renderEditHead();
+  renderViewsBar();
+}
+
+export function closeColumnsPanel(){
+  // Cancel edit: restore baseline
+  if (!editMode) return;
+  tbl.renderHead(baselineOrder.slice(), Array.from(baselineHidden));
+  tbl.applyFilters();
+
+  const thead = document.querySelector('#subsHead');
+  thead?.classList.remove('edit-cols');
+
+  editMode = false;
+  baselineOrder = baselineHidden = editOrder = editHidden = null;
+  renderViewsBar();
+}
+
+export async function saveColumnsPanel(){
+  // Apply edit to working UI, then run saved-view persistence flow
+  if (!editMode) return;
+  const snapshot = {
+    order: editOrder.slice(),
+    hidden: Array.from(editHidden),
+    ...tbl.getSort()
+  };
+
+  // Apply to table immediately
+  tbl.renderHead(snapshot.order, snapshot.hidden);
+  tbl.applyFilters();
+
+  const thead = document.querySelector('#subsHead');
+  thead?.classList.remove('edit-cols');
+
+  editMode = false;
+  baselineOrder = baselineHidden = editOrder = editHidden = null;
+  renderViewsBar();
+
+  // Persist according to rules (Default not overwritten etc.)
+  await saveSnapshotToViews(snapshot);
+}
+
 /* ---------- top views bar ---------- */
 export function renderViewsBar(){
   const bar = $('views-bar');
@@ -247,13 +421,11 @@ export function renderViewsBar(){
     const pill = document.createElement('button');
     pill.className = 'view-pill' + (name === currentView ? ' active' : '');
 
-    // Use separate spans so we can attach the caret inside the pill
     const label = document.createElement('span');
     label.textContent = name;
     pill.appendChild(label);
 
     pill.onclick = () => {
-      // Switch view on pill click
       if (name !== currentView) {
         currentView = name; setCur(name);
         applyView(name);
@@ -261,7 +433,6 @@ export function renderViewsBar(){
       }
     };
 
-    // Only show caret inside the active, non-Default pill
     if (name === currentView && name !== 'Default') {
       const caret = document.createElement('span');
       caret.textContent = '▾';
@@ -272,87 +443,56 @@ export function renderViewsBar(){
       caret.style.opacity = '.85';
       caret.style.cursor = 'pointer';
       caret.style.userSelect = 'none';
-
       const openMenu = (e) => { e.stopPropagation(); openViewActionsMenu(caret, name); };
       caret.onclick = openMenu;
       caret.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMenu(e); }
       });
-
       pill.appendChild(caret);
     }
 
     left.appendChild(pill);
   });
 
-  // Right side: Save view + Columns
+  // Right side: Save/Cancel in edit mode OR Columns + Save view
   const right = document.createElement('div');
   right.style.display = 'flex';
   right.style.alignItems = 'center';
   right.style.gap = '8px';
   right.style.marginLeft = 'auto';
 
-  const plus = document.createElement('button');
-  plus.className = 'view-plus';
-  plus.textContent = '＋ Save view';
-  plus.onclick = async () => {
-    const allNow = readViews();
-    const snapshot = captureState();
+  if (editMode) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = 'columns-cancel';
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = closeColumnsPanel;
 
-    if (currentView === 'Default') {
-      // Default can never be overwritten; always Save As
-      const name = prompt('Save current view as:');
-      if (!name) return;
-      const trimmed = name.trim();
-      if (!trimmed) return;
-      if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'columns-save';
+    saveBtn.className = 'btn primary';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = saveColumnsPanel;
 
-      if (allNow[trimmed]) {
-        const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
-        if (!ok) return;
-      }
-      allNow[trimmed] = snapshot;
-      writeViews(allNow);
-      currentView = trimmed; setCur(trimmed);
-      renderViewsBar();
-      return;
-    }
+    right.append(cancelBtn, saveBtn);
+  } else {
+    const plus = document.createElement('button');
+    plus.className = 'view-plus';
+    plus.textContent = '＋ Save view';
+    plus.onclick = async () => {
+      const snapshot = captureState();
+      await saveSnapshotToViews(snapshot);
+    };
 
-    // Saved view: Overwrite or Save New
-    const choice = await confirmOverwriteOrSaveAs(currentView);
-    if (choice === 'overwrite') {
-      allNow[currentView] = snapshot;
-      writeViews(allNow);
-      renderViewsBar();
-      return;
-    }
-    if (choice !== 'saveas') return; // dismissed
+    const colBtn = document.createElement('button');
+    colBtn.id = 'btnColumns';
+    colBtn.className = 'btn';
+    colBtn.textContent = 'Columns';
+    colBtn.title = 'Edit columns';
+    colBtn.onclick = openColumnsPanel;
 
-    // Save As
-    const name = prompt('Save current view as:');
-    if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    if (trimmed === 'Default') { alert('“Default” is reserved.'); return; }
-
-    if (allNow[trimmed]) {
-      const ok = confirm(`A view named “${trimmed}” already exists. Overwrite it?`);
-      if (!ok) return;
-    }
-    allNow[trimmed] = snapshot;
-    writeViews(allNow);
-    currentView = trimmed; setCur(trimmed);
-    renderViewsBar();
-  };
-
-  const colBtn = document.createElement('button');
-  colBtn.id = 'btnColumns';
-  colBtn.className = 'btn';
-  colBtn.textContent = 'Columns';
-  colBtn.onclick = openColumnsPanel;
-
-  right.appendChild(plus);
-  right.appendChild(colBtn);
+    right.append(plus, colBtn);
+  }
 
   bar.appendChild(left);
   bar.appendChild(right);
@@ -360,22 +500,19 @@ export function renderViewsBar(){
 
 /* ---------- actions: rename / duplicate / delete ---------- */
 async function doRenameView(oldName){
-  if (oldName === 'Default') return; // safety
+  if (oldName === 'Default') return;
   const all = readViews();
-  const initial = oldName;
-  const val = await promptViewName({ title: 'Rename view', submitLabel: 'Save', initial });
+  const val = await promptViewName({ title: 'Rename view', submitLabel: 'Save', initial: oldName });
   if (val == null) return;
   const next = val.trim();
   if (!next || next === oldName) return;
   if (next === 'Default') { alert('“Default” is reserved.'); return; }
 
-  // If target exists, confirm overwrite
   if (all[next] && next !== oldName){
     const ok = confirm(`A view named “${next}” already exists. Overwrite it?`);
     if (!ok) return;
   }
 
-  // Move/overwrite
   all[next] = all[oldName];
   delete all[oldName];
   writeViews(all);
@@ -393,7 +530,7 @@ async function doDuplicateView(name){
   if (!next) return;
   if (next === 'Default') { alert('“Default” is reserved.'); return; }
 
-  const snapshot = captureState(); // duplicate the current working state
+  const snapshot = captureState();
   if (all[next]) {
     const ok = confirm(`A view named “${next}” already exists. Overwrite it?`);
     if (!ok) return;
@@ -406,7 +543,7 @@ async function doDuplicateView(name){
 }
 
 async function doDeleteView(name){
-  if (name === 'Default') return; // safety
+  if (name === 'Default') return;
   const all = readViews();
   const yes = await confirmDeleteView(name);
   if (!yes) return;
@@ -414,13 +551,12 @@ async function doDeleteView(name){
   delete all[name];
   writeViews(all);
 
-  // Fallback to Default
   currentView = 'Default'; setCur('Default');
   applyView('Default');
   renderViewsBar();
 }
 
-/* ---------- helpers used by columns panel ---------- */
+/* ---------- helpers used by edit mode & capture ---------- */
 export function currentHeaderState(){
   const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'));
   const order = ths.map(th => th.dataset.key);
@@ -428,55 +564,7 @@ export function currentHeaderState(){
   return { order, hidden };
 }
 
-/* ===== Columns panel (checklist only) ===== */
-let pendingHidden = null;
-
-export function openColumnsPanel(){
-  const { order, hidden } = currentHeaderState();
-  pendingHidden = new Set(hidden);
-
-  const list = $('columns-list');
-  if (!list) return;
-  list.innerHTML = '';
-
-  const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
-  order.forEach(key => {
-    const c = byKey[key];
-    if (!c) return;
-
-    const row = document.createElement('div');
-    row.className = 'columns-item';
-    row.innerHTML = `
-      <label style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" ${pendingHidden.has(key) ? '' : 'checked'} />
-        <span>${c.label}</span>
-      </label>
-    `;
-
-    // visibility toggle
-    row.querySelector('input').onchange = (ev)=>{
-      if (ev.target.checked) pendingHidden.delete(key);
-      else pendingHidden.add(key);
-    };
-
-    list.appendChild(row);
-  });
-
-  $('columns-backdrop').style.display='flex';
-}
-
-export function closeColumnsPanel(){
-  $('columns-backdrop').style.display='none';
-  pendingHidden = null;
-}
-
-export function saveColumnsPanel(){
-  // keep current header order; no reordering in this popup
-  const { order } = currentHeaderState();
-  const hidden = pendingHidden ? Array.from(pendingHidden) : [];
-
-  // IMPORTANT: Do NOT persist here. Only update the working UI.
-  tbl.renderHead(order, hidden);
-  tbl.applyFilters();
-  closeColumnsPanel();
-}
+/* ===== (legacy names kept for wiring) ===== */
+// openColumnsPanel  -> enter edit mode
+// closeColumnsPanel -> cancel edit
+// saveColumnsPanel  -> save edit (persist via Saved-View rules)
