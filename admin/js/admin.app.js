@@ -3,27 +3,40 @@ import { fetchSubmissions, logout } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
 
-window.__tbl = tbl; // <-- lets us inspect table state in DevTools
-
+window.__tbl = tbl; // DevTools
 
 function wireUI(){
-  // sign out buttons
-  $('#top-signout')?.addEventListener('click', doLogout);
+  // sign out (sidebar only)
   $('#sidebar-signout')?.addEventListener('click', doLogout);
 
-  // refresh + search
+  // refresh (re-fetch)
   $('#btnRefresh')?.addEventListener('click', loadReal);
-  $('#q')?.addEventListener('input', debounce(loadReal, 250));
 
-    // NEW: filter selects
-  $('#fStatus')?.addEventListener('change', loadReal);
-  $('#fEval')?.addEventListener('change', loadReal);
+  // search: client-side filter for instant feedback
+  $('#q')?.addEventListener('input', debounce(() => {
+    tbl.pageIndex = 0;
+    tbl.applyFilters();
+    updateCountPill();
+  }, 200));
+
+  // filters: client-side
+  $('#fStatus')?.addEventListener('change', () => {
+    tbl.pageIndex = 0;
+    tbl.applyFilters();
+    updateCountPill();
+  });
+  $('#fEval')?.addEventListener('change', () => {
+    tbl.pageIndex = 0;
+    tbl.applyFilters();
+    updateCountPill();
+  });
 
   // pagination
   $('#prev-page')?.addEventListener('click', () => {
     if (tbl.pageIndex > 0){
       tbl.pageIndex--;
       tbl.renderTable(currentVisibleKeys());
+      updateCountPill();
     }
   });
   $('#next-page')?.addEventListener('click', () => {
@@ -31,11 +44,11 @@ function wireUI(){
     if (tbl.pageIndex < totalPages - 1){
       tbl.pageIndex++;
       tbl.renderTable(currentVisibleKeys());
+      updateCountPill();
     }
   });
 
-  // columns panel
-  $('#btnColumns')?.addEventListener('click', views.openColumnsPanel);
+  // columns panel (button now lives in the views bar; we also set onclick there)
   $('#close-columns')?.addEventListener('click', views.closeColumnsPanel);
   $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
@@ -68,7 +81,9 @@ async function doLogin(){
     const j = await res.json().catch(() => ({}));
 
     if (!res.ok || j.ok !== true) {
-      if (errEl) errEl.textContent = (j.error === 'invalid_pass' ? 'Invalid passcode' : (j.error || 'Login failed'));
+      if (errEl) errEl.textContent = (j.error === 'invalid_pass'
+        ? 'Invalid passcode'
+        : (j.error || 'Login failed'));
       return;
     }
 
@@ -78,8 +93,6 @@ async function doLogin(){
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
 
-
-    // Wire the rest of the app now that we’re “authed”
     wireUI();
     views.initViews();
     loadReal();
@@ -88,22 +101,19 @@ async function doLogin(){
   }
 }
 
-// extra-defensive: wire both addEventListener and onclick, plus an Enter key handler
+// console fallback so you can trigger manually if needed
+// in DevTools:  __psaLogin()
 function bindLoginHandlers(){
   const btn = $('#btnLogin');
   const passEl = $('#pass');
-
-  // console fallback so you can trigger manually if needed
-  // in DevTools:  __psaLogin()
   window.__psaLogin = doLogin;
+  if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
+  if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+}
 
-  if (btn) {
-    btn.addEventListener('click', doLogin);
-    btn.onclick = doLogin; // belt + suspenders in case something removes listeners
-  }
-  if (passEl) {
-    passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-  }
+function updateCountPill(){
+  const pill = $('#countPill');
+  if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
 async function loadReal(){
@@ -113,55 +123,39 @@ async function loadReal(){
   try {
     const q = ($('#q')?.value || '').trim();
 
-    // 1) Fetch raw items
+    // Fetch raw items (server may apply q too, that’s fine)
     const items = await fetchSubmissions(q);
-    console.debug('[admin] fetch ok, items:', items.length, items[0]);
-
-    // 2) Normalize + assign to table state
     tbl.setRows(items.map(tbl.normalizeRow));
-    console.debug('[admin] normalized rows:', tbl.allRows.length, tbl.allRows[0]);
 
-    // 3) Ensure header + render
-    views.applyView(views.currentView);   // sets header & calls tbl.applyFilters()
-    tbl.applyFilters();                   // explicit second call is fine
+    // Ensure header + render
+    views.applyView(views.currentView); // sets header & calls tbl.applyFilters()
+    tbl.applyFilters();                 // explicit second call is fine
+    updateCountPill();
 
-    // 4) Update count
-    const countPill = $('#countPill');
-    if (countPill) countPill.textContent = String(tbl.viewRows.length);
-
-    // 5) Sanity: how many table rows did we paint?
+    // sanity log
     const trCount = document.querySelectorAll('#subsTbody tr').length;
-    console.debug('[admin] tbody <tr> count:', trCount);
-
+    console.debug('[admin] rows painted:', trCount);
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
   }
 }
 
-
 document.addEventListener('DOMContentLoaded', () => {
-  // Detect auth strictly from the cookie
   const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
 
   const loginEl = document.getElementById('login');
   const shellEl = document.getElementById('shell');
 
-  // Auth note labels (guarded)
   const authNote = document.getElementById('auth-note');
   if (authNote) authNote.textContent = authed ? 'passcode session' : 'not signed in';
   const authNoteTop = document.getElementById('auth-note-top');
   if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
 
   // Always wire login controls
-  const btn = document.getElementById('btnLogin');
-  const passEl = document.getElementById('pass');
-  window.__psaLogin = doLogin;  // console fallback
-  if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
-  if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  bindLoginHandlers();
 
   if (authed) {
-    // Show shell and load content
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
 
@@ -169,7 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
     views.initViews();
     loadReal();
   } else {
-    // Show login only
     if (loginEl) loginEl.classList.remove('hide');
     if (shellEl) shellEl.classList.add('hide');
   }
