@@ -229,3 +229,20 @@ a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outl
 body.col-dragging { cursor: grabbing; }
 .drag-handle { cursor: grab; }
 
+/* --- Date popover --- */
+.popover{position:absolute;z-index:60;background:#fff;border:1px solid var(--line);
+  border-radius:10px;box-shadow:var(--shadow-1);padding:12px;min-width:290px;}
+.popover.hide{display:none;}
+/* make date inputs look like the rest */
+.popover input[type="date"]{padding:8px 10px;border:1px solid var(--line);
+  border-radius:10px;background:#fff;color:var(--text);}
+
+/* subtle animation while columns reflow during drag (already added earlier) */
+.table.edit-cols th,.table.edit-cols td{transition:background-color .12s ease,opacity .12s ease;}
+body.col-dragging{cursor:grabbing;}
+.drag-handle{cursor:grab;}
+
+/* (optional) darker inter-column gutters while editing */
+.table.edit-cols th,.table.edit-cols td{border-right:8px solid #e5e7eb;}
+.table.edit-cols th:last-child,.table.edit-cols td:last-child{border-right:0;}
+
