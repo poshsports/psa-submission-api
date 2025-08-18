@@ -12,6 +12,10 @@ export function setSort(key, dir) {
   if (key) sortKey = key;
   if (dir) sortDir = dir;
 }
+export function setRows(rows) {
+  allRows = Array.isArray(rows) ? rows : [];
+  pageIndex = 0; // reset paging when data set changes
+}
 export function getSort() {
   return { sortKey, sortDir };
 }
