@@ -169,18 +169,19 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
         selStart = d2; selEnd = null; hoverDay = d2;
         paintCalendars();
       } else {
-        // finish range -> set hidden inputs and auto-apply
+       // finish range -> set hidden inputs, preview; wait for user to click Apply
         let a = selStart, b = d2;
         if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
         selStart = a; selEnd = b; hoverDay = null;
-
-        // push to hidden inputs that table.js reads
+        
         const from = $('dateFrom'), to = $('dateTo');
         if (from) from.value = fmtYMD(a);
         if (to)   to.value   = fmtYMD(b);
+        
+        updateDateButtonLabel();  // update button text
+        paintCalendars();         // keep popover open for review
+        // (do not call closeDatePopover or runFilter here)
 
-        // reflect label & apply immediately
-        applyDateAndFilter();            // SECOND CLICK APPLIES
       }
     });
 
