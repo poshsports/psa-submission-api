@@ -112,6 +112,15 @@ export function applyFilters(){
 // toolbar filters (null = not applied)
 const statusSel = $('fStatus');
 const evalSel   = $('fEval');
+  // NEW: extra filters
+const fService = document.getElementById('fService')?.value || '';
+
+// NEW: date range (inclusive)
+const fromStr = document.getElementById('dateFrom')?.value || '';
+const toStr   = document.getElementById('dateTo')?.value   || '';
+const fromMs  = fromStr ? Date.parse(fromStr) : null;
+const toMs    = toStr   ? (Date.parse(toStr) + 86399999) : null;  // end of day
+
 
   const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
     ? statusSel.value.toLowerCase()
@@ -145,6 +154,17 @@ const evalSel   = $('fEval');
       if (evalFilter === 'no'  &&  r.evaluation_bool) return false;
     }
 
+    // service filter
+if (fService && (row.grading_service || row.service || row.grading) !== fService) return false;
+
+// date filter
+if (fromMs != null || toMs != null) {
+  // robust timestamp fallback
+  const ts = (row.created_at_ms ?? row.created_at_ts ??
+              (row.created_at ? Date.parse(row.created_at) : 0));
+  if (fromMs != null && ts < fromMs) return false;
+  if (toMs   != null && ts > toMs)   return false;
+}
     return true;
   });
 
