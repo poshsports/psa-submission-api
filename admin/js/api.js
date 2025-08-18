@@ -27,6 +27,19 @@ export async function fetchSubmissions(q = '') {
   return items;
 }
 
+// Fetch a single submission with full details
+export async function fetchSubmission(id) {
+  if (!id) throw new Error('Missing submission id');
+  const res = await fetch(`/api/admin/submissions/${encodeURIComponent(id)}`, {
+    cache: 'no-store',
+    credentials: 'same-origin'
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load submission');
+  // backend may return { ok:true, item:{...} } or { ok:true, ...payload }
+  return j.item || j;
+}
+
 // POST logout; ignore result
 export async function logout() {
   try {
