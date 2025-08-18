@@ -62,13 +62,31 @@
           <!-- rendered by JS -->
         </div>
 
-        <!-- Toolbar -->
-        <div class="toolbar">
-          <input id="q" type="search" placeholder="Search email or submission…" />
-          <span class="count-pill"><span id="countPill">0</span></span>
-          <div class="spacer"></div>
-          <button id="btnRefresh" class="btn">Refresh</button>
-        </div>
+       <!-- Toolbar -->
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Search email or submission…" />
+  <div class="filters">
+    <select id="fStatus" aria-label="Status">
+      <option value="all">Status: All</option>
+      <option value="submitted">submitted</option>
+      <option value="submitted_paid">submitted_paid</option>
+      <option value="pending_payment">pending_payment</option>
+      <option value="paid">paid</option>
+      <option value="fulfilled">fulfilled</option>
+    </select>
+
+    <select id="fEval" aria-label="Evaluation">
+      <option value="all">Evaluation: All</option>
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+  </div>
+
+  <span class="count-pill"><span id="countPill">0</span></span>
+  <div class="spacer"></div>
+  <button id="btnRefresh" class="btn">Refresh</button>
+</div>
+
 
         <!-- Error line -->
         <div id="subsErr" class="error hide"></div>
