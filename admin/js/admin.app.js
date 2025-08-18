@@ -94,6 +94,38 @@ const startOfMonth = d => new Date(d.getFullYear(), d.getMonth(), 1);
 const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth()+n, 1);
 const sameDate = (a,b) => a && b && a.getTime() === b.getTime();
 
+// Paint selection/hover classes without rebuilding the grids
+function paintRangeClasses(){
+  const cells = document.querySelectorAll('#date-popover .rc-cell');
+
+  // derive active preview range
+  let a = selStart ? mid(selStart) : null;
+  let b = selEnd ? mid(selEnd) : (selStart && hoverDay ? mid(hoverDay) : null);
+
+  let lo = null, hi = null;
+  if (a && b){ if (a > b) [a, b] = [b, a]; lo = a; hi = b; }
+
+  cells.forEach(cell => {
+    const d = parseYMD(cell.dataset.date);
+    cell.classList.remove('rc-in-range','rc-start','rc-end');
+
+    if (selStart && sameDate(d, selStart)) cell.classList.add('rc-start');
+    if (selEnd   && sameDate(d, selEnd))   cell.classList.add('rc-end');
+    if (lo && hi && d >= lo && d <= hi)    cell.classList.add('rc-in-range');
+  });
+
+  // footer preview label
+  const lab = $('rc-range-label');
+  if (lab){
+    if (a && b){
+      const min = a <= b ? a : b, max = a <= b ? b : a;
+      lab.textContent = `${min.toLocaleDateString()} – ${max.toLocaleDateString()}`;
+    } else {
+      lab.textContent = '';
+    }
+  }
+}
+
 function ensureDowRow(gridEl){
   const monthEl = gridEl.closest('.rc-month');
   if (!monthEl) return;
@@ -153,37 +185,35 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
       if (selEnd && sameDate(d, selEnd)) cell.classList.add('rc-end');
     }
 
-    // hover preview
-    cell.addEventListener('mouseenter', () => {
-      if (selStart && !selEnd){
-        hoverDay = mid(parseYMD(cell.dataset.date));
-        paintCalendars();
-      }
-    });
+// hover preview (no rebuild — just repaint classes)
+cell.addEventListener('mouseenter', () => {
+  if (selStart && !selEnd){
+    hoverDay = mid(parseYMD(cell.dataset.date));
+    paintRangeClasses();
+  }
+});
 
-    // click selection
-    cell.addEventListener('click', () => {
-      const d2 = mid(parseYMD(cell.dataset.date));
-      if (!selStart || (selStart && selEnd)){
-        // start new range
-        selStart = d2; selEnd = null; hoverDay = d2;
-        paintCalendars();
-      } else {
-       // finish range -> set hidden inputs, preview; wait for user to click Apply
-        let a = selStart, b = d2;
-        if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
-        selStart = a; selEnd = b; hoverDay = null;
-        
-        const from = $('dateFrom'), to = $('dateTo');
-        if (from) from.value = fmtYMD(a);
-        if (to)   to.value   = fmtYMD(b);
-        
-        updateDateButtonLabel();  // update button text
-        paintCalendars();         // keep popover open for review
-        // (do not call closeDatePopover or runFilter here)
+// click selection (second click sets end but does not auto-apply)
+cell.addEventListener('click', () => {
+  const d2 = mid(parseYMD(cell.dataset.date));
+  if (!selStart || (selStart && selEnd)){
+    // start new range
+    selStart = d2; selEnd = null; hoverDay = d2;
+    paintRangeClasses();
+  } else {
+    // finish range
+    let a = selStart, b = d2;
+    if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
+    selStart = a; selEnd = b; hoverDay = null;
 
-      }
-    });
+    const from = $('dateFrom'), to = $('dateTo');
+    if (from) from.value = fmtYMD(a);
+    if (to)   to.value   = fmtYMD(b);
+
+    updateDateButtonLabel();  // reflect on button
+    paintRangeClasses();      // keep popover open for review; user clicks Apply
+  }
+});
 
     gridEl.appendChild(cell);
   }
@@ -198,25 +228,22 @@ function paintCalendars(){
   const gridL  = $('rc-grid-left');
   const gridR  = $('rc-grid-right');
 
-  const leftMonth = startOfMonth(monthCursor || new Date());
+  const leftMonth  = startOfMonth(monthCursor || new Date());
   const rightMonth = addMonths(leftMonth, 1);
 
   buildMonth(titleL, gridL, leftMonth);
   buildMonth(titleR, gridR, rightMonth);
 
-  // range label preview in footer
-  const lab = $('rc-range-label');
-  if (lab){
-    if (selStart && (selEnd || hoverDay)){
-      const a = selStart;
-      const b = selEnd || hoverDay;
-      const min = (a <= b ? a : b);
-      const max = (a <= b ? b : a);
-      lab.textContent = `${min.toLocaleDateString()} – ${max.toLocaleDateString()}`;
-    } else {
-      lab.textContent = '';
-    }
-  }
+  // --- STEP 3: repaint classes + wire leave handlers ---
+  paintRangeClasses();
+
+  const gl = $('rc-grid-left'), gr = $('rc-grid-right');
+  if (gl) gl.onmouseleave = () => {
+    if (selStart && !selEnd){ hoverDay = null; paintRangeClasses(); }
+  };
+  if (gr) gr.onmouseleave = () => {
+    if (selStart && !selEnd){ hoverDay = null; paintRangeClasses(); }
+  };
 }
 
 // ===== popover open/close =====
