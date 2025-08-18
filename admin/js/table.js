@@ -94,9 +94,9 @@ export function applyFilters(){
   // free-text query
   const q = ($('#q')?.value || '').trim().toLowerCase();
 
-  // toolbar filters (null = not applied)
-  const statusSel = $('#fil-status');
-  const evalSel   = $('#fil-eval');
+  // toolbar filters (match your HTML IDs)
+  const statusSel = $('#fStatus');
+  const evalSel   = $('#fEval');
 
   const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
     ? statusSel.value.toLowerCase()
@@ -136,7 +136,7 @@ export function applyFilters(){
     return true;
   });
 
-  // sort (with paid fields handled correctly)
+  // sort
   const dir = sortDir === 'asc' ? 1 : -1;
   viewRows.sort((a, b) => {
     if (sortKey === 'evaluation') {
@@ -162,16 +162,12 @@ export function renderTable(visibleKeys){
   const body = $('subsTbody');
   const emptyEl = $('subsEmpty');
 
-  // If the table body isn't mounted yet, safely bail (e.g., mid-login transition)
   if (!body) {
-    // still try to keep pagination label sane if present
     const total = viewRows.length;
     const start = pageIndex * pageSize;
     const end   = Math.min(start + pageSize, total);
     const pageRange = $('page-range');
-    if (pageRange) {
-      pageRange.textContent = total ? `${start + 1}–${end} of ${total}` : '0–0 of 0';
-    }
+    if (pageRange) pageRange.textContent = total ? `${start + 1}–${end} of ${total}` : '0–0 of 0';
     return;
   }
 
@@ -201,12 +197,10 @@ export function renderTable(visibleKeys){
     </tr>
   `).join('');
 
-  // pagination UI (null-safe)
+  // pagination UI
   const total = viewRows.length;
   const pageRange = $('page-range');
-  if (pageRange) {
-    pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
-  }
+  if (pageRange) pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
   const prevBtn = $('prev-page');
   if (prevBtn) prevBtn.disabled = pageIndex === 0;
   const nextBtn = $('next-page');
