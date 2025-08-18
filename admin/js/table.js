@@ -94,9 +94,9 @@ export function applyFilters(){
   // free-text query
   const q = ($('#q')?.value || '').trim().toLowerCase();
 
-  // toolbar filters (null = not applied)
-  const statusSel = $('#fStatus');   // was '#fil-status'
-  const evalSel   = $('#fEval');     // was '#fil-eval'
+// toolbar filters (null = not applied)
+const statusSel = $('#fStatus'); // matches <select id="fStatus">
+const evalSel   = $('#fEval');   // matches <select id="fEval">
 
   const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
     ? statusSel.value.toLowerCase()
