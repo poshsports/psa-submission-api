@@ -46,10 +46,10 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
   --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
 
   /* layout alignment + compact pager */
-  --gutter-x:8px;                 /* tighter L/R padding for the bars */
+  --gutter-x:8px;
   --pager-pad-y:6px; --pager-pad-x:10px; --pager-gap:8px;
 
-  /* space reserved so the v-scrollbar never covers the last column */
+  /* reserve space so v-scrollbar never covers last column */
   --scroll-gutter-right:16px;
 }
 .muted{color:var(--muted);font-size:12px}
@@ -100,8 +100,8 @@ html,body{height:100%;overflow:hidden}
 
 /* Search smaller so Dates fits; Date button stays single-line */
 .toolbar input[type="search"]{
-  min-width:240px;              /* was 320px */
-  flex: 0 1 360px;              /* allow shrinking on narrow layouts */
+  min-width:240px;
+  flex: 0 1 360px;
   padding:8px 10px;
   border:1px solid var(--line);
   border-radius:10px;
@@ -111,15 +111,9 @@ html,body{height:100%;overflow:hidden}
 .toolbar input[type="search"]:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(38,128,235,.15)}
 
 #btnDate{
-  height:36px;                  /* match <select> height */
-  min-width:180px;              /* prevent wrap */
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  padding:6px 10px;
-  border:1px solid var(--line);
-  border-radius:10px;
-  background:#fff;
+  height:36px; min-width:180px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:6px 10px; border:1px solid var(--line); border-radius:10px; background:#fff;
 }
 
 .toolbar .spacer{flex:1}
@@ -143,54 +137,52 @@ html,body{height:100%;overflow:hidden}
   scrollbar-gutter:stable both-edges;
 }
 
-/* Admin table styling */
+/* ===== Admin table styling ===== */
 .table{
-  border-collapse:separate;
-  border-spacing:0;
-  min-width:1200px;
-  width:100%;
-  background:#fff;
+  border-collapse:separate; border-spacing:0;
+  min-width:1200px; width:100%; background:#fff;
 }
 
-.table th,
-.table td{
+/* Single source of truth for centering */
+.table th, .table td {
   border-bottom:1px solid var(--line);
   white-space:nowrap;
   vertical-align:middle;
-  text-align:center;                 /* center everything by default */
+  text-align:center;            /* default center */
 }
 
-.table th{
-  position:sticky;
-  top:0;
-  background:var(--surface-2);
-  z-index:1;
-  color:var(--muted);
+/* Let per-column overrides still work if you ever opt-in */
+.table th.left,  .table td.left  { text-align:left  !important; }
+.table th.right, .table td.right { text-align:right !important; }
+
+/* Make inner content honor centering */
+.table td > a,
+.table td > span,
+.table td > time,
+.table td > code,
+.table td > .pill,
+.table td > .tdc {            /* wrapper inserted by table.js */
+  display:inline-block;
+  vertical-align:middle;
 }
 
+/* Sticky header + misc */
+.table thead th{ position:sticky; top:0; background:var(--surface-2); z-index:1; color:var(--muted); }
 .table th .caret{ margin-left:6px; opacity:.8; color:var(--muted); }
 .table tr:hover td{ background:var(--row-hover); }
 
-/* safe per-column overrides when you need them */
-.table td.right, .table th.right { text-align:right !important; }
-.table td.left,  .table th.left  { text-align:left  !important; }
-
 .table code{
-  background:#eef2ff;
-  border:1px solid var(--line);
-  border-radius:999px;
-  padding:3px 8px;
-  font-weight:600;
-  color:#1f2937;
+  background:#eef2ff; border:1px solid var(--line);
+  border-radius:999px; padding:3px 8px; font-weight:600; color:#1f2937;
 }
 
-/* EXTRA room on the last column so it never hides under the v-scrollbar */
+/* Extra room on the last column so it never hides under the v-scrollbar */
 .table thead th:last-child,
 .table tbody td:last-child{
   padding-right: calc(12px + var(--scroll-gutter-right));
 }
 
-/* Empty */
+/* Empty state */
 .empty{padding:18px;color:var(--muted)}
 
 /* Compact, left-aligned pagination */
@@ -266,45 +258,16 @@ body.col-dragging { cursor: grabbing; }
 .rc-side{ display:flex; flex-direction:column; gap:8px; width:120px; padding-right:10px; border-right:1px solid var(--line); }
 
 /* Two months side-by-side (centered titles + vertical separator) */
-.rc-months{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:12px;
-}
-
-.rc-month{
-  width:260px;
-  position:relative;
-}
+.rc-months{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.rc-month{ width:260px; position:relative; }
 
 /* thin separator between the two month grids */
-.rc-month + .rc-month{
-  border-left:1px solid var(--line);
-  margin-left:12px;
-  padding-left:12px;
-}
+.rc-month + .rc-month{ border-left:1px solid var(--line); margin-left:12px; padding-left:12px; }
 
 /* centered month titles, with nav arrows pinned to the edges */
-.rc-head{
-  position:relative;
-  height:32px;
-  margin-bottom:6px;
-}
-.rc-title{
-  position:absolute;
-  left:0; right:0;
-  text-align:center;
-  line-height:32px;
-  font-weight:600;
-  color:var(--text);
-}
-#rc-prev,#rc-next{
-  position:absolute;
-  top:0;
-  height:32px;
-  padding:4px 8px;
-  border-radius:8px;
-}
+.rc-head{ position:relative; height:32px; margin-bottom:6px; }
+.rc-title{ position:absolute; left:0; right:0; text-align:center; line-height:32px; font-weight:600; color:var(--text); }
+#rc-prev,#rc-next{ position:absolute; top:0; height:32px; padding:4px 8px; border-radius:8px; }
 #rc-prev{ left:0; }
 #rc-next{ right:0; }
 #rc-prev:hover,#rc-next:hover{ background:var(--row-hover); }
@@ -337,71 +300,4 @@ body.col-dragging { cursor: grabbing; }
 
 /* Footer */
 .rc-foot{ display:flex; align-items:center; gap:8px; padding-top:10px; margin-top:12px; border-top:1px solid var(--line); }
-
 .rc-foot .spacer { flex: 1; }
-
-/* ===== Table alignment: hard-center by default ===== */
-#subsTable thead th,
-#subsTable tbody td {
-  text-align: center !important;
-  vertical-align: middle;
-}
-
-/* Utilities (explicit overrides) */
-#subsTable thead th.left,
-#subsTable tbody td.left { text-align: left !important; }
-
-#subsTable thead th.right,
-#subsTable tbody td.right { text-align: right !important; }
-
-/* Ensure common cell children don't fight centering */
-#subsTable tbody td > a,
-#subsTable tbody td > span,
-#subsTable tbody td > time,
-#subsTable tbody td > .pill {
-  display: inline-block;        /* honors parent text-align */
-  vertical-align: middle;
-}
-
-/* If any cell was turned into a flex box elsewhere, reset it */
-#subsTable tbody td { display: table-cell; }
-
-/* Hard override: center ALL cells in #subsTable even if .left/.right slipped in */
-#subsTable th,
-#subsTable td { text-align: center !important; }
-
-/* Neutralize any legacy alignment classes for this table only */
-#subsTable th.left,
-#subsTable td.left,
-#subsTable th.right,
-#subsTable td.right { text-align: center !important; }
-
-/* If any cells are flex containers, center their content too */
-#subsTable td { display: table-cell !important; }
-#subsTable td > * { margin-left: auto; margin-right: auto; }
-
-/* FINAL OVERRIDE for legacy admin table: center absolutely everything */
-.table th,
-.table td { 
-  text-align: center !important;
-  vertical-align: middle !important;
-}
-
-/* neutralize any stray alignment classes */
-.table th.left,
-.table td.left,
-.table th.right,
-.table td.right { 
-  text-align: center !important; 
-}
-
-/* make inner elements honor centering */
-.table td > a,
-.table td > span,
-.table td > time,
-.table td > code,
-.table td > .pill {
-  display: inline-block;
-  vertical-align: middle;
-  margin-inline: auto; /* centers inline-block if something forced width */
-}
