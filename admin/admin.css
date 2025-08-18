@@ -379,3 +379,29 @@ body.col-dragging { cursor: grabbing; }
 /* If any cells are flex containers, center their content too */
 #subsTable td { display: table-cell !important; }
 #subsTable td > * { margin-left: auto; margin-right: auto; }
+
+/* FINAL OVERRIDE for legacy admin table: center absolutely everything */
+.table th,
+.table td { 
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+/* neutralize any stray alignment classes */
+.table th.left,
+.table td.left,
+.table th.right,
+.table td.right { 
+  text-align: center !important; 
+}
+
+/* make inner elements honor centering */
+.table td > a,
+.table td > span,
+.table td > time,
+.table td > code,
+.table td > .pill {
+  display: inline-block;
+  vertical-align: middle;
+  margin-inline: auto; /* centers inline-block if something forced width */
+}
