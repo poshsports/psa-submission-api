@@ -338,7 +338,6 @@ function wireUI(){
 
   // refresh (re-fetch)
   $('btnRefresh')?.addEventListener('click', loadReal);
-  $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
 
   // local filtering
