@@ -48,7 +48,7 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
   /* layout alignment + compact pager */
   --gutter-x:10px;              /* tighter L/R padding for bars */
   --pager-pad-y:6px; --pager-pad-x:10px; --pager-gap:8px;
-  --scroll-gutter-right:14px;   /* space for vertical scrollbar so last col isn't clipped */
+  --scroll-gutter-right:17px;   /* space for vertical scrollbar so last col isn't clipped */
 }
 .muted{color:var(--muted);font-size:12px}
 
