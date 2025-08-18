@@ -14,7 +14,7 @@ async function doLogout(e){
 window.__doLogout = doLogout;
 
 function ensureSignoutWired(){
-  const el = $('#sidebar-signout');
+  const el = $('sidebar-signout');
   if (!el) return;
   // Wire both styles to be extra safe
   el.addEventListener('click', doLogout);
@@ -34,7 +34,7 @@ function wireUI(){
   ensureSignoutWired();
 
   // refresh (re-fetch)
-  $('#btnRefresh')?.addEventListener('click', loadReal);
+  $('btnRefresh')?.addEventListener('click', loadReal);
 
   // ---- local filtering (instant; no network) ----
   const debouncedFilter = debounce(runFilter, 150);
@@ -44,12 +44,12 @@ function wireUI(){
 
 
 // pagination
-$('#prev-page')?.addEventListener('click', () => {
+$('prev-page')?.addEventListener('click', () => {
   tbl.prevPage();                              // <-- helper, not direct write
   tbl.renderTable(currentVisibleKeys());
   updateCountPill();
 });
-$('#next-page')?.addEventListener('click', () => {
+$('next-page')?.addEventListener('click', () => {
   tbl.nextPage();                              // <-- helper, not direct write
   tbl.renderTable(currentVisibleKeys());
   updateCountPill();
@@ -57,10 +57,10 @@ $('#next-page')?.addEventListener('click', () => {
 
 
   // columns panel (open + close/save)
-  $('#btnColumns')?.addEventListener('click', views.openColumnsPanel);
-  $('#close-columns')?.addEventListener('click', views.closeColumnsPanel);
-  $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
-  $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
+  $('btnColumns')?.addEventListener('click', views.openColumnsPanel);
+  $('close-columns')?.addEventListener('click', views.closeColumnsPanel);
+  $('columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
+  $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
 
 // Fallback delegation: if toolbar nodes are re-rendered, filtering still works
