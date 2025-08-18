@@ -237,14 +237,11 @@ export function renderTable(visibleKeys){
 
   // If the table body isn't mounted yet, safely bail (e.g., mid-login transition)
   if (!body) {
-    // still try to keep pagination label sane if present
     const total0 = viewRows.length;
     const start0 = pageIndex * pageSize;
     const end0   = Math.min(start0 + pageSize, total0);
     const pageRange0 = $('page-range');
-    if (pageRange0) {
-      pageRange0.textContent = total0 ? `${start0 + 1}–${end0} of ${total0}` : '0–0 of 0';
-    }
+    if (pageRange0) pageRange0.textContent = total0 ? `${start0 + 1}–${end0} of ${total0}` : '0–0 of 0';
     const pill0 = $('countPill');
     if (pill0) pill0.textContent = String(viewRows.length);
     return;
@@ -258,7 +255,6 @@ export function renderTable(visibleKeys){
   }
 
   const colMap = new Map(COLUMNS.map(c => [c.key, c]));
-  const alignClass = () =>
 
   // paging
   const start = pageIndex * pageSize;
@@ -279,9 +275,7 @@ export function renderTable(visibleKeys){
   // pagination UI (null-safe)
   const total = viewRows.length;
   const pageRange = $('page-range');
-  if (pageRange) {
-    pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
-  }
+  if (pageRange) pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
   const prevBtn = $('prev-page');
   if (prevBtn) prevBtn.disabled = pageIndex === 0;
   const nextBtn = $('next-page');
