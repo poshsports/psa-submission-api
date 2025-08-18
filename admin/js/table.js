@@ -98,21 +98,27 @@ export function renderHead(order, hidden){
   const head = $('subsHead');
 
   head.innerHTML = `
-    <tr>
-      ${order.map(key => {
-        const col = COLUMNS.find(c => c.key === key);
-        if (!col) return '';
-        const caretId = 'car-' + key;
-        const style = hiddenSet.has(key) ? ' style="display:none" data-hidden="1"' : '';
-        return `
-          <th class="${col.sortable ? 'sortable' : ''}" data-key="${key}"${style}>
-            <span class="th-label">${escapeHtml(col.label)}</span>
-            ${col.sortable ? `<span class="caret" id="${caretId}"></span>` : ''}
-          </th>
-        `;
-      }).join('')}
-    </tr>
-  `;
+head.innerHTML = `
+  <tr>
+    ${order.map(key => {
+      const col = COLUMNS.find(c => c.key === key);
+      if (!col) return '';
+      const caretId = 'car-' + key;
+
+      // inline center; also hide if needed
+      const attrs = hiddenSet.has(key)
+        ? ' style="text-align:center;vertical-align:middle;display:none" data-hidden="1"'
+        : ' style="text-align:center;vertical-align:middle"';
+
+      return `
+        <th class="${col.sortable ? 'sortable' : ''}" data-key="${key}"${attrs}>
+          <span class="th-label">${escapeHtml(col.label)}</span>
+          ${col.sortable ? `<span class="caret" id="${caretId}"></span>` : ''}
+        </th>
+      `;
+    }).join('')}
+  </tr>
+`;
 
   // Sorting click handlers
   head.querySelectorAll('th.sortable').forEach(th => {
@@ -252,7 +258,7 @@ export function renderTable(visibleKeys){
   }
 
   const colMap = new Map(COLUMNS.map(c => [c.key, c]));
-  const alignClass = (key) => (colMap.get(key)?.align === 'right' ? 'right' : '');
+  const alignClass = () =>
 
   // paging
   const start = pageIndex * pageSize;
@@ -265,7 +271,7 @@ export function renderTable(visibleKeys){
         const col = colMap.get(key);
         const val = r[key];
         const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
-        return `<td class="${alignClass(key)}">${out}</td>`;
+        return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
       }).join('')}
     </tr>
   `).join('');
