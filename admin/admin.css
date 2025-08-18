@@ -237,12 +237,4 @@ body.col-dragging { cursor: grabbing; }
 .popover input[type="date"]{padding:8px 10px;border:1px solid var(--line);
   border-radius:10px;background:#fff;color:var(--text);}
 
-/* subtle animation while columns reflow during drag (already added earlier) */
-.table.edit-cols th,.table.edit-cols td{transition:background-color .12s ease,opacity .12s ease;}
-body.col-dragging{cursor:grabbing;}
-.drag-handle{cursor:grab;}
-
-/* (optional) darker inter-column gutters while editing */
-.table.edit-cols th,.table.edit-cols td{border-right:8px solid #e5e7eb;}
-.table.edit-cols th:last-child,.table.edit-cols td:last-child{border-right:0;}
 
