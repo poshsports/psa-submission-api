@@ -309,12 +309,37 @@ function applyDateAndFilter(){
   runFilter();
 }
 
+function resetFilters(){
+  // close popover if it's open
+  closeDatePopover?.();
+
+  // text search
+  const q = $('q'); if (q) q.value = '';
+
+  // selects
+  const s = $('fStatus'); if (s) s.value = 'all';
+  const e = $('fEval');   if (e) e.value = 'all';
+  const g = $('fService');if (g) g.value = '';
+
+  // dates
+  const from = $('dateFrom'), to = $('dateTo');
+  if (from) from.value = '';
+  if (to)   to.value   = '';
+  // clear in-memory range state so the popover shows clean
+  selStart = selEnd = hoverDay = null;
+
+  updateDateButtonLabel();
+  runFilter();
+}
+
 // ===== UI wiring =====
 function wireUI(){
   ensureSignoutWired();
 
   // refresh (re-fetch)
   $('btnRefresh')?.addEventListener('click', loadReal);
+  $('btnRefresh')?.addEventListener('click', loadReal);
+  $('btnResetFilters')?.addEventListener('click', resetFilters);
 
   // local filtering
   const debouncedFilter = debounce(runFilter, 150);
