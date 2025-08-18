@@ -22,30 +22,40 @@ function ensureSignoutWired(){
 }
 
 function wireUI(){
-  // sign out (sidebar only)
-  ensureSignoutWired();
+  // sign out buttons
+  $('#top-signout')?.addEventListener('click', doLogout);
+  $('#sidebar-signout')?.addEventListener('click', doLogout);
 
-  // refresh (re-fetch)
+  // refresh (network fetch)
   $('#btnRefresh')?.addEventListener('click', loadReal);
 
-  // search: client-side filter for instant feedback
-  $('#q')?.addEventListener('input', debounce(() => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
-  }, 200));
+  // ---- local filtering (no network) ----
+  const runFilter = () => { tbl.pageIndex = 0; tbl.applyFilters(); };
+  $('#q')?.addEventListener('input', debounce(runFilter, 200));
+  $('#fStatus')?.addEventListener('change', runFilter);
+  $('#fEval')?.addEventListener('change', runFilter);
 
-  // filters: client-side
-  $('#fStatus')?.addEventListener('change', () => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
+  // pagination
+  $('#prev-page')?.addEventListener('click', () => {
+    if (tbl.pageIndex > 0){
+      tbl.pageIndex--;
+      tbl.renderTable(currentVisibleKeys());
+    }
   });
-  $('#fEval')?.addEventListener('change', () => {
-    tbl.pageIndex = 0;
-    tbl.applyFilters();
-    updateCountPill();
+  $('#next-page')?.addEventListener('click', () => {
+    const totalPages = Math.ceil(tbl.viewRows.length / tbl.pageSize) || 1;
+    if (tbl.pageIndex < totalPages - 1){
+      tbl.pageIndex++;
+      tbl.renderTable(currentVisibleKeys());
+    }
   });
+
+  // columns panel
+  $('#btnColumns')?.addEventListener('click', views.openColumnsPanel);
+  $('#close-columns')?.addEventListener('click', views.closeColumnsPanel);
+  $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
+  $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
+}
 
   // pagination
   $('#prev-page')?.addEventListener('click', () => {
@@ -137,25 +147,23 @@ async function loadReal(){
   if (err) { err.classList.add('hide'); err.textContent = ''; }
 
   try {
-    const q = ($('#q')?.value || '').trim();
+    // get ALL items; filtering is client-side
+    const items = await fetchSubmissions(); 
 
-    // Fetch raw items (server may apply q too, that’s fine)
-    const items = await fetchSubmissions(q);
     tbl.setRows(items.map(tbl.normalizeRow));
 
-    // Ensure header + render
-    views.applyView(views.currentView); // sets header & calls tbl.applyFilters()
-    tbl.applyFilters();                 // explicit second call is fine
-    updateCountPill();
+    // ensure header, then apply current UI filters
+    views.applyView(views.currentView);  // sets header and calls tbl.applyFilters()
+    tbl.applyFilters();                  // ok to call again
 
-    // sanity log
-    const trCount = document.querySelectorAll('#subsTbody tr').length;
-    console.debug('[admin] rows painted:', trCount);
+    const countPill = $('#countPill');
+    if (countPill) countPill.textContent = String(tbl.viewRows.length);
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
   }
 }
+
 
 document.addEventListener('DOMContentLoaded', () => {
   const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
