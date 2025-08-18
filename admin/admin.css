@@ -298,6 +298,25 @@ body.col-dragging { cursor: grabbing; }
 .rc-start{ border-top-left-radius:999px; border-bottom-left-radius:999px; }
 .rc-end{   border-top-right-radius:999px; border-bottom-right-radius:999px; }
 
+/* Keep header labels visually centered; don't let the caret shift them */
+#subsHead th {
+  position: sticky;             /* already true, re-assert for positioning context */
+  padding-right: 26px;          /* reserve space for the caret */
+}
+
+#subsHead .caret {
+  position: absolute;           /* remove from flow so label centers perfectly */
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;                    /* kill the old margin-left */
+  width: 12px;                  /* small, stable hit area */
+  text-align: center;
+  opacity: .8;
+  color: var(--muted);
+}
+
+
 /* Footer */
 .rc-foot{ display:flex; align-items:center; gap:8px; padding-top:10px; margin-top:12px; border-top:1px solid var(--line); }
 .rc-foot .spacer { flex: 1; }
