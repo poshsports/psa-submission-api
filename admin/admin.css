@@ -234,23 +234,49 @@ body.col-dragging { cursor: grabbing; }
 .rc-side{ display:flex; flex-direction:column; gap:8px; width:120px; padding-right:10px; border-right:1px solid var(--line); }
 
 /* Two months side-by-side (centered titles + vertical separator) */
-.rc-months{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.rc-months{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
 
-.rc-month{ width:260px; position:relative; }
-/* separator between the two month grids */
+.rc-month{
+  width:260px;
+  position:relative;
+}
+
+/* thin separator between the two month grids */
 .rc-month + .rc-month{
   border-left:1px solid var(--line);
   margin-left:12px;
   padding-left:12px;
 }
 
-/* centered month titles with nav arrows pinned to sides */
-.rc-head{ position:relative; height:32px; margin-bottom:6px; }
-.rc-title{
-  position:absolute; left:0; right:0;
-  text-align:center; line-height:32px;
-  font-weight:600; color:var(--text);
+/* centered month titles, with nav arrows pinned to the edges */
+.rc-head{
+  position:relative;
+  height:32px;
+  margin-bottom:6px;
 }
+.rc-title{
+  position:absolute;
+  left:0; right:0;
+  text-align:center;
+  line-height:32px;
+  font-weight:600;
+  color:var(--text);
+}
+#rc-prev,#rc-next{
+  position:absolute;
+  top:0;
+  height:32px;
+  padding:4px 8px;
+  border-radius:8px;
+}
+#rc-prev{ left:0; }
+#rc-next{ right:0; }
+#rc-prev:hover,#rc-next:hover{ background:var(--row-hover); }
+
 #rc-prev,#rc-next{
   position:absolute; top:0; height:32px;
   padding:4px 8px; border-radius:8px;
