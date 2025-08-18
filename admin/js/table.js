@@ -110,8 +110,8 @@ export function applyFilters(){
   const q = ($('q')?.value || '').trim().toLowerCase();
 
 // toolbar filters (null = not applied)
-const statusSel = $('#fStatus'); // matches <select id="fStatus">
-const evalSel   = $('#fEval');   // matches <select id="fEval">
+const statusSel = $('fStatus');
+const evalSel   = $('fEval');
 
   const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
     ? statusSel.value.toLowerCase()
