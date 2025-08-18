@@ -17,6 +17,52 @@ function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
 function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
 function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
+/* Custom 2-button confirm: returns 'overwrite' | 'saveas' | null */
+function confirmOverwriteOrSaveAs(viewName){
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+
+    const panel = document.createElement('div');
+    panel.className = 'modal-panel';
+    panel.style.maxWidth = '420px';
+
+    const h = document.createElement('h3');
+    h.textContent = 'Save changes?';
+
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = `Update “${viewName}” or save a new view.`;
+
+    const footer = document.createElement('div');
+    footer.className = 'row';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.gap = '8px';
+
+    const btnSaveAs = document.createElement('button');
+    btnSaveAs.className = 'btn';
+    btnSaveAs.textContent = 'Save New';
+
+    const btnOverwrite = document.createElement('button');
+    btnOverwrite.className = 'btn primary';
+    btnOverwrite.textContent = 'Overwrite';
+
+    btnSaveAs.onclick = () => cleanup('saveas');
+    btnOverwrite.onclick = () => cleanup('overwrite');
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
+
+    footer.append(btnSaveAs, btnOverwrite);
+    panel.append(h, p, footer);
+    overlay.append(panel);
+    document.body.append(overlay);
+
+    function cleanup(result){
+      overlay.remove();
+      resolve(result);
+    }
+  });
+}
+
 /* Capture current UI state (order/hidden + sort) WITHOUT persisting */
 function captureState(){
   const { order, hidden } = currentHeaderState();
@@ -99,7 +145,7 @@ export function renderViewsBar(){
   const plus = document.createElement('button');
   plus.className = 'view-plus';
   plus.textContent = '＋ Save view';
-  plus.onclick = () => {
+  plus.onclick = async () => {
     const allNow = readViews();
     const snapshot = captureState();
 
@@ -122,16 +168,17 @@ export function renderViewsBar(){
       return;
     }
 
-    // In a saved view: offer overwrite or Save As
-    const overwrite = confirm(`Save changes to “${currentView}”?\nOK = Overwrite,  Cancel = Save As new`);
-    if (overwrite) {
+    // In a saved view: show custom Overwrite / Save New dialog
+    const choice = await confirmOverwriteOrSaveAs(currentView);
+    if (choice === 'overwrite') {
       allNow[currentView] = snapshot;
       writeViews(allNow);
       renderViewsBar();
       return;
     }
+    if (choice !== 'saveas') return; // dismissed
 
-    // Save As
+    // Save As flow
     const name = prompt('Save current view as:');
     if (!name) return;
     const trimmed = name.trim();
