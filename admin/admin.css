@@ -164,11 +164,11 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 a,button,[role="button"],input{outline-offset:2px}
 a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--focus)}
 
-/* ===== Edit Columns mode (Shopify-like) ===== */
 .table.edit-cols th,
 .table.edit-cols td {
-  border-right: 10px solid var(--surface-2); /* clearer gutter */
+  border-right: 10px solid var(--line); /* darker gutter, matches table borders */
 }
+
 .table.edit-cols th:last-child,
 .table.edit-cols td:last-child { border-right: 0; }
 
