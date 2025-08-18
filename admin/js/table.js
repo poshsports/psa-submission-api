@@ -9,6 +9,21 @@ export let sortKey = 'created_at';
 export let sortDir = 'desc';
 export let pageSize = 50;
 export let pageIndex = 0;
+// --- paging helpers (ESM-safe) ---
+export function setPageIndex(i = 0) {
+  pageIndex = Math.max(0, i | 0);
+}
+export function nextPage() {
+  const totalPages = Math.max(1, Math.ceil(viewRows.length / pageSize));
+  pageIndex = Math.min(pageIndex + 1, totalPages - 1);
+}
+export function prevPage() {
+  pageIndex = Math.max(0, pageIndex - 1);
+}
+export function getPageIndex() {
+  return pageIndex;
+}
+
 
 export function setSort(key, dir) {
   if (key) sortKey = key;
