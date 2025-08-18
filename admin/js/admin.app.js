@@ -29,6 +29,86 @@ function runFilter(){
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
+function buildServiceOptions(){
+  const sel = $('fService');
+  if (!sel) return;
+  const seen = new Set();
+  tbl.rows.forEach(r => {
+    const v = (r.grading_service || r.service || r.grading || '').trim();
+    if (v) seen.add(v);
+  });
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Grading: All</option>' +
+    Array.from(seen).sort().map(v => `<option>${v}</option>`).join('');
+  if (cur && Array.from(seen).includes(cur)) sel.value = cur;
+}
+
+function positionPopover(pop, anchor){
+  const r = anchor.getBoundingClientRect();
+  pop.style.top  = `${window.scrollY + r.bottom + 6}px`;
+  pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - pop.offsetWidth - 10))}px`;
+}
+
+function updateDateButtonLabel(){
+  const btn = $('btnDate'); if (!btn) return;
+  const f = $('dateFrom')?.value, t = $('dateTo')?.value;
+
+  if (!f && !t){ btn.textContent = 'Dates: All'; return; }
+
+  const fmt = s => {
+    const [y,m,d] = s.split('-'); return `${m}/${d}`;
+  };
+  // quick detection of presets (optional nicety)
+  const today = new Date(); today.setHours(0,0,0,0);
+  const fMs = f ? Date.parse(f) : null;
+  const tMs = t ? Date.parse(t) : null;
+  const day = 86400000;
+
+  if (fMs && tMs){
+    const span = Math.round((tMs - fMs)/day) + 1;
+    if (span === 1 && tMs === today.getTime()) { btn.textContent = 'Dates: Today'; return; }
+    if (span === 7 && tMs === today.getTime()) { btn.textContent = 'Dates: Last 7 days'; return; }
+    if (span === 30 && tMs === today.getTime()) { btn.textContent = 'Dates: Last 30 days'; return; }
+  }
+  btn.textContent = `Dates: ${f?fmt(f):'…'}–${t?fmt(t):'…'}`;
+}
+
+function openDatePopover(){
+  const pop = $('date-popover'); const btn = $('btnDate');
+  if (!pop || !btn) return;
+  pop.classList.remove('hide');
+  positionPopover(pop, btn);
+
+  // close on clicks outside / Esc
+  const onDoc = (e) => {
+    if (!pop.contains(e.target) && e.target !== btn) { closeDatePopover(); }
+  };
+  const onEsc = (e) => { if (e.key === 'Escape') closeDatePopover(); };
+  pop.__off = () => { document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onEsc, true); };
+  document.addEventListener('mousedown', onDoc, true);
+  document.addEventListener('keydown', onEsc, true);
+}
+
+function closeDatePopover(){
+  const pop = $('date-popover'); if (!pop) return;
+  pop.classList.add('hide'); pop.__off?.(); pop.__off = null;
+}
+
+function setPreset(days){  // days=1 for today, 7, 30
+  const to = new Date(); to.setHours(0,0,0,0);
+  const from = new Date(to.getTime() - (days-1)*86400000);
+  const pad = n => String(n).padStart(2,'0');
+  const val = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  $('dateFrom').value = val(from);
+  $('dateTo').value   = val(to);
+}
+
+function applyDateAndFilter(){
+  closeDatePopover();
+  updateDateButtonLabel();
+  runFilter();
+}
+
 function wireUI(){
   // sign out (sidebar only)
   ensureSignoutWired();
@@ -42,6 +122,17 @@ function wireUI(){
   $('fStatus')?.addEventListener('change', runFilter);
   $('fEval')?.addEventListener('change', runFilter);
 
+  // NEW: grading service filter
+  $('fService')?.addEventListener('change', runFilter);
+
+  // NEW: date popover wiring
+  $('btnDate')?.addEventListener('click', openDatePopover);
+  $('datePresetToday')?.addEventListener('click', () => { setPreset(1); });
+  $('datePreset7')?.addEventListener('click',    () => { setPreset(7); });
+  $('datePreset30')?.addEventListener('click',   () => { setPreset(30); });
+  $('dateClear')?.addEventListener('click', () => { $('dateFrom').value=''; $('dateTo').value=''; });
+  $('dateCancel')?.addEventListener('click', closeDatePopover);
+  $('dateApply')?.addEventListener('click', applyDateAndFilter);
 
 // pagination
 $('prev-page')?.addEventListener('click', () => {
@@ -70,7 +161,7 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   const id = e.target && e.target.id;
-  if (id === 'fStatus' || id === 'fEval') runFilter();
+  if (id === 'fStatus' || id === 'fEval' || id === 'fService') runFilter();
 }, true);
 
 // Global backstop: if something re-renders the sidebar, this still works
@@ -143,6 +234,7 @@ async function loadReal(){
     // Get ALL items; filtering is client-side
     const items = await fetchSubmissions();            // <-- no `q` here
     tbl.setRows(items.map(tbl.normalizeRow));
+    buildServiceOptions();
 
     // Ensure header/sort, then apply current UI filters + update count
     views.applyView(views.currentView);
