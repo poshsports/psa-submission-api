@@ -71,13 +71,6 @@ function wireUI(){
   $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
 
-
-  // columns panel (button now lives in the views bar; we also set onclick there)
-  $('#close-columns')?.addEventListener('click', views.closeColumnsPanel);
-  $('#columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
-  $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
-}
-
 // Global backstop: if something re-renders the sidebar, this still works
 document.addEventListener('click', (e) => {
   const t = e.target && e.target.closest && e.target.closest('#sidebar-signout');
