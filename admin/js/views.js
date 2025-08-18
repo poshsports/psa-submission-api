@@ -5,17 +5,48 @@ import * as tbl from './table.js';
 
 const LS_VIEWS = 'psa_admin_table_views_v1';
 const LS_CUR   = 'psa_admin_current_view';
+// ----- per-user scoping (forward-compatible) -----
+function getUserId(){
+  const m1 = document.cookie.match(/(?:^|;\s*)psa_admin_uid=([^;]+)/);
+  const raw = m1 && m1[1];
+  return raw ? decodeURIComponent(raw) : 'anon';
+}
+const UID = getUserId();
+const VIEWS_KEY = () => `${LS_VIEWS}::${UID}`;
+const CUR_KEY   = () => `${LS_CUR}::${UID}`;
+
 
 export let currentView = 'Default';
 
-/* ---------- storage helpers ---------- */
+/* ---------- storage helpers (user-scoped; anon-safe) ---------- */
 function readViews(){
-  try { return JSON.parse(localStorage.getItem(LS_VIEWS) || '{}'); }
-  catch { return {}; }
+  // When we have a real user id, read ONLY the scoped keys.
+  if (UID !== 'anon') {
+    try { return JSON.parse(localStorage.getItem(VIEWS_KEY()) || '{}'); }
+    catch { return {}; }
+  }
+  // For anon (current behavior), allow fallback to legacy unscoped keys.
+  try {
+    const scoped = localStorage.getItem(VIEWS_KEY());
+    if (scoped) return JSON.parse(scoped);
+    return JSON.parse(localStorage.getItem(LS_VIEWS) || '{}');
+  } catch { return {}; }
 }
-function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
-function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
-function setCur(n){ localStorage.setItem(LS_CUR, n); }
+
+function writeViews(v){
+  localStorage.setItem(VIEWS_KEY(), JSON.stringify(v));
+}
+
+function getCur(){
+  if (UID !== 'anon') return localStorage.getItem(CUR_KEY()) || 'Default';
+  // anon: fallback to legacy key if scoped isn't set yet
+  return localStorage.getItem(CUR_KEY()) || localStorage.getItem(LS_CUR) || 'Default';
+}
+
+function setCur(n){
+  localStorage.setItem(CUR_KEY(), n);
+}
+
 
 /* ---------- lightweight UI helpers ---------- */
 
