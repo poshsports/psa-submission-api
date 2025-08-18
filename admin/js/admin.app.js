@@ -39,8 +39,9 @@ function wireUI(){
   // ---- local filtering (instant; no network) ----
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
-  $('#fStatus')?.addEventListener('change', runFilter);
-  $('#fEval')?.addEventListener('change', runFilter);
+  $('fStatus')?.addEventListener('change', runFilter);
+  $('fEval')?.addEventListener('change', runFilter);
+
 
 // pagination
 $('#prev-page')?.addEventListener('click', () => {
