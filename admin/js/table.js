@@ -94,7 +94,7 @@ export function applyFilters(){
   // free-text query
   const q = ($('#q')?.value || '').trim().toLowerCase();
 
-  // toolbar filters (match your HTML IDs)
+  // toolbar filters (match the HTML ids)
   const statusSel = $('#fStatus');
   const evalSel   = $('#fEval');
 
@@ -113,7 +113,6 @@ export function applyFilters(){
 
   // filter (search + status + evaluation)
   viewRows = allRows.filter(r => {
-    // text match (email or submission id)
     if (q) {
       const matchText =
         (r.customer_email && r.customer_email.toLowerCase().includes(q)) ||
@@ -121,13 +120,11 @@ export function applyFilters(){
       if (!matchText) return false;
     }
 
-    // status exact match (case-insensitive)
     if (statusFilter) {
       const st = String(r.status || '').toLowerCase();
       if (st !== statusFilter) return false;
     }
 
-    // evaluation yes/no
     if (evalFilter) {
       if (evalFilter === 'yes' && !r.evaluation_bool) return false;
       if (evalFilter === 'no'  &&  r.evaluation_bool) return false;
@@ -136,7 +133,7 @@ export function applyFilters(){
     return true;
   });
 
-  // sort
+  // sort (with paid fields handled correctly)
   const dir = sortDir === 'asc' ? 1 : -1;
   viewRows.sort((a, b) => {
     if (sortKey === 'evaluation') {
@@ -162,12 +159,18 @@ export function renderTable(visibleKeys){
   const body = $('subsTbody');
   const emptyEl = $('subsEmpty');
 
+  // If the table body isn't mounted yet, safely bail (e.g., mid-login transition)
   if (!body) {
-    const total = viewRows.length;
-    const start = pageIndex * pageSize;
-    const end   = Math.min(start + pageSize, total);
-    const pageRange = $('page-range');
-    if (pageRange) pageRange.textContent = total ? `${start + 1}–${end} of ${total}` : '0–0 of 0';
+    // still try to keep pagination label sane if present
+    const total0 = viewRows.length;
+    const start0 = pageIndex * pageSize;
+    const end0   = Math.min(start0 + pageSize, total0);
+    const pageRange0 = $('page-range');
+    if (pageRange0) {
+      pageRange0.textContent = total0 ? `${start0 + 1}–${end0} of ${total0}` : '0–0 of 0';
+    }
+    const pill0 = $('countPill');
+    if (pill0) pill0.textContent = String(viewRows.length);
     return;
   }
 
@@ -197,12 +200,18 @@ export function renderTable(visibleKeys){
     </tr>
   `).join('');
 
-  // pagination UI
+  // pagination UI (null-safe)
   const total = viewRows.length;
   const pageRange = $('page-range');
-  if (pageRange) pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
+  if (pageRange) {
+    pageRange.textContent = `${total ? (start + 1) : 0}–${end} of ${total}`;
+  }
   const prevBtn = $('prev-page');
   if (prevBtn) prevBtn.disabled = pageIndex === 0;
   const nextBtn = $('next-page');
   if (nextBtn) nextBtn.disabled = end >= total;
+
+  // update count pill
+  const pill = $('countPill');
+  if (pill) pill.textContent = String(total);
 }
