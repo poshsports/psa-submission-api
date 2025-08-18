@@ -97,28 +97,27 @@ export function renderHead(order, hidden){
   const hiddenSet = new Set(hidden || []);
   const head = $('subsHead');
 
- head.innerHTML = `
-  <tr>
-    ${order.map(key => {
-      const col = COLUMNS.find(c => c.key === key);
-      if (!col) return '';
-      const caretId = 'car-' + key;
+  head.innerHTML = `
+    <tr>
+      ${order.map(key => {
+        const col = COLUMNS.find(c => c.key === key);
+        if (!col) return '';
+        const caretId = 'car-' + key;
 
-      // inline center + optional hide flag
-      const attrs = hiddenSet.has(key)
-        ? ' style="text-align:center;vertical-align:middle;display:none" data-hidden="1"'
-        : ' style="text-align:center;vertical-align:middle"';
+        // inline center + optional hide flag (keeps data-hidden marker)
+        const attrs = hiddenSet.has(key)
+          ? ' style="text-align:center;vertical-align:middle;display:none" data-hidden="1"'
+          : ' style="text-align:center;vertical-align:middle"';
 
-      return (
-        '<th class="' + (col.sortable ? 'sortable' : '') + '" data-key="' + key + '"' + attrs + '>' +
-          '<span class="th-label">' + escapeHtml(col.label) + '</span>' +
-          (col.sortable ? '<span class="caret" id="' + caretId + '"></span>' : '') +
-        '</th>'
-      );
-    }).join('')}
-  </tr>
-`;
-
+        return (
+          '<th class="' + (col.sortable ? 'sortable' : '') + '" data-key="' + key + '"' + attrs + '>' +
+            '<span class="th-label">' + escapeHtml(col.label) + '</span>' +
+            (col.sortable ? '<span class="caret" id="' + caretId + '"></span>' : '') +
+          '</th>'
+        );
+      }).join('')}
+    </tr>
+  `;
 
   // Sorting click handlers
   head.querySelectorAll('th.sortable').forEach(th => {
@@ -148,14 +147,13 @@ export function applyFilters(){
   // toolbar filters
   const statusSel = $('fStatus');
   const evalSel   = $('fEval');
-
-  const fService = document.getElementById('fService')?.value || '';
+  const fService  = document.getElementById('fService')?.value || '';
 
   // date range (inclusive end-of-day)
   const fromStr = document.getElementById('dateFrom')?.value || '';
   const toStr   = document.getElementById('dateTo')?.value   || '';
-  const fromMs  = fromStr ? Date.parse(fromStr + 'T00:00:00') : null;
-  const toMs    = toStr   ? Date.parse(toStr   + 'T23:59:59.999') : null;
+  const fromMs  = fromStr ? Date.parse(fromStr + 'T00:00:00')        : null;
+  const toMs    = toStr   ? Date.parse(toStr   + 'T23:59:59.999')    : null;
 
   const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
     ? statusSel.value.toLowerCase()
@@ -267,7 +265,7 @@ export function renderTable(visibleKeys){
         const col = colMap.get(key);
         const val = r[key];
         const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
-        return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
+        return `<td data-key="${key}" style="text-align:center;vertical-align:middle"><div class="tdc">${out}</div></td>`;
       }).join('')}
     </tr>
   `).join('');
