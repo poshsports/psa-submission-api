@@ -97,28 +97,28 @@ export function renderHead(order, hidden){
   const hiddenSet = new Set(hidden || []);
   const head = $('subsHead');
 
-  head.innerHTML = `
-head.innerHTML = `
+ head.innerHTML = `
   <tr>
     ${order.map(key => {
       const col = COLUMNS.find(c => c.key === key);
       if (!col) return '';
       const caretId = 'car-' + key;
 
-      // inline center; also hide if needed
+      // inline center + optional hide flag
       const attrs = hiddenSet.has(key)
         ? ' style="text-align:center;vertical-align:middle;display:none" data-hidden="1"'
         : ' style="text-align:center;vertical-align:middle"';
 
-      return `
-        <th class="${col.sortable ? 'sortable' : ''}" data-key="${key}"${attrs}>
-          <span class="th-label">${escapeHtml(col.label)}</span>
-          ${col.sortable ? `<span class="caret" id="${caretId}"></span>` : ''}
-        </th>
-      `;
+      return (
+        '<th class="' + (col.sortable ? 'sortable' : '') + '" data-key="' + key + '"' + attrs + '>' +
+          '<span class="th-label">' + escapeHtml(col.label) + '</span>' +
+          (col.sortable ? '<span class="caret" id="' + caretId + '"></span>' : '') +
+        '</th>'
+      );
     }).join('')}
   </tr>
 `;
+
 
   // Sorting click handlers
   head.querySelectorAll('th.sortable').forEach(th => {
