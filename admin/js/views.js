@@ -129,13 +129,11 @@ export function currentHeaderState(){
   return { order, hidden };
 }
 
-/* ===== Columns panel (drag only here) ===== */
-let pendingOrder = null;
+/* ===== Columns panel (checklist only) ===== */
 let pendingHidden = null;
 
 export function openColumnsPanel(){
   const { order, hidden } = currentHeaderState();
-  pendingOrder = order.slice();
   pendingHidden = new Set(hidden);
 
   const list = $('columns-list');
@@ -143,36 +141,20 @@ export function openColumnsPanel(){
   list.innerHTML = '';
 
   const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
-
-  pendingOrder.forEach(key=>{
+  order.forEach(key => {
     const c = byKey[key];
+    if (!c) return;
+
     const row = document.createElement('div');
     row.className = 'columns-item';
-    row.draggable = true;
-    row.dataset.key = key;
     row.innerHTML = `
-      <span class="drag-handle">⠿</span>
       <label style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" ${pendingHidden.has(key)?'':'checked'} />
+        <input type="checkbox" ${pendingHidden.has(key) ? '' : 'checked'} />
         <span>${c.label}</span>
       </label>
     `;
 
-    // drag reordering
-    row.addEventListener('dragstart', (e)=>{ e.dataTransfer.setData('text/plain', key); });
-    row.addEventListener('dragover', (e)=>{ e.preventDefault(); });
-    row.addEventListener('drop', (e)=>{
-      e.preventDefault();
-      const srcKey = e.dataTransfer.getData('text/plain');
-      const dstKey = e.currentTarget.dataset.key;
-      if(!srcKey || !dstKey || srcKey===dstKey) return;
-      const from = pendingOrder.indexOf(srcKey);
-      const to = pendingOrder.indexOf(dstKey);
-      pendingOrder.splice(to,0, pendingOrder.splice(from,1)[0]);
-      openColumnsPanel(); // re-render
-    });
-
-    // visibility
+    // visibility toggle
     row.querySelector('input').onchange = (ev)=>{
       if (ev.target.checked) pendingHidden.delete(key);
       else pendingHidden.add(key);
@@ -186,22 +168,22 @@ export function openColumnsPanel(){
 
 export function closeColumnsPanel(){
   $('columns-backdrop').style.display='none';
-  pendingOrder = null;
   pendingHidden = null;
 }
 
 export function saveColumnsPanel(){
-  if(!pendingOrder) return closeColumnsPanel();
+  // keep current header order; no reordering in this popup
+  const { order } = currentHeaderState();
+  const hidden = pendingHidden ? Array.from(pendingHidden) : [];
 
-  const hidden = Array.from(pendingHidden);
   const all = readViews();
   const v = all[currentView] || {};
   const { sortKey, sortDir } = tbl.getSort();
 
-  all[currentView] = { ...(v||{}), order: pendingOrder.slice(), hidden, sortKey, sortDir };
+  all[currentView] = { ...(v||{}), order, hidden, sortKey, sortDir };
   writeViews(all);
 
-  tbl.renderHead(pendingOrder.slice(), hidden);
+  tbl.renderHead(order, hidden);
   tbl.applyFilters();
   closeColumnsPanel();
 }
