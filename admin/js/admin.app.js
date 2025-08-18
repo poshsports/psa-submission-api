@@ -5,26 +5,25 @@ import * as tbl from './table.js';
 import * as views from './views.js';
 
 window.__tbl = tbl; // DevTools
-// Expose logout so we can call it from HTML / console if needed
+
+// ===== sign out =====
 async function doLogout(e){
   e?.preventDefault?.();
   try { await logout(); } catch {}
-  // Always leave the page, even if the POST fails
-  window.location.replace('/admin');
+  window.location.replace('/admin'); // Always leave the page
 }
 window.__doLogout = doLogout;
 
 function ensureSignoutWired(){
   const el = $('sidebar-signout');
   if (!el) return;
-  // Wire both styles to be extra safe
   el.addEventListener('click', doLogout);
   el.onclick = doLogout;
 }
 
-// Single place to run client-side filters + update count
+// ===== filters & counters =====
 function runFilter(){
-  tbl.setPageIndex(0);     // <-- instead of tbl.pageIndex = 0
+  tbl.setPageIndex(0);
   tbl.applyFilters();
   const pill = $('countPill');
   if (pill) pill.textContent = String(tbl.viewRows.length);
@@ -34,7 +33,7 @@ function buildServiceOptions(){
   const sel = $('fService');
   if (!sel) return;
   const seen = new Set();
-  tbl.rows.forEach(r => {
+  (tbl.allRows || []).forEach(r => {
     const v = (r.grading_service || r.service || r.grading || '').trim();
     if (v) seen.add(v);
   });
@@ -44,12 +43,14 @@ function buildServiceOptions(){
   if (cur && Array.from(seen).includes(cur)) sel.value = cur;
 }
 
+// ===== popover placement =====
 function positionPopover(pop, anchor){
   const r = anchor.getBoundingClientRect();
   pop.style.top  = `${window.scrollY + r.bottom + 6}px`;
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - pop.offsetWidth - 10))}px`;
 }
 
+// ===== button label for dates =====
 function updateDateButtonLabel(){
   const btn = $('btnDate'); if (!btn) return;
   const f = $('dateFrom')?.value, t = $('dateTo')?.value;
@@ -59,7 +60,7 @@ function updateDateButtonLabel(){
   const fmt = s => {
     const [y,m,d] = s.split('-'); return `${m}/${d}`;
   };
-  // quick detection of presets (optional nicety)
+  // quick detection of presets
   const today = new Date(); today.setHours(0,0,0,0);
   const fMs = f ? Date.parse(f) : null;
   const tMs = t ? Date.parse(t) : null;
@@ -74,14 +75,177 @@ function updateDateButtonLabel(){
   btn.textContent = `Dates: ${f?fmt(f):'…'}–${t?fmt(t):'…'}`;
 }
 
+// ===================================================================
+// Range calendar (two-month) with hover & second-click apply
+// ===================================================================
+const DOW = ['S','M','T','W','T','F','S'];
+const MONTH_FMT = { month: 'long', year: 'numeric' };
+
+// selection + UI state (module-scope so we can re-open cleanly)
+let selStart = null;    // Date | null (midnight)
+let selEnd   = null;    // Date | null (midnight)
+let hoverDay = null;    // Date | null (midnight)
+let monthCursor = null; // Date (first day of left month)
+
+const mid = d => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+const fmtYMD = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseYMD = s => { const [y,m,d] = s.split('-').map(n=>+n); const x = new Date(y, m-1, d); x.setHours(0,0,0,0); return x; };
+const startOfMonth = d => new Date(d.getFullYear(), d.getMonth(), 1);
+const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth()+n, 1);
+const sameDate = (a,b) => a && b && a.getTime() === b.getTime();
+
+function ensureDowRow(gridEl){
+  const monthEl = gridEl.closest('.rc-month');
+  if (!monthEl) return;
+  let dow = monthEl.querySelector('.rc-dow');
+  if (!dow){
+    dow = document.createElement('div');
+    dow.className = 'rc-dow';
+    DOW.forEach(ch => {
+      const s = document.createElement('div');
+      s.textContent = ch;
+      dow.appendChild(s);
+    });
+    monthEl.insertBefore(dow, gridEl);
+  } else {
+    if (!dow.firstChild) {
+      DOW.forEach(ch => { const s = document.createElement('div'); s.textContent = ch; dow.appendChild(s); });
+    }
+  }
+}
+
+function buildMonth(titleEl, gridEl, monthFirstDate){
+  if (!titleEl || !gridEl) return;
+
+  titleEl.textContent = monthFirstDate.toLocaleString(undefined, MONTH_FMT);
+  gridEl.innerHTML = '';
+  ensureDowRow(gridEl);
+
+  const firstDow = monthFirstDate.getDay(); // 0..6
+  // Start from the Sunday of the first week shown
+  const gridStart = new Date(monthFirstDate);
+  gridStart.setDate(1 - firstDow);
+  gridStart.setHours(0,0,0,0);
+
+  // determine "preview end" (hover when picking)
+  const rngA = selStart ? mid(selStart) : null;
+  const rngB = selEnd ? mid(selEnd) : (selStart && hoverDay ? mid(hoverDay) : null);
+  let minR = null, maxR = null;
+  if (rngA && rngB) {
+    if (rngA.getTime() <= rngB.getTime()) { minR = rngA; maxR = rngB; }
+    else { minR = rngB; maxR = rngA; }
+  }
+
+  for (let i = 0; i < 42; i++){
+    const d = new Date(gridStart); d.setDate(gridStart.getDate()+i); // each cell
+    const cell = document.createElement('div');
+    cell.className = 'rc-cell';
+    cell.dataset.date = fmtYMD(d);
+    cell.textContent = String(d.getDate());
+    if (d.getMonth() !== monthFirstDate.getMonth()) cell.classList.add('rc-muted');
+
+    // range styles
+    if (rngA){
+      if (minR && maxR && d.getTime() >= minR.getTime() && d.getTime() <= maxR.getTime()){
+        cell.classList.add('rc-in-range');
+      }
+      if (sameDate(d, rngA)) cell.classList.add('rc-start');
+      if (selEnd && sameDate(d, selEnd)) cell.classList.add('rc-end');
+    }
+
+    // hover preview
+    cell.addEventListener('mouseenter', () => {
+      if (selStart && !selEnd){
+        hoverDay = mid(parseYMD(cell.dataset.date));
+        paintCalendars();
+      }
+    });
+
+    // click selection
+    cell.addEventListener('click', () => {
+      const d2 = mid(parseYMD(cell.dataset.date));
+      if (!selStart || (selStart && selEnd)){
+        // start new range
+        selStart = d2; selEnd = null; hoverDay = d2;
+        paintCalendars();
+      } else {
+        // finish range -> set hidden inputs and auto-apply
+        let a = selStart, b = d2;
+        if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
+        selStart = a; selEnd = b; hoverDay = null;
+
+        // push to hidden inputs that table.js reads
+        const from = $('dateFrom'), to = $('dateTo');
+        if (from) from.value = fmtYMD(a);
+        if (to)   to.value   = fmtYMD(b);
+
+        // reflect label & apply immediately
+        applyDateAndFilter();            // SECOND CLICK APPLIES
+      }
+    });
+
+    gridEl.appendChild(cell);
+  }
+}
+
+function paintCalendars(){
+  const pop = $('date-popover');
+  if (!pop || pop.classList.contains('hide')) return;
+
+  const titleL = $('rc-title-left');
+  const titleR = $('rc-title-right');
+  const gridL  = $('rc-grid-left');
+  const gridR  = $('rc-grid-right');
+
+  const leftMonth = startOfMonth(monthCursor || new Date());
+  const rightMonth = addMonths(leftMonth, 1);
+
+  buildMonth(titleL, gridL, leftMonth);
+  buildMonth(titleR, gridR, rightMonth);
+
+  // range label preview in footer
+  const lab = $('rc-range-label');
+  if (lab){
+    if (selStart && (selEnd || hoverDay)){
+      const a = selStart;
+      const b = selEnd || hoverDay;
+      const min = (a <= b ? a : b);
+      const max = (a <= b ? b : a);
+      lab.textContent = `${min.toLocaleDateString()} – ${max.toLocaleDateString()}`;
+    } else {
+      lab.textContent = '';
+    }
+  }
+}
+
+// ===== popover open/close =====
 function openDatePopover(){
   const pop = $('date-popover'); const btn = $('btnDate');
   if (!pop || !btn) return;
   if (!pop.classList.contains('hide')) { closeDatePopover(); return; } // toggle
 
+  // derive selection from hidden inputs (so UI reflects current filters)
+  const f = $('dateFrom')?.value || '';
+  const t = $('dateTo')?.value   || '';
+  selStart = f ? parseYMD(f) : null;
+  selEnd   = t ? parseYMD(t) : null;
+  hoverDay = null;
+
+  // initial month cursor: chosen start (or today)
+  const base = selStart || new Date();
+  monthCursor = startOfMonth(base);
+
   pop.classList.remove('hide');
   positionPopover(pop, btn);
 
+  // wire prev/next each time (overwrite old)
+  $('rc-prev').onclick = () => { monthCursor = addMonths(monthCursor, -1); paintCalendars(); };
+  $('rc-next').onclick = () => { monthCursor = addMonths(monthCursor, +1); paintCalendars(); };
+
+  // show initial calendars
+  paintCalendars();
+
+  // outside-click / Esc to close
   const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== btn) closeDatePopover(); };
   const onEsc = (e) => { if (e.key === 'Escape') closeDatePopover(); };
   pop.__off = () => {
@@ -97,13 +261,18 @@ function closeDatePopover(){
   pop.classList.add('hide'); pop.__off?.(); pop.__off = null;
 }
 
-function setPreset(days){  // days=1 for today, 7, 30
+// Presets (keep manual Apply flow; but preview the selection in the calendar)
+function setPreset(days){
   const to = new Date(); to.setHours(0,0,0,0);
   const from = new Date(to.getTime() - (days-1)*86400000);
   const pad = n => String(n).padStart(2,'0');
   const val = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   $('dateFrom').value = val(from);
   $('dateTo').value   = val(to);
+
+  selStart = mid(from); selEnd = mid(to); hoverDay = null;
+  monthCursor = startOfMonth(selStart);
+  paintCalendars();
 }
 
 function applyDateAndFilter(){
@@ -112,46 +281,47 @@ function applyDateAndFilter(){
   runFilter();
 }
 
+// ===== UI wiring =====
 function wireUI(){
-  // sign out (sidebar only)
   ensureSignoutWired();
 
   // refresh (re-fetch)
   $('btnRefresh')?.addEventListener('click', loadReal);
 
-  // ---- local filtering (instant; no network) ----
+  // local filtering
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
   $('fStatus')?.addEventListener('change', runFilter);
   $('fEval')?.addEventListener('change', runFilter);
 
-  // NEW: grading service filter
+  // grading service
   $('fService')?.addEventListener('change', runFilter);
 
-  // NEW: date popover wiring
+  // date popover (two-month range)
   $('btnDate')?.addEventListener('click', openDatePopover);
   $('datePresetToday')?.addEventListener('click', () => { setPreset(1);  updateDateButtonLabel(); });
   $('datePreset7')?.addEventListener('click',    () => { setPreset(7);  updateDateButtonLabel(); });
   $('datePreset30')?.addEventListener('click',   () => { setPreset(30); updateDateButtonLabel(); });
   $('dateClear')?.addEventListener('click', () => {
     $('dateFrom').value=''; $('dateTo').value='';
-    updateDateButtonLabel();
+    selStart = selEnd = hoverDay = null;
+    updateDateButtonLabel(); paintCalendars();
   });
   $('dateCancel')?.addEventListener('click', closeDatePopover);
   $('dateApply')?.addEventListener('click', applyDateAndFilter);
 
-  // Optional: live label while typing custom dates (no filtering yet)
+  // Optional: live label if hidden inputs are hand-edited elsewhere
   $('dateFrom')?.addEventListener('change', updateDateButtonLabel);
   $('dateTo')?.addEventListener('change', updateDateButtonLabel);
 
   // pagination
   $('prev-page')?.addEventListener('click', () => {
-    tbl.prevPage();                              // <-- helper, not direct write
+    tbl.prevPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
   });
   $('next-page')?.addEventListener('click', () => {
-    tbl.nextPage();                              // <-- helper, not direct write
+    tbl.nextPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
   });
@@ -163,7 +333,7 @@ function wireUI(){
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
 
-// Fallback delegation: if toolbar nodes are re-rendered, filtering still works
+// Fallback delegation
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'q') runFilter();
 }, true);
@@ -173,7 +343,7 @@ document.addEventListener('change', (e) => {
   if (id === 'fStatus' || id === 'fEval' || id === 'fService') runFilter();
 }, true);
 
-// Global backstop: if something re-renders the sidebar, this still works
+// Global backstop: sidebar signout
 document.addEventListener('click', (e) => {
   const t = e.target && e.target.closest && e.target.closest('#sidebar-signout');
   if (t) doLogout(e);
@@ -185,6 +355,7 @@ function currentVisibleKeys(){
   return ths.map(th => th.dataset.key);
 }
 
+// ===== auth & boot =====
 async function doLogin(){
   const pass = document.getElementById('pass')?.value?.trim() || '';
   const errEl = document.getElementById('err');
@@ -206,14 +377,14 @@ async function doLogin(){
       return;
     }
 
-    // Cookie is set. Flip UI in place and initialize the shell (no reload).
+    // Flip UI in place
     const loginEl = document.getElementById('login');
     const shellEl = document.getElementById('shell');
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
-    updateDateButtonLabel();   // <<<<<<<<<<<<<<<<<<<<<< ADDED
+    updateDateButtonLabel();
     views.initViews();
     loadReal();
   } catch (e) {
@@ -221,8 +392,7 @@ async function doLogin(){
   }
 }
 
-// console fallback so you can trigger manually if needed
-// in DevTools:  __psaLogin()
+// console helper
 function bindLoginHandlers(){
   const btn = $('btnLogin');
   const passEl = $('pass');
@@ -232,7 +402,7 @@ function bindLoginHandlers(){
 }
 
 function updateCountPill(){
-  const pill = $('countPill')
+  const pill = $('countPill');
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
@@ -241,14 +411,13 @@ async function loadReal(){
   if (err) { err.classList.add('hide'); err.textContent = ''; }
 
   try {
-    // Get ALL items; filtering is client-side
-    const items = await fetchSubmissions();            // <-- no `q` here
+    const items = await fetchSubmissions(); // fetch all; filter client-side
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
-    // Ensure header/sort, then apply current UI filters + update count
+    // ensure header/sort, then apply current filters
     views.applyView(views.currentView);
-    runFilter();                                       // pageIndex=0, applyFilters, update pill
+    runFilter();
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
@@ -266,7 +435,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const authNoteTop = document.getElementById('auth-note-top');
   if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
 
-  // Always wire login controls
   bindLoginHandlers();
 
   if (authed) {
@@ -274,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
-    updateDateButtonLabel();   // <<<<<<<<<<<<<<<<<<<<<< ADDED
+    updateDateButtonLabel();
     views.initViews();
     loadReal();
   } else {
