@@ -15,6 +15,10 @@ function wireUI(){
   $('#btnRefresh')?.addEventListener('click', loadReal);
   $('#q')?.addEventListener('input', debounce(loadReal, 250));
 
+    // NEW: filter selects
+  $('#fStatus')?.addEventListener('change', loadReal);
+  $('#fEval')?.addEventListener('change', loadReal);
+
   // pagination
   $('#prev-page')?.addEventListener('click', () => {
     if (tbl.pageIndex > 0){
