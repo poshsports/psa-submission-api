@@ -167,11 +167,11 @@ a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outl
 /* ===== Edit Columns mode (Shopify-like) ===== */
 .table.edit-cols th,
 .table.edit-cols td {
-  /* add clean vertical gaps between columns while editing */
-  border-right: 8px solid var(--surface);
+  border-right: 10px solid var(--surface-2); /* clearer gutter */
 }
 .table.edit-cols th:last-child,
 .table.edit-cols td:last-child { border-right: 0; }
+
 
 .table.edit-cols th {
   background: var(--surface-2);
