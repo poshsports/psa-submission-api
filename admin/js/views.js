@@ -275,29 +275,35 @@ let editOrder = null;
 let editHidden = null;
 
 function renderEditHead(){
-  // Render header with current edit state, then wire drag + eye toggles
-  tbl.renderHead(editOrder.slice(), Array.from(editHidden));
+  // In edit mode we keep ALL columns visible; we only gray out the "to-be-hidden" ones.
+  tbl.renderHead(editOrder.slice(), []);     // <-- show all columns
   tbl.applyFilters();
 
+  const tableEl = document.querySelector('table.table');
   const thead = document.querySelector('#subsHead');
+  const tbody = document.querySelector('#subsTbody');
+  tableEl?.classList.add('edit-cols');
+
   const ths = Array.from(thead?.querySelectorAll('th[data-key]') || []);
-
-  // Tag thead so CSS can style differently
-  thead?.classList.add('edit-cols');
-
   const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
 
-  ths.forEach(th => {
+  // build tools + states
+  const hiddenIdx = [];
+  ths.forEach((th, idx) => {
     const key = th.dataset.key;
     const meta = byKey[key];
     if (!meta) return;
 
-    // Disable sorting while editing
+    // mark gray state if "hidden" in the pending edit
+    const willHide = editHidden.has(key);
+    th.classList.toggle('is-off', willHide);
+
+    // disable sorting while editing
     th.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); }, true);
     th.style.userSelect = 'none';
     th.style.cursor = 'default';
 
-    // Build tools container
+    // tools container
     let tools = th.querySelector('.th-tools');
     if (!tools) {
       tools = document.createElement('span');
@@ -306,7 +312,7 @@ function renderEditHead(){
     }
     tools.innerHTML = '';
 
-    // Drag handle
+    // drag handle
     const drag = document.createElement('span');
     drag.className = 'drag-handle';
     drag.title = 'Drag to reorder';
@@ -317,9 +323,7 @@ function renderEditHead(){
       e.dataTransfer.setData('text/plain', key);
       e.dataTransfer.effectAllowed = 'move';
     });
-
     th.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
-
     th.addEventListener('drop', (e)=>{
       e.preventDefault();
       const srcKey = e.dataTransfer.getData('text/plain');
@@ -329,16 +333,15 @@ function renderEditHead(){
       const to = editOrder.indexOf(dstKey);
       if (from === -1 || to === -1) return;
       editOrder.splice(to, 0, editOrder.splice(from,1)[0]);
-      renderEditHead(); // re-render and rewire
+      renderEditHead(); // re-render + rewire
     });
 
-    // Eye toggle
+    // eye toggle
     const eye = document.createElement('button');
-    eye.className = 'th-eye btn';
-    const isHidden = editHidden.has(key);
-    eye.title = isHidden ? 'Show column' : 'Hide column';
-    eye.textContent = isHidden ? '🙈' : '👁';
-    eye.setAttribute('aria-pressed', String(!isHidden));
+    eye.className = 'th-eye btn' + (willHide ? ' off' : '');
+    eye.title = willHide ? 'Show column' : 'Hide column';
+    eye.textContent = '👁';
+    eye.setAttribute('aria-pressed', String(!willHide));
     eye.onclick = (e)=>{
       e.stopPropagation();
       if (editHidden.has(key)) editHidden.delete(key);
@@ -347,11 +350,24 @@ function renderEditHead(){
     };
 
     tools.append(drag, eye);
+
+    if (willHide) hiddenIdx.push(idx);
   });
+
+  // gray out body cells for "to-be-hidden" columns
+  if (tbody) {
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach(tr => {
+      const tds = Array.from(tr.children);
+      tds.forEach((td, idx) => {
+        td.classList.toggle('col-off', hiddenIdx.includes(idx));
+      });
+    });
+  }
 }
 
 export function openColumnsPanel(){
-  // Enter edit mode
+  // Enter edit mode (capture baseline; start with everything visible)
   const { order, hidden } = currentHeaderState();
   baselineOrder = order.slice();
   baselineHidden = new Set(hidden);
@@ -365,13 +381,23 @@ export function openColumnsPanel(){
 }
 
 export function closeColumnsPanel(){
-  // Cancel edit: restore baseline
+  // Cancel → restore baseline (including actually hidden columns)
   if (!editMode) return;
+
+  const tableEl = document.querySelector('table.table');
+  const thead = document.querySelector('#subsHead');
+  const tbody = document.querySelector('#subsTbody');
+
   tbl.renderHead(baselineOrder.slice(), Array.from(baselineHidden));
   tbl.applyFilters();
 
-  const thead = document.querySelector('#subsHead');
+  tableEl?.classList.remove('edit-cols');
   thead?.classList.remove('edit-cols');
+
+  // clear any gray classes on body cells
+  if (tbody) {
+    Array.from(tbody.querySelectorAll('td.col-off')).forEach(td => td.classList.remove('col-off'));
+  }
 
   editMode = false;
   baselineOrder = baselineHidden = editOrder = editHidden = null;
@@ -379,26 +405,33 @@ export function closeColumnsPanel(){
 }
 
 export async function saveColumnsPanel(){
-  // Apply edit to working UI, then run saved-view persistence flow
+  // Save → apply edit to working UI, then persist via Saved-View rules
   if (!editMode) return;
+
   const snapshot = {
     order: editOrder.slice(),
     hidden: Array.from(editHidden),
     ...tbl.getSort()
   };
 
-  // Apply to table immediately
+  const tableEl = document.querySelector('table.table');
+  const thead = document.querySelector('#subsHead');
+  const tbody = document.querySelector('#subsTbody');
+
+  // Apply to table immediately (now actually hide)
   tbl.renderHead(snapshot.order, snapshot.hidden);
   tbl.applyFilters();
 
-  const thead = document.querySelector('#subsHead');
+  tableEl?.classList.remove('edit-cols');
   thead?.classList.remove('edit-cols');
+  if (tbody) {
+    Array.from(tbody.querySelectorAll('td.col-off')).forEach(td => td.classList.remove('col-off'));
+  }
 
   editMode = false;
   baselineOrder = baselineHidden = editOrder = editHidden = null;
   renderViewsBar();
 
-  // Persist according to rules (Default not overwritten etc.)
   await saveSnapshotToViews(snapshot);
 }
 
