@@ -57,11 +57,18 @@ export function applyView(name){
 
 /* ---------- top views bar ---------- */
 export function renderViewsBar(){
-  const bar = $('views-bar');                 // id only (no '#')
+  const bar = $('views-bar');
   if (!bar) return;
 
   bar.innerHTML = '';
+
   const all = readViews();
+
+  // Left side: saved view pills
+  const left = document.createElement('div');
+  left.style.display = 'flex';
+  left.style.alignItems = 'center';
+  left.style.gap = '8px';
 
   Object.keys(all).forEach(name => {
     const pill = document.createElement('button');
@@ -72,8 +79,15 @@ export function renderViewsBar(){
       applyView(name);
       renderViewsBar();
     };
-    bar.appendChild(pill);
+    left.appendChild(pill);
   });
+
+  // Right side: Save view + Columns
+  const right = document.createElement('div');
+  right.style.display = 'flex';
+  right.style.alignItems = 'center';
+  right.style.gap = '8px';
+  right.style.marginLeft = 'auto';
 
   const plus = document.createElement('button');
   plus.className = 'view-plus';
@@ -93,7 +107,18 @@ export function renderViewsBar(){
     currentView = name; setCur(name);
     renderViewsBar();
   };
-  bar.appendChild(plus);
+
+  const colBtn = document.createElement('button');
+  colBtn.id = 'btnColumns';
+  colBtn.className = 'btn';
+  colBtn.textContent = 'Columns';
+  colBtn.onclick = openColumnsPanel;
+
+  right.appendChild(plus);
+  right.appendChild(colBtn);
+
+  bar.appendChild(left);
+  bar.appendChild(right);
 }
 
 /* ---------- helpers used by columns panel ---------- */
@@ -113,7 +138,7 @@ export function openColumnsPanel(){
   pendingOrder = order.slice();
   pendingHidden = new Set(hidden);
 
-  const list = $('columns-list');            // id only
+  const list = $('columns-list');
   if (!list) return;
   list.innerHTML = '';
 
@@ -156,7 +181,7 @@ export function openColumnsPanel(){
     list.appendChild(row);
   });
 
-  $('columns-backdrop').style.display='flex'; // id only
+  $('columns-backdrop').style.display='flex';
 }
 
 export function closeColumnsPanel(){
