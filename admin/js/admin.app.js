@@ -23,7 +23,7 @@ function ensureSignoutWired(){
 
 // Single place to run client-side filters + update count
 function runFilter(){
-  tbl.pageIndex = 0;
+  tbl.setPageIndex(0);     // <-- instead of tbl.pageIndex = 0
   tbl.applyFilters();
   const pill = $('#countPill');
   if (pill) pill.textContent = String(tbl.viewRows.length);
@@ -42,22 +42,18 @@ function wireUI(){
   $('#fStatus')?.addEventListener('change', runFilter);
   $('#fEval')?.addEventListener('change', runFilter);
 
-  // pagination
-  $('#prev-page')?.addEventListener('click', () => {
-    if (tbl.pageIndex > 0){
-      tbl.pageIndex--;
-      tbl.renderTable(currentVisibleKeys());
-      updateCountPill();
-    }
-  });
-  $('#next-page')?.addEventListener('click', () => {
-    const totalPages = Math.ceil(tbl.viewRows.length / tbl.pageSize) || 1;
-    if (tbl.pageIndex < totalPages - 1){
-      tbl.pageIndex++;
-      tbl.renderTable(currentVisibleKeys());
-      updateCountPill();
-    }
-  });
+// pagination
+$('#prev-page')?.addEventListener('click', () => {
+  tbl.prevPage();
+  tbl.renderTable(currentVisibleKeys());
+  updateCountPill();
+});
+$('#next-page')?.addEventListener('click', () => {
+  tbl.nextPage();
+  tbl.renderTable(currentVisibleKeys());
+  updateCountPill();
+});
+
 
   // columns panel (open + close/save)
   $('#btnColumns')?.addEventListener('click', views.openColumnsPanel);
