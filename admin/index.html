@@ -156,6 +156,26 @@
           <button class="page-btn" id="prev-page">‹</button>
           <button class="page-btn" id="next-page">›</button>
         </div>
+        <!-- Submission Details drawer -->
+<div id="details-backdrop" class="details-backdrop" aria-hidden="true">
+  <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="details-title">
+    <div class="details-head">
+      <div id="details-title" style="font-weight:700">Submission</div>
+      <button id="details-close" class="btn">Close</button>
+    </div>
+    <div id="details-body" class="details-body"></div>
+    <div class="details-foot">
+      <button id="details-close-2" class="btn">Close</button>
+    </div>
+  </div>
+</div>
+<script>
+  // keep the secondary close button simple without touching modules
+  document.addEventListener('DOMContentLoaded', () => {
+    const b = document.getElementById('details-backdrop');
+    document.getElementById('details-close-2')?.addEventListener('click', () => b?.classList.remove('show'));
+  });
+</script>
       </main>
     </div>
   </div>
