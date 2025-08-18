@@ -2,6 +2,8 @@ import { $, debounce } from './util.js';
 import { fetchSubmissions, logout } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
+window.__tbl = tbl;    // lets you inspect state in DevTools
+
 
 function wireUI(){
   // sign out buttons
@@ -102,19 +104,35 @@ function bindLoginHandlers(){
 async function loadReal(){
   const err = $('#subsErr');
   if (err) { err.classList.add('hide'); err.textContent = ''; }
+
   try {
     const q = ($('#q')?.value || '').trim();
-    const items = await fetchSubmissions(q);
-    tbl.allRows = items.map(tbl.normalizeRow);
 
-    // ensure header exists per current view, then filter/sort and paint
-    views.applyView(views.currentView);
-    tbl.applyFilters();
+    // 1) Fetch raw items
+    const items = await fetchSubmissions(q);
+    console.debug('[admin] fetch ok, items:', items.length, items[0]);
+
+    // 2) Normalize + assign to table state
+    tbl.allRows = items.map(tbl.normalizeRow);
+    console.debug('[admin] normalized rows:', tbl.allRows.length, tbl.allRows[0]);
+
+    // 3) Ensure header exists (views will also call renderHead) then filter/sort/paint
+    views.applyView(views.currentView);   // calls renderHead() + tbl.applyFilters()
+    tbl.applyFilters();                   // explicit second call is fine
+
+    // 4) Count pill — reflect what was painted
     if ($('#countPill')) $('#countPill').textContent = String(tbl.viewRows.length);
+
+    // 5) Final sanity: how many <tr>?
+    const trCount = document.querySelectorAll('#subsTbody tr').length;
+    console.debug('[admin] tbody <tr> count:', trCount);
+
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
+    console.error('[admin] loadReal error:', e);
   }
 }
+
 
 document.addEventListener('DOMContentLoaded', () => {
   // Detect auth strictly from the cookie
