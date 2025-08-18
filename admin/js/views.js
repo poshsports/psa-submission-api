@@ -298,10 +298,16 @@ function renderEditHead(){
     const willHide = editHidden.has(key);
     th.classList.toggle('is-off', willHide);
 
-    // disable sorting while editing
-    th.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); }, true);
+    // disable header sort clicks, but allow clicks on our tools (drag/eye)
+    th.addEventListener('click', (e) => {
+      if (!(e.target && e.target.closest('.th-tools'))) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, false); // <-- bubble phase, not capture
     th.style.userSelect = 'none';
     th.style.cursor = 'default';
+
 
     // tools container
     let tools = th.querySelector('.th-tools');
