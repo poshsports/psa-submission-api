@@ -1,6 +1,6 @@
 // /admin/js/admin.app.js
-import { $, debounce } from './util.js';
-import { fetchSubmissions, logout } from './api.js';
+import { $, debounce, escapeHtml } from './util.js';
+import { fetchSubmissions, logout, fetchSubmission } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
 
@@ -407,6 +407,113 @@ function currentVisibleKeys(){
   return ths.map(th => th.dataset.key);
 }
 
+// ===== Submission Details drawer =====
+let detailsWired = false;
+
+function wireDetailsDrawer(){
+  if (detailsWired) return;
+  detailsWired = true;
+
+  const tbody     = $('subsTbody');
+  const backdrop  = document.getElementById('details-backdrop');
+  const bodyEl    = document.getElementById('details-body');
+  const titleEl   = document.getElementById('details-title');
+  const closeBtn  = document.getElementById('details-close');
+  const closeBtn2 = document.getElementById('details-close-2');
+
+  if (!tbody || !backdrop || !bodyEl || !titleEl) return;
+
+  const close = () => { backdrop.classList.remove('show'); bodyEl.innerHTML = ''; };
+
+  // close interactions
+  closeBtn?.addEventListener('click', close);
+  closeBtn2?.addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+  // open on row click (ignore buttons/links inside row)
+  tbody.addEventListener('click', async (e) => {
+    if (e.target.closest('a,button')) return;
+    const tr = e.target.closest('tr[data-id]');
+    const id = tr?.dataset.id;
+    if (!id) return;
+
+    titleEl.textContent = `Submission ${id}`;
+    bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
+    backdrop.classList.add('show');
+
+    try{
+      const data = await fetchSubmission(id);
+      renderDetails(bodyEl, data);
+    }catch(err){
+      bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(err.message || 'Error')}</div>`;
+    }
+  });
+}
+
+function renderDetails(container, d){
+  const email   = d.customer_email || d.email || '';
+  const status  = d.status || '';
+  const created = safeDate(d.created_at || d.inserted_at || d.submitted_at_iso || d.submitted_at);
+  const cardsCt = Array.isArray(d.card_info) ? d.card_info.length : (d.cards ?? '');
+  const evalAmt = (d?.totals?.evaluation ?? d.evaluation ?? d.eval_line_sub ?? 0) || 0;
+  const evalYes = Number(evalAmt) > 0 ? 'Yes' : 'No';
+  const grand   = money(d?.totals?.grand ?? d.grand_total ?? d.total ?? 0);
+  const paidAt  = safeDate(d.paid_at_iso);
+  const paidAmt = money(d.paid_amount || 0);
+  const order   = d.shopify_order_name || '';
+  const svc     = (d.grading_service ?? d.grading_services ?? d.service ?? d.grading ?? '') || '';
+
+  let cardsHtml = '';
+  if (Array.isArray(d.card_info) && d.card_info.length){
+    cardsHtml = `
+      <div class="block">
+        <div class="block-title">Cards (${d.card_info.length})</div>
+        <div class="cards-table">
+          <div class="ct-head">
+            <div>Player</div><div>Year</div><div>Brand</div><div>Card</div><div>Notes</div>
+          </div>
+          ${d.card_info.map(c => `
+            <div class="ct-row">
+              <div>${escapeHtml(String(c.player ?? ''))}</div>
+              <div>${escapeHtml(String(c.year ?? ''))}</div>
+              <div>${escapeHtml(String(c.brand ?? ''))}</div>
+              <div>${escapeHtml(String(c.card ?? ''))}</div>
+              <div>${escapeHtml(String(c.notes ?? ''))}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  const raw = `<details class="block"><summary class="block-title">Raw JSON</summary><pre class="json">${escapeHtml(JSON.stringify(d, null, 2))}</pre></details>`;
+
+  container.innerHTML = `
+    <div class="dl">
+      <dt>Submission</dt><dd><code>${escapeHtml(String(d.submission_id || d.id || ''))}</code></dd>
+      <dt>Email</dt><dd>${escapeHtml(String(email))}</dd>
+      <dt>Status</dt><dd>${escapeHtml(String(status))}</dd>
+      <dt>Created</dt><dd>${escapeHtml(created)}</dd>
+      <dt>Cards</dt><dd>${escapeHtml(String(cardsCt))}</dd>
+      <dt>Evaluation</dt><dd>${evalYes}${evalYes === 'Yes' ? ` (${money(evalAmt)})` : ''}</dd>
+      <dt>Grand</dt><dd>${grand}</dd>
+      <dt>Grading Service</dt><dd>${escapeHtml(String(svc))}</dd>
+      <dt>Paid</dt><dd>${paidAt ? `${escapeHtml(paidAt)} — ${paidAmt}` : paidAmt}</dd>
+      <dt>Order</dt><dd>${order ? `<span class="pill">${escapeHtml(order)}</span>` : ''}</dd>
+    </div>
+
+    ${cardsHtml}
+    ${raw}
+  `;
+}
+
+function safeDate(iso){
+  try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
+  catch { return ''; }
+}
+function money(n){ return `$${(Number(n)||0).toLocaleString()}`; }
+
 // ===== auth & boot =====
 async function doLogin(){
   const pass = document.getElementById('pass')?.value?.trim() || '';
@@ -436,6 +543,7 @@ async function doLogin(){
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
+    wireDetailsDrawer()
     updateDateButtonLabel();
     views.initViews();
     loadReal();
@@ -494,6 +602,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
+    wireDetailsDrawer();
     updateDateButtonLabel();
     views.initViews();
     loadReal();
