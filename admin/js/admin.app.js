@@ -1,4 +1,4 @@
-import { debounce } from './util.js';
+import { $, debounce } from './util.js';
 import { fetchSubmissions, logout } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
