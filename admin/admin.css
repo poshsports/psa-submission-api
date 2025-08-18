@@ -339,3 +339,30 @@ body.col-dragging { cursor: grabbing; }
 .rc-foot{ display:flex; align-items:center; gap:8px; padding-top:10px; margin-top:12px; border-top:1px solid var(--line); }
 
 .rc-foot .spacer { flex: 1; }
+
+/* ===== Table alignment: hard-center by default ===== */
+#subsTable thead th,
+#subsTable tbody td {
+  text-align: center !important;
+  vertical-align: middle;
+}
+
+/* Utilities (explicit overrides) */
+#subsTable thead th.left,
+#subsTable tbody td.left { text-align: left !important; }
+
+#subsTable thead th.right,
+#subsTable tbody td.right { text-align: right !important; }
+
+/* Ensure common cell children don't fight centering */
+#subsTable tbody td > a,
+#subsTable tbody td > span,
+#subsTable tbody td > time,
+#subsTable tbody td > .pill {
+  display: inline-block;        /* honors parent text-align */
+  vertical-align: middle;
+}
+
+/* If any cell was turned into a flex box elsewhere, reset it */
+#subsTable tbody td { display: table-cell; }
+
