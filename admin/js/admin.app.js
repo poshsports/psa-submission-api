@@ -4,10 +4,26 @@ import * as tbl from './table.js';
 import * as views from './views.js';
 
 window.__tbl = tbl; // DevTools
+// Expose logout so we can call it from HTML / console if needed
+async function doLogout(e){
+  e?.preventDefault?.();
+  try { await logout(); } catch {}
+  // Always leave the page, even if the POST fails
+  window.location.replace('/admin');
+}
+window.__doLogout = doLogout;
+
+function ensureSignoutWired(){
+  const el = $('#sidebar-signout');
+  if (!el) return;
+  // Wire both styles to be extra safe
+  el.addEventListener('click', doLogout);
+  el.onclick = doLogout;
+}
 
 function wireUI(){
   // sign out (sidebar only)
-  $('#sidebar-signout')?.addEventListener('click', doLogout);
+  ensureSignoutWired();
 
   // refresh (re-fetch)
   $('#btnRefresh')?.addEventListener('click', loadReal);
@@ -54,16 +70,16 @@ function wireUI(){
   $('#columns-save')?.addEventListener('click', views.saveColumnsPanel);
 }
 
+// Global backstop: if something re-renders the sidebar, this still works
+document.addEventListener('click', (e) => {
+  const t = e.target && e.target.closest && e.target.closest('#sidebar-signout');
+  if (t) doLogout(e);
+});
+
 function currentVisibleKeys(){
   const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
     .filter(th => th.style.display !== 'none');
   return ths.map(th => th.dataset.key);
-}
-
-async function doLogout(e){
-  e?.preventDefault?.();
-  await logout();
-  window.location.replace('/admin');
 }
 
 async function doLogin(){
