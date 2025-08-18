@@ -274,9 +274,15 @@ let baselineHidden = null;
 let editOrder = null;
 let editHidden = null;
 
+// live-drag state (for smooth preview during drag)
+let draggingKey = null;
+let lastHoverKey = null;
+let lastBefore = null;
+
+
 function renderEditHead(){
   // In edit mode we keep ALL columns visible; we only gray out the "to-be-hidden" ones.
-  tbl.renderHead(editOrder.slice(), []);     // <-- show all columns
+  tbl.renderHead(editOrder.slice(), []);     // show all columns during edit
   tbl.applyFilters();
 
   const tableEl = document.querySelector('table.table');
@@ -286,9 +292,8 @@ function renderEditHead(){
 
   const ths = Array.from(thead?.querySelectorAll('th[data-key]') || []);
   const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
-
-  // build tools + states
   const hiddenIdx = [];
+
   ths.forEach((th, idx) => {
     const key = th.dataset.key;
     const meta = byKey[key];
@@ -298,16 +303,15 @@ function renderEditHead(){
     const willHide = editHidden.has(key);
     th.classList.toggle('is-off', willHide);
 
-    // disable header sort clicks, but allow clicks on our tools (drag/eye)
+    // disable header sorting clicks, but let tool clicks through
     th.addEventListener('click', (e) => {
       if (!(e.target && e.target.closest('.th-tools'))) {
         e.stopPropagation();
         e.preventDefault();
       }
-    }, false); // <-- bubble phase, not capture
+    }, false);
     th.style.userSelect = 'none';
     th.style.cursor = 'default';
-
 
     // tools container
     let tools = th.querySelector('.th-tools');
@@ -318,7 +322,7 @@ function renderEditHead(){
     }
     tools.innerHTML = '';
 
-    // drag handle
+    // DRAG HANDLE
     const drag = document.createElement('span');
     drag.className = 'drag-handle';
     drag.title = 'Drag to reorder';
@@ -326,23 +330,64 @@ function renderEditHead(){
     drag.draggable = true;
 
     drag.addEventListener('dragstart', (e)=>{
+      draggingKey = key;
+      lastHoverKey = null;
+      lastBefore = null;
       e.dataTransfer.setData('text/plain', key);
       e.dataTransfer.effectAllowed = 'move';
-    });
-    th.addEventListener('dragover', (e)=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
-    th.addEventListener('drop', (e)=>{
-      e.preventDefault();
-      const srcKey = e.dataTransfer.getData('text/plain');
-      const dstKey = key;
-      if (!srcKey || !dstKey || srcKey === dstKey) return;
-      const from = editOrder.indexOf(srcKey);
-      const to = editOrder.indexOf(dstKey);
-      if (from === -1 || to === -1) return;
-      editOrder.splice(to, 0, editOrder.splice(from,1)[0]);
-      renderEditHead(); // re-render + rewire
+      // use the header cell as drag image so the column name follows the cursor
+      try { e.dataTransfer.setDragImage(th, 10, 10); } catch {}
+      document.body.classList.add('col-dragging');
     });
 
-    // eye toggle
+    th.addEventListener('dragover', (e)=>{
+      if (!draggingKey) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      // decide insert side based on pointer position
+      const rect = th.getBoundingClientRect();
+      const before = e.clientX < rect.left + rect.width / 2;
+      const dstKey = key;
+
+      // throttle re-render to only when target/side actually changes
+      if (dstKey === lastHoverKey && before === lastBefore) return;
+      lastHoverKey = dstKey; lastBefore = before;
+
+      const from = editOrder.indexOf(draggingKey);
+      let to = editOrder.indexOf(dstKey);
+      if (from === -1 || to === -1) return;
+
+      // compute new index if dropped "now"
+      let newIndex = before ? to : to + 1;
+      if (newIndex > from) newIndex--; // account for removal offset
+      if (newIndex === from) return;
+
+      // live preview: mutate order and re-render so columns slide in place
+      const next = editOrder.slice();
+      next.splice(newIndex, 0, next.splice(from, 1)[0]);
+      editOrder = next;
+      renderEditHead();                // re-render & re-wire tools
+    });
+
+    th.addEventListener('drop', (e)=>{
+      if (!draggingKey) return;
+      e.preventDefault();
+      draggingKey = null;
+      lastHoverKey = null;
+      lastBefore = null;
+      document.body.classList.remove('col-dragging');
+      // no extra work; order already updated during dragover
+    });
+
+    th.addEventListener('dragend', ()=>{
+      draggingKey = null;
+      lastHoverKey = null;
+      lastBefore = null;
+      document.body.classList.remove('col-dragging');
+    });
+
+    // EYE TOGGLE
     const eye = document.createElement('button');
     eye.className = 'th-eye btn' + (willHide ? ' off' : '');
     eye.title = willHide ? 'Show column' : 'Hide column';
@@ -365,8 +410,8 @@ function renderEditHead(){
     const rows = Array.from(tbody.querySelectorAll('tr'));
     rows.forEach(tr => {
       const tds = Array.from(tr.children);
-      tds.forEach((td, idx) => {
-        td.classList.toggle('col-off', hiddenIdx.includes(idx));
+      tds.forEach((td, idx2) => {
+        td.classList.toggle('col-off', hiddenIdx.includes(idx2));
       });
     });
   }
