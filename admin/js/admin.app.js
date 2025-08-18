@@ -2,7 +2,8 @@ import { $, debounce } from './util.js';
 import { fetchSubmissions, logout } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
-window.__tbl = tbl;    // lets you inspect state in DevTools
+
+window.__tbl = tbl; // <-- lets us inspect table state in DevTools
 
 
 function wireUI(){
@@ -116,14 +117,15 @@ async function loadReal(){
     tbl.allRows = items.map(tbl.normalizeRow);
     console.debug('[admin] normalized rows:', tbl.allRows.length, tbl.allRows[0]);
 
-    // 3) Ensure header exists (views will also call renderHead) then filter/sort/paint
-    views.applyView(views.currentView);   // calls renderHead() + tbl.applyFilters()
+    // 3) Ensure header + render
+    views.applyView(views.currentView);   // sets header & calls tbl.applyFilters()
     tbl.applyFilters();                   // explicit second call is fine
 
-    // 4) Count pill — reflect what was painted
-    if ($('#countPill')) $('#countPill').textContent = String(tbl.viewRows.length);
+    // 4) Update count
+    const countPill = $('#countPill');
+    if (countPill) countPill.textContent = String(tbl.viewRows.length);
 
-    // 5) Final sanity: how many <tr>?
+    // 5) Sanity: how many table rows did we paint?
     const trCount = document.querySelectorAll('#subsTbody tr').length;
     console.debug('[admin] tbody <tr> count:', trCount);
 
