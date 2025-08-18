@@ -144,13 +144,45 @@ html,body{height:100%;overflow:hidden}
 }
 
 /* Admin table styling */
-.table{border-collapse:separate;border-spacing:0;min-width:1200px;width:100%;background:#fff}
-.table th,.table td{border-bottom:1px solid var(--line)}
-.table th{position:sticky;top:0;background:var(--surface-2);z-index:1;color:var(--muted)}
-.table th .caret{margin-left:6px;opacity:.8;color:var(--muted)}
-.table tr:hover td{background:var(--row-hover)}
-.table td.right{text-align:right}
-.table code{background:#eef2ff;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-weight:600;color:#1f2937}
+.table{
+  border-collapse:separate;
+  border-spacing:0;
+  min-width:1200px;
+  width:100%;
+  background:#fff;
+}
+
+.table th,
+.table td{
+  border-bottom:1px solid var(--line);
+  white-space:nowrap;
+  vertical-align:middle;
+  text-align:center;                 /* center everything by default */
+}
+
+.table th{
+  position:sticky;
+  top:0;
+  background:var(--surface-2);
+  z-index:1;
+  color:var(--muted);
+}
+
+.table th .caret{ margin-left:6px; opacity:.8; color:var(--muted); }
+.table tr:hover td{ background:var(--row-hover); }
+
+/* safe per-column overrides when you need them */
+.table td.right, .table th.right { text-align:right !important; }
+.table td.left,  .table th.left  { text-align:left  !important; }
+
+.table code{
+  background:#eef2ff;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:3px 8px;
+  font-weight:600;
+  color:#1f2937;
+}
 
 /* EXTRA room on the last column so it never hides under the v-scrollbar */
 .table thead th:last-child,
@@ -272,14 +304,6 @@ body.col-dragging { cursor: grabbing; }
   height:32px;
   padding:4px 8px;
   border-radius:8px;
-}
-#rc-prev{ left:0; }
-#rc-next{ right:0; }
-#rc-prev:hover,#rc-next:hover{ background:var(--row-hover); }
-
-#rc-prev,#rc-next{
-  position:absolute; top:0; height:32px;
-  padding:4px 8px; border-radius:8px;
 }
 #rc-prev{ left:0; }
 #rc-next{ right:0; }
