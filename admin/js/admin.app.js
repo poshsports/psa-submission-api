@@ -143,20 +143,13 @@ async function loadReal(){
   if (err) { err.classList.add('hide'); err.textContent = ''; }
 
   try {
-    const q = ($('#q')?.value || '').trim();
-
-    // Fetch raw items (server may apply q too, that’s fine)
-    const items = await fetchSubmissions(q);
+    // Get ALL items; filtering is client-side
+    const items = await fetchSubmissions();            // <-- no `q` here
     tbl.setRows(items.map(tbl.normalizeRow));
 
-    // Ensure header + render
-    views.applyView(views.currentView); // sets header & calls tbl.applyFilters()
-    tbl.applyFilters();                 // explicit second call is fine
-    updateCountPill();
-
-    // sanity log
-    const trCount = document.querySelectorAll('#subsTbody tr').length;
-    console.debug('[admin] rows painted:', trCount);
+    // Ensure header/sort, then apply current UI filters + update count
+    views.applyView(views.currentView);
+    runFilter();                                       // pageIndex=0, applyFilters, update pill
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
