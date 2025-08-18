@@ -366,3 +366,16 @@ body.col-dragging { cursor: grabbing; }
 /* If any cell was turned into a flex box elsewhere, reset it */
 #subsTable tbody td { display: table-cell; }
 
+/* Hard override: center ALL cells in #subsTable even if .left/.right slipped in */
+#subsTable th,
+#subsTable td { text-align: center !important; }
+
+/* Neutralize any legacy alignment classes for this table only */
+#subsTable th.left,
+#subsTable td.left,
+#subsTable th.right,
+#subsTable td.right { text-align: center !important; }
+
+/* If any cells are flex containers, center their content too */
+#subsTable td { display: table-cell !important; }
+#subsTable td > * { margin-left: auto; margin-right: auto; }
