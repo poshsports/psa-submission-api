@@ -80,6 +80,32 @@
     </select>
   </div>
 
+  <!-- Grading Service filter -->
+<select id="fService" title="Grading service" style="min-width:220px">
+  <option value="">Grading: All</option>
+</select>
+
+<!-- Date range button + popover -->
+<button id="btnDate" class="btn" type="button" title="Filter by date">Dates: All</button>
+<div id="date-popover" class="popover hide" role="dialog" aria-modal="true">
+  <div class="row" style="gap:8px;margin-bottom:8px">
+    <input id="dateFrom" type="date" />
+    <input id="dateTo" type="date" />
+  </div>
+
+  <div class="row" style="gap:8px;margin-bottom:10px">
+    <button id="datePresetToday"  class="btn" type="button">Today</button>
+    <button id="datePreset7"      class="btn" type="button">Last 7 days</button>
+    <button id="datePreset30"     class="btn" type="button">Last 30 days</button>
+  </div>
+
+  <div class="row" style="gap:8px;justify-content:flex-end">
+    <button id="dateClear"  class="btn" type="button">Clear</button>
+    <button id="dateCancel" class="btn" type="button">Cancel</button>
+    <button id="dateApply"  class="btn primary" type="button">Apply</button>
+  </div>
+</div>
+
   <span class="count-pill"><span id="countPill">0</span></span>
   <div class="spacer"></div>
   <button id="btnRefresh" class="btn">Refresh</button>
