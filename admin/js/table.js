@@ -107,7 +107,7 @@ export function paintCarets(){
 // ===== core: filter + sort + paginate =====
 export function applyFilters(){
   // free-text query
-  const q = ($('#q')?.value || '').trim().toLowerCase();
+  const q = ($('q')?.value || '').trim().toLowerCase();
 
 // toolbar filters (null = not applied)
 const statusSel = $('#fStatus'); // matches <select id="fStatus">
