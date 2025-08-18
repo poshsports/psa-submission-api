@@ -165,17 +165,30 @@ a,button,[role="button"],input{outline-offset:2px}
 a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--focus)}
 
 /* ===== Edit Columns mode (Shopify-like) ===== */
-#subsHead.edit-cols th {
+.table.edit-cols th,
+.table.edit-cols td {
+  /* add clean vertical gaps between columns while editing */
+  border-right: 8px solid var(--surface);
+}
+.table.edit-cols th:last-child,
+.table.edit-cols td:last-child { border-right: 0; }
+
+.table.edit-cols th {
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--line);
 }
+
+/* tools area inside TH */
 #subsHead .th-tools {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: 8px;
 }
+
+/* eye button – shows slash when "off" */
 #subsHead .th-eye {
+  position: relative;
   padding: 2px 6px;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -185,3 +198,25 @@ a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outl
   line-height: 1;
 }
 #subsHead .th-eye:hover { background: var(--row-hover); }
+#subsHead .th-eye.off { opacity: .55; }
+#subsHead .th-eye.off::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 50%;
+  height: 1.5px;
+  background: var(--muted);
+  transform: rotate(-24deg);
+  pointer-events: none;
+}
+
+/* gray out columns marked to be hidden */
+.table.edit-cols th.is-off {
+  opacity: .7;
+  background: var(--surface-2);
+}
+.table.edit-cols td.col-off {
+  opacity: .5;
+  background: var(--surface-2);
+}
