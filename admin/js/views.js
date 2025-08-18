@@ -19,7 +19,7 @@ function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
 /* ---------- lightweight UI helpers (no new CSS needed) ---------- */
 
-// Small anchored menu beside a button
+// Small anchored menu beside a button/span
 function openViewActionsMenu(anchorEl, viewName){
   // Backdrop to capture outside clicks
   const back = document.createElement('div');
@@ -53,7 +53,7 @@ function openViewActionsMenu(anchorEl, viewName){
     return btn;
   };
 
-  // Position next to anchor
+  // Position next to anchor, aligned under it
   const r = anchorEl.getBoundingClientRect();
   const top = window.scrollY + r.bottom + 6;
   const left = Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - 220));
@@ -76,7 +76,7 @@ function openViewActionsMenu(anchorEl, viewName){
   document.body.append(back, menu);
 }
 
-// Modal: two-button confirm for Overwrite/Save New (already used by Save View)
+// Modal: two-button confirm for Overwrite/Save New (used by Save View)
 function confirmOverwriteOrSaveAs(viewName){
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
@@ -244,35 +244,45 @@ export function renderViewsBar(){
   left.style.gap = '8px';
 
   Object.keys(all).forEach(name => {
-    // Wrap so we can append a caret next to the active pill
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex';
-    wrap.style.alignItems = 'center';
-    wrap.style.gap = '4px';
-
     const pill = document.createElement('button');
     pill.className = 'view-pill' + (name === currentView ? ' active' : '');
-    pill.textContent = name;
-    pill.onclick = () => {
-      currentView = name; setCur(name);
-      applyView(name);
-      renderViewsBar();
-    };
-    wrap.appendChild(pill);
 
-    // Only show actions caret for the active, non-Default view
+    // Use separate spans so we can attach the caret inside the pill
+    const label = document.createElement('span');
+    label.textContent = name;
+    pill.appendChild(label);
+
+    pill.onclick = () => {
+      // Switch view on pill click
+      if (name !== currentView) {
+        currentView = name; setCur(name);
+        applyView(name);
+        renderViewsBar();
+      }
+    };
+
+    // Only show caret inside the active, non-Default pill
     if (name === currentView && name !== 'Default') {
-      const caret = document.createElement('button');
-      caret.className = 'btn';
-      caret.setAttribute('aria-label', 'View actions');
+      const caret = document.createElement('span');
       caret.textContent = '▾';
-      caret.style.padding = '4px 8px';
-      caret.style.borderRadius = '999px';
-      caret.onclick = (e) => { e.stopPropagation(); openViewActionsMenu(caret, name); };
-      wrap.appendChild(caret);
+      caret.setAttribute('aria-label', 'View actions');
+      caret.setAttribute('role', 'button');
+      caret.tabIndex = 0;
+      caret.style.marginLeft = '6px';
+      caret.style.opacity = '.85';
+      caret.style.cursor = 'pointer';
+      caret.style.userSelect = 'none';
+
+      const openMenu = (e) => { e.stopPropagation(); openViewActionsMenu(caret, name); };
+      caret.onclick = openMenu;
+      caret.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMenu(e); }
+      });
+
+      pill.appendChild(caret);
     }
 
-    left.appendChild(wrap);
+    left.appendChild(pill);
   });
 
   // Right side: Save view + Columns
