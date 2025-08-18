@@ -1,3 +1,4 @@
+// /admin/js/views.js
 import { $ } from './util.js';
 import { COLUMNS, defaultOrder, defaultHidden } from './columns.js';
 import * as tbl from './table.js';
@@ -7,6 +8,7 @@ const LS_CUR   = 'psa_admin_current_view';
 
 export let currentView = 'Default';
 
+/* ---------- storage helpers ---------- */
 function readViews(){
   try { return JSON.parse(localStorage.getItem(LS_VIEWS) || '{}'); }
   catch { return {}; }
@@ -15,18 +17,22 @@ function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
 function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
 function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
+/* ---------- public API ---------- */
 export function initViews(){
   const all = readViews();
   const { sortKey, sortDir } = tbl.getSort();
+
+  // Seed default view on first run
   if (!all['Default']) {
     all['Default'] = { order: defaultOrder, hidden: defaultHidden, sortKey, sortDir };
     writeViews(all);
   }
+
   currentView = getCur();
   if (!all[currentView]) currentView = 'Default';
 
   applyView(currentView);
-  renderViewsBar(); // will no-op if #views-bar not mounted yet
+  renderViewsBar();
 }
 
 export function applyView(name){
@@ -34,25 +40,25 @@ export function applyView(name){
   const v = all[name] || all['Default'];
   if (!v) return;
 
-  // merge with current columns to survive additions/removals
-  const knownKeys = new Set(COLUMNS.map(c => c.key));
-  let order = (v.order || defaultOrder).filter(k => knownKeys.has(k));
+  // Merge with current columns (survive future additions/removals)
+  const known = new Set(COLUMNS.map(c => c.key));
+  let order = (v.order || defaultOrder).filter(k => known.has(k));
   const missing = COLUMNS.map(c => c.key).filter(k => !order.includes(k));
   order = order.concat(missing);
+  const hidden = (v.hidden || defaultHidden).filter(k => known.has(k));
 
-  const hidden = (v.hidden || defaultHidden).filter(k => knownKeys.has(k));
-
-  // set sort via setter (can’t write to module namespace)
+  // Sort
   tbl.setSort(v.sortKey || 'created_at', v.sortDir || 'desc');
 
-  // paint header with this view and render
+  // Paint header + render rows
   tbl.renderHead(order, hidden);
   tbl.applyFilters();
 }
 
+/* ---------- top views bar ---------- */
 export function renderViewsBar(){
-  const bar = $('#views-bar');
-  if (!bar) return;            // guard: shell not mounted yet
+  const bar = $('views-bar');                 // id only (no '#')
+  if (!bar) return;
 
   bar.innerHTML = '';
   const all = readViews();
@@ -62,15 +68,13 @@ export function renderViewsBar(){
     pill.className = 'view-pill' + (name === currentView ? ' active' : '');
     pill.textContent = name;
     pill.onclick = () => {
-      currentView = name;
-      setCur(name);
+      currentView = name; setCur(name);
       applyView(name);
       renderViewsBar();
     };
     bar.appendChild(pill);
   });
 
-  // “Save view” pill
   const plus = document.createElement('button');
   plus.className = 'view-plus';
   plus.textContent = '＋ Save view';
@@ -81,15 +85,18 @@ export function renderViewsBar(){
 
     const state = currentHeaderState();
     const { sortKey, sortDir } = tbl.getSort();
-    const views = readViews();
-    views[name] = { ...state, sortKey, sortDir };
-    writeViews(views);
+
+    const allNow = readViews();
+    allNow[name] = { ...state, sortKey, sortDir };
+    writeViews(allNow);
+
     currentView = name; setCur(name);
     renderViewsBar();
   };
   bar.appendChild(plus);
 }
 
+/* ---------- helpers used by columns panel ---------- */
 export function currentHeaderState(){
   const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'));
   const order = ths.map(th => th.dataset.key);
@@ -97,7 +104,7 @@ export function currentHeaderState(){
   return { order, hidden };
 }
 
-/* ===== Columns panel (drag enabled only here) ===== */
+/* ===== Columns panel (drag only here) ===== */
 let pendingOrder = null;
 let pendingHidden = null;
 
@@ -106,10 +113,10 @@ export function openColumnsPanel(){
   pendingOrder = order.slice();
   pendingHidden = new Set(hidden);
 
-  const list = $('#columns-list');
-  if (!list) return; // guard
-
+  const list = $('columns-list');            // id only
+  if (!list) return;
   list.innerHTML = '';
+
   const byKey = Object.fromEntries(COLUMNS.map(c=>[c.key,c]));
 
   pendingOrder.forEach(key=>{
@@ -126,7 +133,7 @@ export function openColumnsPanel(){
       </label>
     `;
 
-    // drag
+    // drag reordering
     row.addEventListener('dragstart', (e)=>{ e.dataTransfer.setData('text/plain', key); });
     row.addEventListener('dragover', (e)=>{ e.preventDefault(); });
     row.addEventListener('drop', (e)=>{
@@ -141,40 +148,34 @@ export function openColumnsPanel(){
     });
 
     // visibility
-    const cb = row.querySelector('input');
-    if (cb) {
-      cb.onchange = (ev)=>{
-        if (ev.target.checked) pendingHidden.delete(key);
-        else pendingHidden.add(key);
-      };
-    }
+    row.querySelector('input').onchange = (ev)=>{
+      if (ev.target.checked) pendingHidden.delete(key);
+      else pendingHidden.add(key);
+    };
 
     list.appendChild(row);
   });
 
-  const backdrop = $('#columns-backdrop');
-  if (backdrop) backdrop.style.display='flex';
+  $('columns-backdrop').style.display='flex'; // id only
 }
 
 export function closeColumnsPanel(){
-  const backdrop = $('#columns-backdrop');
-  if (backdrop) backdrop.style.display='none';
+  $('columns-backdrop').style.display='none';
   pendingOrder = null;
   pendingHidden = null;
 }
 
 export function saveColumnsPanel(){
   if(!pendingOrder) return closeColumnsPanel();
-  const hidden = Array.from(pendingHidden || []);
 
-  // write into current view
+  const hidden = Array.from(pendingHidden);
   const all = readViews();
   const v = all[currentView] || {};
   const { sortKey, sortDir } = tbl.getSort();
+
   all[currentView] = { ...(v||{}), order: pendingOrder.slice(), hidden, sortKey, sortDir };
   writeViews(all);
 
-  // apply and close
   tbl.renderHead(pendingOrder.slice(), hidden);
   tbl.applyFilters();
   closeColumnsPanel();
