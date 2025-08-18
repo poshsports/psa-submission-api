@@ -42,9 +42,13 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
   --app-bg:#f6f6f7; --surface:#fff; --surface-2:#fafbfc; --line:#e5e7eb;
   --text:#212b36; --muted:#637381; --accent:#008060; --accent-600:#007353;
   --accent-50:#e6f4ef; --row-hover:#f4f6f8; --focus:#2680eb;
-  --r-sm:8px; --r-md:12px; --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
+  --r-sm:8px; --r-md:12px;
+  --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
+
   /* layout alignment + compact pager */
-  --gutter-x:12px; --pager-pad-y:6px; --pager-pad-x:12px; --pager-gap:8px;
+  --gutter-x:10px;              /* tighter L/R padding for bars */
+  --pager-pad-y:6px; --pager-pad-x:10px; --pager-gap:8px;
+  --scroll-gutter-right:14px;   /* space for vertical scrollbar so last col isn't clipped */
 }
 .muted{color:var(--muted);font-size:12px}
 
@@ -73,11 +77,20 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 .sidebar-spacer{flex:1}
 .admin-main{display:flex;flex-direction:column;overflow:hidden;min-height:0}
 
-.topbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:10}
+.topbar{
+  height:56px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 var(--gutter-x);                       /* aligned with other bars */
+  border-bottom:1px solid var(--line);background:var(--surface);
+  position:sticky;top:0;z-index:10
+}
 .brand{display:flex;gap:10px;align-items:center;font-weight:700}
 .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
 
-.views-bar,.toolbar{display:flex;align-items:center;gap:8px;padding:10px var(--gutter-x);border-bottom:1px solid var(--line);background:var(--surface)}
+.views-bar,.toolbar{
+  display:flex;align-items:center;gap:8px;
+  padding:10px var(--gutter-x);
+  border-bottom:1px solid var(--line);background:var(--surface)
+}
 .view-pill{padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--text);background:#fff;cursor:pointer}
 .view-pill:hover{background:var(--row-hover)}
 .view-pill.active{background:var(--accent-50);border-color:var(--accent);font-weight:600}
@@ -92,11 +105,16 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 
 /* Table container (fills height; both scrollbars inside) */
 .table-wrap{
-  flex:1;min-height:0;overflow:hidden;background:var(--surface);
+  flex:1;overflow:hidden;background:var(--surface);
   border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-1);
-  margin:8px var(--gutter-x) var(--pager-gap);
+  margin:8px 6px 0 6px;                               /* tighter, esp. on the left */
 }
-.table-scroller{height:100%;overflow:auto;border-top:0}
+
+.table-scroller{
+  height:100%;overflow:auto;border-top:0;
+  padding-right:var(--scroll-gutter-right);           /* space for v-scrollbar  */
+  scrollbar-gutter:stable both-edges;                 /* layout stays stable    */
+}
 
 /* Admin table styling */
 .table{border-collapse:separate;border-spacing:0;min-width:1200px;width:100%;background:#fff}
@@ -112,7 +130,7 @@ html,body{height:100%;overflow:hidden}          /* keep scrolling inside the tab
 
 /* Compact, left-aligned pagination */
 .pagination{
-  display:flex;align-items:center;justify-content:flex-start;gap:8px;
+  display:flex;align-items:center;justify-content:flex-start;gap:var(--pager-gap);
   padding:var(--pager-pad-y) var(--pager-pad-x);
   border-top:1px solid var(--line);background:var(--surface);
   font-size:14px;line-height:1.1;
