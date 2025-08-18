@@ -17,49 +17,169 @@ function writeViews(v){ localStorage.setItem(LS_VIEWS, JSON.stringify(v)); }
 function getCur(){ return localStorage.getItem(LS_CUR) || 'Default'; }
 function setCur(n){ localStorage.setItem(LS_CUR, n); }
 
-/* Custom 2-button confirm: returns 'overwrite' | 'saveas' | null */
+/* ---------- lightweight UI helpers (no new CSS needed) ---------- */
+
+// Small anchored menu beside a button
+function openViewActionsMenu(anchorEl, viewName){
+  // Backdrop to capture outside clicks
+  const back = document.createElement('div');
+  back.style.position = 'fixed';
+  back.style.inset = '0';
+  back.style.zIndex = '70';
+  back.style.background = 'transparent';
+
+  // Floating menu
+  const menu = document.createElement('div');
+  menu.style.position = 'absolute';
+  menu.style.minWidth = '200px';
+  menu.style.padding = '6px';
+  menu.style.background = '#fff';
+  menu.style.border = '1px solid var(--line)';
+  menu.style.borderRadius = '10px';
+  menu.style.boxShadow = 'var(--shadow-1)';
+  menu.style.zIndex = '71';
+
+  const item = (label, onClick, danger=false) => {
+    const btn = document.createElement('button');
+    btn.className = 'btn' + (danger ? ' danger' : '');
+    btn.style.display = 'block';
+    btn.style.width = '100%';
+    btn.style.textAlign = 'left';
+    btn.style.border = '0';
+    btn.style.margin = '4px 0';
+    btn.style.padding = '8px 10px';
+    btn.textContent = label;
+    btn.onclick = () => { cleanup(); onClick(); };
+    return btn;
+  };
+
+  // Position next to anchor
+  const r = anchorEl.getBoundingClientRect();
+  const top = window.scrollY + r.bottom + 6;
+  const left = Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - 220));
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+
+  // Build items
+  menu.append(
+    item('Rename view', () => doRenameView(viewName)),
+    item('Duplicate view', () => doDuplicateView(viewName)),
+    item('Delete view', () => doDeleteView(viewName), true)
+  );
+
+  function cleanup(){
+    back.remove();
+    menu.remove();
+  }
+  back.onclick = cleanup;
+
+  document.body.append(back, menu);
+}
+
+// Modal: two-button confirm for Overwrite/Save New (already used by Save View)
 function confirmOverwriteOrSaveAs(viewName){
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal';
-
     const panel = document.createElement('div');
     panel.className = 'modal-panel';
     panel.style.maxWidth = '420px';
 
-    const h = document.createElement('h3');
-    h.textContent = 'Save changes?';
-
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = `Update “${viewName}” or save a new view.`;
+    const h = document.createElement('h3'); h.textContent = 'Save changes?';
+    const p = document.createElement('p'); p.className = 'muted'; p.textContent = `Update “${viewName}” or save a new view.`;
 
     const footer = document.createElement('div');
     footer.className = 'row';
     footer.style.justifyContent = 'flex-end';
     footer.style.gap = '8px';
 
-    const btnSaveAs = document.createElement('button');
-    btnSaveAs.className = 'btn';
-    btnSaveAs.textContent = 'Save New';
+    const btnSaveAs = document.createElement('button'); btnSaveAs.className = 'btn'; btnSaveAs.textContent = 'Save New';
+    const btnOverwrite = document.createElement('button'); btnOverwrite.className = 'btn primary'; btnOverwrite.textContent = 'Overwrite';
 
-    const btnOverwrite = document.createElement('button');
-    btnOverwrite.className = 'btn primary';
-    btnOverwrite.textContent = 'Overwrite';
-
-    btnSaveAs.onclick = () => cleanup('saveas');
-    btnOverwrite.onclick = () => cleanup('overwrite');
-    overlay.onclick = (e) => { if (e.target === overlay) cleanup(null); };
+    btnSaveAs.onclick = () => done('saveas');
+    btnOverwrite.onclick = () => done('overwrite');
+    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
 
     footer.append(btnSaveAs, btnOverwrite);
     panel.append(h, p, footer);
     overlay.append(panel);
     document.body.append(overlay);
 
-    function cleanup(result){
-      overlay.remove();
-      resolve(result);
-    }
+    function done(result){ overlay.remove(); resolve(result); }
+  });
+}
+
+// Modal: prompt for a view name. Returns string | null
+function promptViewName({ title, submitLabel, initial }){
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    const panel = document.createElement('div');
+    panel.className = 'modal-panel';
+    panel.style.maxWidth = '480px';
+
+    const h = document.createElement('h3'); h.textContent = title;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = initial || '';
+    input.style.width = '100%';
+    input.style.margin = '12px 0';
+    input.autofocus = true;
+
+    const footer = document.createElement('div');
+    footer.className = 'row';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.gap = '8px';
+
+    const btnCancel = document.createElement('button'); btnCancel.className = 'btn'; btnCancel.textContent = 'Cancel';
+    const btnSave = document.createElement('button'); btnSave.className = 'btn primary'; btnSave.textContent = submitLabel || 'Save';
+
+    btnCancel.onclick = () => done(null);
+    btnSave.onclick = () => done(input.value);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnSave.click(); });
+    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
+
+    footer.append(btnCancel, btnSave);
+    panel.append(h, input, footer);
+    overlay.append(panel);
+    document.body.append(overlay);
+
+    function done(val){ overlay.remove(); resolve(val); }
+    setTimeout(()=>input.focus(), 0);
+  });
+}
+
+// Modal: confirm delete (returns true/false)
+function confirmDeleteView(name){
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal';
+    const panel = document.createElement('div');
+    panel.className = 'modal-panel';
+    panel.style.maxWidth = '420px';
+
+    const h = document.createElement('h3'); h.textContent = 'Delete view?';
+    const p = document.createElement('p'); p.className = 'muted'; p.textContent = `Are you sure you want to delete “${name}”?`;
+
+    const footer = document.createElement('div');
+    footer.className = 'row';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.gap = '8px';
+
+    const btnCancel = document.createElement('button'); btnCancel.className = 'btn'; btnCancel.textContent = 'Cancel';
+    const btnDelete = document.createElement('button'); btnDelete.className = 'btn danger'; btnDelete.textContent = 'Delete';
+
+    btnCancel.onclick = () => done(false);
+    btnDelete.onclick = () => done(true);
+    overlay.onclick = (e) => { if (e.target === overlay) done(false); };
+
+    footer.append(btnCancel, btnDelete);
+    panel.append(h, p, footer);
+    overlay.append(panel);
+    document.body.append(overlay);
+
+    function done(val){ overlay.remove(); resolve(val); }
   });
 }
 
@@ -124,6 +244,12 @@ export function renderViewsBar(){
   left.style.gap = '8px';
 
   Object.keys(all).forEach(name => {
+    // Wrap so we can append a caret next to the active pill
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '4px';
+
     const pill = document.createElement('button');
     pill.className = 'view-pill' + (name === currentView ? ' active' : '');
     pill.textContent = name;
@@ -132,7 +258,21 @@ export function renderViewsBar(){
       applyView(name);
       renderViewsBar();
     };
-    left.appendChild(pill);
+    wrap.appendChild(pill);
+
+    // Only show actions caret for the active, non-Default view
+    if (name === currentView && name !== 'Default') {
+      const caret = document.createElement('button');
+      caret.className = 'btn';
+      caret.setAttribute('aria-label', 'View actions');
+      caret.textContent = '▾';
+      caret.style.padding = '4px 8px';
+      caret.style.borderRadius = '999px';
+      caret.onclick = (e) => { e.stopPropagation(); openViewActionsMenu(caret, name); };
+      wrap.appendChild(caret);
+    }
+
+    left.appendChild(wrap);
   });
 
   // Right side: Save view + Columns
@@ -168,7 +308,7 @@ export function renderViewsBar(){
       return;
     }
 
-    // In a saved view: show custom Overwrite / Save New dialog
+    // Saved view: Overwrite or Save New
     const choice = await confirmOverwriteOrSaveAs(currentView);
     if (choice === 'overwrite') {
       allNow[currentView] = snapshot;
@@ -178,7 +318,7 @@ export function renderViewsBar(){
     }
     if (choice !== 'saveas') return; // dismissed
 
-    // Save As flow
+    // Save As
     const name = prompt('Save current view as:');
     if (!name) return;
     const trimmed = name.trim();
@@ -206,6 +346,68 @@ export function renderViewsBar(){
 
   bar.appendChild(left);
   bar.appendChild(right);
+}
+
+/* ---------- actions: rename / duplicate / delete ---------- */
+async function doRenameView(oldName){
+  if (oldName === 'Default') return; // safety
+  const all = readViews();
+  const initial = oldName;
+  const val = await promptViewName({ title: 'Rename view', submitLabel: 'Save', initial });
+  if (val == null) return;
+  const next = val.trim();
+  if (!next || next === oldName) return;
+  if (next === 'Default') { alert('“Default” is reserved.'); return; }
+
+  // If target exists, confirm overwrite
+  if (all[next] && next !== oldName){
+    const ok = confirm(`A view named “${next}” already exists. Overwrite it?`);
+    if (!ok) return;
+  }
+
+  // Move/overwrite
+  all[next] = all[oldName];
+  delete all[oldName];
+  writeViews(all);
+
+  currentView = next; setCur(next);
+  renderViewsBar();
+}
+
+async function doDuplicateView(name){
+  const all = readViews();
+  const suggested = `${name} (copy)`;
+  const val = await promptViewName({ title: 'Duplicate view', submitLabel: 'Duplicate view', initial: suggested });
+  if (val == null) return;
+  const next = val.trim();
+  if (!next) return;
+  if (next === 'Default') { alert('“Default” is reserved.'); return; }
+
+  const snapshot = captureState(); // duplicate the current working state
+  if (all[next]) {
+    const ok = confirm(`A view named “${next}” already exists. Overwrite it?`);
+    if (!ok) return;
+  }
+  all[next] = snapshot;
+  writeViews(all);
+
+  currentView = next; setCur(next);
+  renderViewsBar();
+}
+
+async function doDeleteView(name){
+  if (name === 'Default') return; // safety
+  const all = readViews();
+  const yes = await confirmDeleteView(name);
+  if (!yes) return;
+
+  delete all[name];
+  writeViews(all);
+
+  // Fallback to Default
+  currentView = 'Default'; setCur('Default');
+  applyView('Default');
+  renderViewsBar();
 }
 
 /* ---------- helpers used by columns panel ---------- */
