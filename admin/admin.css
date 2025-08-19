@@ -45,11 +45,8 @@ code{background:#f6f8fa;padding:2px 6px;border-radius:6px}
   --r-sm:8px; --r-md:12px;
   --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.10);
 
-  /* layout alignment + compact pager */
   --gutter-x:8px;
   --pager-pad-y:6px; --pager-pad-x:10px; --pager-gap:8px;
-
-  /* reserve space so v-scrollbar never covers last column */
   --scroll-gutter-right:16px;
 }
 .muted{color:var(--muted);font-size:12px}
@@ -98,94 +95,51 @@ html,body{height:100%;overflow:hidden}
 .view-pill.active{background:var(--accent-50);border-color:var(--accent);font-weight:600}
 .view-plus{padding:6px 10px;border-radius:999px;border:1px dashed var(--line);color:var(--muted);background:transparent}
 
-/* Search smaller so Dates fits; Date button stays single-line */
+/* Search + date button */
 .toolbar input[type="search"]{
-  min-width:240px;
-  flex: 0 1 360px;
-  padding:8px 10px;
-  border:1px solid var(--line);
-  border-radius:10px;
-  background:#fff;
-  color:var(--text);
+  min-width:240px; flex: 0 1 360px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:10px; background:#fff; color:var(--text);
 }
 .toolbar input[type="search"]:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(38,128,235,.15)}
-
-#btnDate{
-  height:36px; min-width:180px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  padding:6px 10px; border:1px solid var(--line); border-radius:10px; background:#fff;
-}
-
+#btnDate{ height:36px; min-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:6px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
 .toolbar .spacer{flex:1}
 .count-pill{padding:4px 8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font-size:12px;color:var(--muted)}
 .toolbar select{height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text)}
 .toolbar select:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(38,128,235,.15)}
 .toolbar .filters{display:flex;gap:8px;align-items:center}
 
-/* Table container (fills height; both scrollbars inside) */
+/* Table container */
 .table-wrap{
   flex:1;overflow:hidden;background:var(--surface);
   border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-1);
   margin:6px 4px 0 4px;
 }
 .table-scroller{
-  height:100%;
-  overflow:auto;
-  overflow-y:scroll;
-  border-top:0;
-  padding-right:var(--scroll-gutter-right);
-  scrollbar-gutter:stable both-edges;
+  height:100%; overflow:auto; overflow-y:scroll; border-top:0;
+  padding-right:var(--scroll-gutter-right); scrollbar-gutter:stable both-edges;
 }
 
-/* ===== Admin table styling ===== */
-.table{
-  border-collapse:separate; border-spacing:0;
-  min-width:1200px; width:100%; background:#fff;
-}
-
-/* Single source of truth for centering */
+/* Admin table */
+.table{ border-collapse:separate; border-spacing:0; min-width:1200px; width:100%; background:#fff; }
 .table th, .table td {
-  border-bottom:1px solid var(--line);
-  white-space:nowrap;
-  vertical-align:middle;
-  text-align:center;            /* default center */
+  border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:middle; text-align:center;
 }
-
-/* Let per-column overrides still work if you ever opt-in */
 .table th.left,  .table td.left  { text-align:left  !important; }
 .table th.right, .table td.right { text-align:right !important; }
-
-/* Make inner content honor centering */
-.table td > a,
-.table td > span,
-.table td > time,
-.table td > code,
-.table td > .pill,
-.table td > .tdc{
-  display:inline-block;
-  vertical-align:middle;
+.table td > a, .table td > span, .table td > time, .table td > code, .table td > .pill, .table td > .tdc{
+  display:inline-block; vertical-align:middle;
 }
-
-/* Sticky header + misc */
 .table thead th{ position:sticky; top:0; background:var(--surface-2); z-index:1; color:var(--muted); }
 .table th .caret{ margin-left:6px; opacity:.8; color:var(--muted); }
 .table tr:hover td{ background:var(--row-hover); }
-
-.table code{
-  background:#eef2ff; border:1px solid var(--line);
-  border-radius:999px; padding:3px 8px; font-weight:600; color:#1f2937;
-}
-
-/* Extra room on the last column so it never hides under the v-scrollbar */
-.table thead th:last-child,
-.table tbody td:last-child{
-  padding-right: calc(12px + var(--scroll-gutter-right));
-}
+.table code{ background:#eef2ff; border:1px solid var(--line); border-radius:999px; padding:3px 8px; font-weight:600; color:#1f2937; }
+.table thead th:last-child, .table tbody td:last-child{ padding-right: calc(12px + var(--scroll-gutter-right)); }
 
 /* Empty state */
 .empty{padding:18px;color:var(--muted)}
 
-/* Compact, left-aligned pagination */
+/* Pagination */
 .pagination{
   display:flex;align-items:center;justify-content:flex-start;gap:var(--pager-gap);
   padding:var(--pager-pad-y) var(--pager-pad-x);
@@ -211,13 +165,9 @@ a,button,[role="button"],input{outline-offset:2px}
 a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--focus)}
 
 /* ===== Edit Columns mode ===== */
-.table.edit-cols th,
-.table.edit-cols td { border-right: 10px solid var(--line); }
-.table.edit-cols th:last-child,
-.table.edit-cols td:last-child { border-right: 0; }
+.table.edit-cols th, .table.edit-cols td { border-right: 10px solid var(--line); }
+.table.edit-cols th:last-child, .table.edit-cols td:last-child { border-right: 0; }
 .table.edit-cols th { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
-
-/* tools area inside TH */
 #subsHead .th-tools { display:inline-flex; align-items:center; gap:6px; margin-left:8px; }
 
 /* eye button */
@@ -231,12 +181,8 @@ a:focus-visible,button:focus-visible,.btn:focus-visible,input:focus-visible{outl
   content:''; position:absolute; left:5px; right:5px; top:50%; height:1.5px;
   background:var(--muted); transform:rotate(-24deg); pointer-events:none;
 }
-
-/* gray out columns marked to be hidden */
 .table.edit-cols th.is-off { opacity:.7; background:var(--surface-2); }
 .table.edit-cols td.col-off { opacity:.5; background:var(--surface-2); }
-
-/* subtle animation while columns reflow during drag */
 .table.edit-cols th,.table.edit-cols td { transition:background-color .12s ease, opacity .12s ease; }
 body.col-dragging { cursor: grabbing; }
 
@@ -250,69 +196,34 @@ body.col-dragging { cursor: grabbing; }
   padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--text);
 }
 
-/* ===== Range calendar popover (two-month) ===== */
+/* Two-month range picker */
 #date-popover.popover{ min-width:680px; padding:12px; }
 .range-cal{ display:flex; align-items:stretch; gap:12px; }
-
-/* Left preset rail */
 .rc-side{ display:flex; flex-direction:column; gap:8px; width:120px; padding-right:10px; border-right:1px solid var(--line); }
-
-/* Two months side-by-side (centered titles + vertical separator) */
 .rc-months{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .rc-month{ width:260px; position:relative; }
-
-/* thin separator between the two month grids */
 .rc-month + .rc-month{ border-left:1px solid var(--line); margin-left:12px; padding-left:12px; }
-
-/* centered month titles, with nav arrows pinned to the edges */
 .rc-head{ position:relative; height:32px; margin-bottom:6px; }
 .rc-title{ position:absolute; left:0; right:0; text-align:center; line-height:32px; font-weight:600; color:var(--text); }
 #rc-prev,#rc-next{ position:absolute; top:0; height:32px; padding:4px 8px; border-radius:8px; }
-#rc-prev{ left:0; }
-#rc-next{ right:0; }
+#rc-prev{ left:0; } #rc-next{ right:0; }
 #rc-prev:hover,#rc-next:hover{ background:var(--row-hover); }
-
-/* Day-of-week row */
 .rc-dow{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:4px; color:var(--muted); font-size:12px; text-align:center; }
-
-/* Day grid */
 .rc-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
-
-/* Day cell base */
 .rc-cell{ text-align:center; padding:7px 0; border-radius:8px; user-select:none; cursor:pointer; line-height:1; }
-
-/* Muted filler days */
 .rc-muted{ color:var(--muted); }
-
-/* Disabled days */
 .rc-disabled{ opacity:.35; pointer-events:none; }
-
-/* Hover */
 .rc-cell:hover{ background:var(--row-hover); }
-
-/* In-range highlight */
 .rc-in-range{ background:var(--accent-50); }
-
-/* Selected endpoints */
 .rc-start, .rc-end{ background:var(--accent); color:#fff; }
 .rc-start{ border-top-left-radius:999px; border-bottom-left-radius:999px; }
 .rc-end{   border-top-right-radius:999px; border-bottom-right-radius:999px; }
 
-/* Keep header labels visually centered; don't let the caret shift them */
-#subsHead th {
-  position: sticky;
-  padding-right: 26px;          /* reserve space for the caret */
-}
+/* Keep header labels visually centered; caret out of flow */
+#subsHead th { position: sticky; padding-right: 26px; }
 #subsHead .caret {
-  position: absolute;           /* remove from flow so label centers perfectly */
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  margin: 0;
-  width: 12px;
-  text-align: center;
-  opacity: .8;
-  color: var(--muted);
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  margin: 0; width: 12px; text-align: center; opacity: .8; color: var(--muted);
 }
 
 /* Footer (range picker) */
@@ -323,7 +234,7 @@ body.col-dragging { cursor: grabbing; }
 #subsTbody tr.rowlink { cursor: pointer; }
 #subsTbody tr.rowlink:focus { outline: 2px solid var(--focus); }
 
-/* ===== Submission Details drawer (single source of truth) ===== */
+/* ===== Submission Details drawer ===== */
 .details-backdrop{
   position:fixed; inset:0; display:none; z-index:70;
   background:rgba(16,24,40,.35);
@@ -341,9 +252,9 @@ body.col-dragging { cursor: grabbing; }
   display:flex; align-items:center; justify-content:space-between;
 }
 .details-foot{ border-top:1px solid var(--line); border-bottom:0; margin-top:auto; }
-
 .details-body{
   padding:14px; overflow:auto; flex:1; min-height:0; background:#fff;
+  overscroll-behavior: contain;     /* stop trackpad scroll leak */
 }
 
 /* Definition list layout */
@@ -351,11 +262,17 @@ body.col-dragging { cursor: grabbing; }
 .dl dt{ color:var(--muted); }
 .dl dd{ margin:0; }
 
-/* Cards table inside drawer */
+/* Ship-to block */
+.shipto{
+  display:inline-block; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+  background:var(--surface-2); color:var(--text); font-style:normal;
+}
+
+/* Cards table inside drawer (grid, not <table>) */
 .cards-table{
   border:1px solid var(--line);
   border-radius:10px;
-  overflow:auto;           /* vertical scroll for long lists */
+  overflow:auto;
   max-height:260px;
 }
 .cards-table .ct-head,
@@ -370,13 +287,16 @@ body.col-dragging { cursor: grabbing; }
   font-weight:600;
   color:var(--muted);
   padding:8px;
+  position:sticky; top:0; z-index:1; /* sticky header while scrolling */
 }
 .cards-table .ct-row > div{
   padding:8px;
   white-space:nowrap;
   overflow:hidden;
-  text-overflow:ellipsis;  /* no horizontal scroll */
+  text-overflow:ellipsis;
 }
+.cards-table .ct-row > div:last-child{ white-space: normal; overflow:visible; text-overflow:clip; }
+.cards-table .right{ text-align:right; }
 
 /* Raw JSON viewer */
 pre.json{
@@ -386,16 +306,3 @@ pre.json{
 
 /* Loading placeholder */
 .loading{ color:var(--muted); padding:6px 0; }
-
-/* Keep the cards table header visible while scrolling */
-.cards-table .ct-head { position: sticky; top: 0; z-index: 1; }
-
-/* Stop scroll from “leaking” out of the drawer on trackpads */
-.details-body { overscroll-behavior: contain; }
-
-/* Optional: let only the Description wrap (reads better on narrow screens) */
-.cards-table .ct-row > div:last-child {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-}
