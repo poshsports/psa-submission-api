@@ -465,13 +465,18 @@ function renderAddress(r) {
   );
 
   // ---- ADDRESS LINES ----
-  // Your JSON uses { address: { street: "12 Christopher Way", ... } }
-  const a1 = pick(
-    r.ship_addr1, r.ship_address1, r.address1,
-    nested?.address1, nested?.line1,
-    nested?.street,               // <— NEW: handle {street: "..."}
-    nested?.street1, nested?.address_line1, nested?.address_line_1, nested?.addr1, nested?.street_address1
-  );
+// BEFORE (your current a1 didn't consider "street")
+const a1 = pick(
+  r.ship_addr1, r.ship_address1, r.address1,
+  nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1
+);
+
+// AFTER (adds fallback to nested?.street so existing rows show street)
+const a1 = pick(
+  r.ship_addr1, r.ship_address1, r.address1,
+  nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
+  nested?.street           // <-- this is the key your JSON currently has
+);
 
   // address line 2 / suite / unit / apt
   const a2Raw = pick(
