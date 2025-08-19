@@ -390,3 +390,7 @@ body.col-dragging { cursor: grabbing; }
 /* Make table rows feel clickable */
 .rowlink{ cursor:pointer; }
 
+/* make rows look clickable */
+#subsTbody tr.rowlink { cursor: pointer; }
+#subsTbody tr.rowlink:focus { outline: 2px solid var(--focus); }
+
