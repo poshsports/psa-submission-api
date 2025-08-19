@@ -138,7 +138,14 @@ export function paintCarets(){
   const el = document.getElementById('car-' + sortKey);
   if (el) el.textContent = sortDir === 'asc' ? '▲' : '▼';
 }
-
+function getSelectedStatuses() {
+  const sel = $('fStatus');
+  if (!sel) return [];
+  // collect selected <option>s, normalize, and ignore any "all"
+  return Array.from(sel.selectedOptions || [])
+    .map(o => String(o.value || '').trim().toLowerCase())
+    .filter(v => v && v !== 'all');
+}
 // ===== core: filter + sort + paginate =====
 export function applyFilters(){
   // free-text query
@@ -155,7 +162,7 @@ export function applyFilters(){
   const fromMs  = fromStr ? Date.parse(fromStr + 'T00:00:00')        : null;
   const toMs    = toStr   ? Date.parse(toStr   + 'T23:59:59.999')    : null;
 
-  const statusFilter = (statusSel && statusSel.value && statusSel.value.toLowerCase() !== 'all')
+  tatusFilter = (statusSel && statusSel.value && statusSel.value.
     ? statusSel.value.toLowerCase()
     : null;
 
@@ -177,10 +184,11 @@ export function applyFilters(){
       if (!matchText) return false;
     }
 
-    if (statusFilter) {
-      const st = String(r.status || '').toLowerCase();
-      if (st !== statusFilter) return false;
-    }
+  if (statuses.length) {
+    const st = String(r.status || '').trim().toLowerCase();
+    if (!statuses.includes(st)) return false;
+  }
+
 
     if (evalFilter) {
       if (evalFilter === 'yes' && !r.evaluation_bool) return false;
