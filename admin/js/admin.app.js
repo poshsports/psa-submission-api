@@ -277,7 +277,8 @@ function applyDateAndFilter(){
 function resetFilters(){
   closeDatePopover?.();
   const q = $('q'); if (q) q.value = '';
-  const s = $('fStatus'); if (s) s.value = 'all';
+  const s = $('fStatus');
+  if (s) Array.from(s.options).forEach(o => (o.selected = false));
   const e = $('fEval');   if (e) e.value = 'all';
   const g = $('fService');if (g) g.value = '';
 
