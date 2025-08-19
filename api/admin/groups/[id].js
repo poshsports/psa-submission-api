@@ -1,8 +1,7 @@
 // api/admin/groups/[id].js
-const { sb } = require('../../_util/supabase');
 const { requireAdmin } = require('../../_util/adminAuth');
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });
     return;
@@ -12,6 +11,9 @@ module.exports = async function handler(req, res) {
     res.status(401).json({ ok: false, error: 'Unauthorized' });
     return;
   }
+
+  // Lazy-load Supabase helper after auth
+  const { sb } = require('../../_util/supabase');
 
   const id = String(req.query.id || '').trim();
   if (!id) {
@@ -35,4 +37,4 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
-};
+}
