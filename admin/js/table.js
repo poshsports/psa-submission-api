@@ -146,15 +146,31 @@ function getSelectedStatuses() {
     .map(o => String(o.value || '').trim().toLowerCase())
     .filter(v => v && v !== 'all');
 }
-// ===== core: filter + sort + paginate =====
-export function applyFilter
+export function applyFilters() {
+  // free-text query
+  const q = ($('q')?.value || '').trim().toLowerCase();
+
+  // toolbar filters
+  const evalSel  = $('fEval');
+  const fService = (document.getElementById('fService')?.value || '').trim();
+  const statuses = getSelectedStatuses(); // [] means "All"
+
+  // date range (inclusive end-of-day)
+  const fromStr = document.getElementById('dateFrom')?.value || '';
+  const toStr   = document.getElementById('dateTo')?.value   || '';
+  const fromMs  = fromStr ? Date.parse(fromStr + 'T00:00:00')     : null;
+  const toMs    = toStr   ? Date.parse(toStr   + 'T23:59:59.999') : null;
+
+  const evalFilter = (evalSel && evalSel.value && evalSel.value.toLowerCase() !== 'all')
+    ? evalSel.value.toLowerCase() // 'yes' | 'no'
+    : null;
 
   // determine visible columns from header
-  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
-    .filter(th => th.style.display !== 'none');
-  const visibleKeys = ths.map(th => th.dataset.key);
+  const visibleKeys = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
+    .filter(th => th.style.display !== 'none')
+    .map(th => th.dataset.key);
 
-  // filter (search + status + evaluation + service + date)
+  // filter (search + multi-status + evaluation + service + date)
   viewRows = allRows.filter(r => {
     if (q) {
       const matchText =
@@ -163,11 +179,10 @@ export function applyFilter
       if (!matchText) return false;
     }
 
-  if (statuses.length) {
-    const st = String(r.status || '').trim().toLowerCase();
-    if (!statuses.includes(st)) return false;
-  }
-
+    if (statuses.length) {
+      const st = String(r.status || '').trim().toLowerCase();
+      if (!statuses.includes(st)) return false;
+    }
 
     if (evalFilter) {
       if (evalFilter === 'yes' && !r.evaluation_bool) return false;
@@ -175,7 +190,8 @@ export function applyFilter
     }
 
     if (fService) {
-      if ((r.grading_service || '') !== fService) return false;
+      const svc = String(r.grading_service || '').trim();
+      if (svc !== fService) return false;
     }
 
     if (fromMs != null || toMs != null) {
