@@ -434,12 +434,11 @@ function pickFirst(...vals){
 }
 
 function renderAddress(r) {
-  // If the backend already gives a single formatted string, use it.
+  // If backend gives a single formatted string, use it.
   if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
     return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
   }
 
-  // Try common nested objects first
   const nested =
     r.shipping_address ||
     r.shopify_shipping_address ||
@@ -475,18 +474,10 @@ function renderAddress(r) {
   const zip  = pick(r.ship_zip, r.zip, nested?.zip, nested?.postal_code, nested?.postal);
   const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
 
-  const parts = [
-    name,
-    a1,
-    a2,
-    [city, st, zip].filter(Boolean).join(', '),
-    country
-  ].filter(Boolean);
-
+  const parts = [name, a1, a2, [city, st, zip].filter(Boolean).join(', '), country].filter(Boolean);
   if (!parts.length) return '';
   return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
 }
-
 
 function renderCardsTable(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return '';
@@ -533,17 +524,21 @@ function fmtDate(iso){
 async function openSubmissionDetails(id) {
   openSubmissionDetailsPanel();
 
-  const titleEl = $('details-title');
-  const bodyEl  = $('details-body');
-  if (titleEl) {
-  const titleId = String((r && (r.submission_id || r.id)) || id).toUpperCase();
-  titleEl.innerHTML = `<strong>Submission ${escapeHtml(titleId)}</strong>`;
+const titleEl = $('details-title');
+const bodyEl  = $('details-body');
+
+// provisional title while loading
+if (titleEl) {
+  titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
 }
-  if (bodyEl)  bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
+if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
 
   try {
     const r = await fetchSubmission(id);
-
+    if (titleEl) {
+  const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
+  titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
+}  
     const evalAmtNum = Number(
       (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
     ) || 0;
