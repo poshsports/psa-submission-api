@@ -197,6 +197,20 @@
     </div>
   </div>
 
+  <!-- Submission Details Drawer -->
+<div id="details-backdrop" class="details-backdrop" aria-hidden="true">
+  <aside class="details-panel" role="dialog" aria-modal="true" aria-labelledby="details-title">
+    <div class="details-head">
+      <strong id="details-title">Submission</strong>
+      <button id="details-close" class="btn" type="button">Close</button>
+    </div>
+    <div id="details-body" class="details-body">Loading…</div>
+    <div class="details-foot">
+      <button id="details-close-2" class="btn" type="button">Close</button>
+    </div>
+  </aside>
+</div>
+
   <!-- New module entrypoint -->
   <script type="module" src="/admin/js/admin.app.js"></script>
   <!-- (Optional) Keep legacy for instant rollback:
