@@ -458,6 +458,7 @@ function openSubmissionDetailsPanel() {
 
   host.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden';
+  $('subsheet-close')?.focus({ preventScroll: true });
 }
 
 function closeSubmissionDetails() {
