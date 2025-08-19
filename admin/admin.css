@@ -399,3 +399,11 @@ pre.json{
 .kv-label{ color:var(--muted); }
 .kv-value{ color:var(--text); }
 .shipto{ font-style:normal; color:var(--text); }
+
+/* Drawer overlay used by #subsheet */
+.sheet-backdrop { position:fixed; inset:0; display:none; z-index:9999; background:rgba(16,24,40,.35); }
+.sheet-backdrop:not(.hide) { display:flex; align-items:stretch; justify-content:flex-end; }
+.sheet { width:min(760px,92vw); height:100%; background:#fff; border-left:1px solid var(--line); display:flex; flex-direction:column; box-shadow:var(--shadow-1); }
+.sheet-head { padding:12px 14px; background:var(--surface-2); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+.sheet-body { padding:14px; overflow:auto; flex:1; min-height:0; }
+.sheet-title { font-weight:700; }
