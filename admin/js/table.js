@@ -260,7 +260,10 @@ export function renderTable(visibleKeys){
   const rows = viewRows.slice(start, end);
 
 body.innerHTML = rows.map(r => `
-  <tr data-id="${escapeHtml(String(r.submission_id || r.id || ''))}">
+  <tr
+    class="rowlink"
+    data-id="${escapeHtml(String(r.submission_id || r.id || ''))}"
+  >
     ${visibleKeys.map(key => {
       const col = colMap.get(key);
       const val = r[key];
@@ -269,6 +272,7 @@ body.innerHTML = rows.map(r => `
     }).join('')}
   </tr>
 `).join('');
+
 
   // pagination UI (null-safe)
   const total = viewRows.length;
