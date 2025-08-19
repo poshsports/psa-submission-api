@@ -3,6 +3,7 @@ import { $, debounce, escapeHtml } from './util.js';
 import { fetchSubmissions, logout, fetchSubmission } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
+import { showGroupsView } from './groups.js';
 
 window.__tbl = tbl; // DevTools
 
@@ -819,6 +820,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStatusButtonLabel();
     views.initViews();
     loadReal();
+
+     try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
+    
   } else {
     if (loginEl) loginEl.classList.remove('hide');
     if (shellEl) shellEl.classList.add('hide');
