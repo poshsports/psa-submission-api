@@ -27,18 +27,32 @@ export async function fetchSubmissions(q = '') {
   return items;
 }
 
-// Fetch a single submission with full details
 export async function fetchSubmission(id) {
-  if (!id) throw new Error('Missing submission id');
-  const res = await fetch(`/api/admin/submissions/${encodeURIComponent(id)}`, {
-    cache: 'no-store',
-    credentials: 'same-origin'
-  });
+  // This is the only shape your backend returns 200 for (confirmed in console).
+  const url = `/api/admin/submissions?id=${encodeURIComponent(id)}`;
+
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load submission`);
+
   const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j.ok) throw new Error(j.error || 'Failed to load submission');
-  // backend may return { ok:true, item:{...} } or { ok:true, ...payload }
-  return j.item || j;
+
+  // Unwrap common shapes
+  if (Array.isArray(j.items)) {
+    const item = j.items.find(
+      it => (it.submission_id || it.id || '').toLowerCase() === String(id).toLowerCase()
+    ) || j.items[0];
+    if (!item) throw new Error('Submission not found');
+    return item;
+  }
+
+  // Fallbacks if backend ever changes
+  if (j.item) return j.item;
+  if (j.data) return j.data;
+  if (j.submission) return j.submission;
+
+  return j; // assume the object itself
 }
+
 
 // POST logout; ignore result
 export async function logout() {
