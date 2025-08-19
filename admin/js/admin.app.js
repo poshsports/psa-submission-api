@@ -361,7 +361,6 @@ function currentVisibleKeys(){
 // Submission details – create the drawer DOM on demand
 // ===================================================================
 
-// Create the drawer markup if it's missing (so no HTML edits required)
 function ensureDetailsHost() {
   if ($('details-backdrop')) return;
 
@@ -397,19 +396,16 @@ function ensureDetailsBackdropWired() {
   $('details-close')?.addEventListener('click', closeSubmissionDetails);
   $('details-close-2')?.addEventListener('click', closeSubmissionDetails);
 
-  // click outside the panel closes
   back.addEventListener('mousedown', (e) => {
     if (!panel.contains(e.target)) closeSubmissionDetails();
   });
 
-  // Esc closes
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSubmissionDetails();
   });
 }
 
 function openSubmissionDetailsPanel() {
-  // make sure DOM exists before we try to render into it
   ensureDetailsHost();
   ensureDetailsBackdropWired();
 
@@ -438,18 +434,27 @@ function pickFirst(...vals){
 }
 
 function renderAddress(r) {
+  // accept many shapes
   const nested =
     r.shipping_address || r.shopify_shipping_address ||
     r.ship_address || r.ship_to || r.address || null;
 
   const name = pickFirst(r.ship_name, r.shipping_name, nested?.name, r.name, r.customer_name);
-  const a1   = pickFirst(r.ship_addr1, r.address1, nested?.address1);
-  const a2   = pickFirst(r.ship_addr2, r.address2, nested?.address2);
+  const a1   = pickFirst(r.ship_addr1, r.address1, nested?.address1, nested?.line1);
+  const a2   = pickFirst(r.ship_addr2, r.address2, nested?.address2, nested?.line2);
   const city = pickFirst(r.ship_city,  r.city,     nested?.city);
   const st   = pickFirst(r.ship_state, r.state,    nested?.state, nested?.province);
   const zip  = pickFirst(r.ship_zip,   r.zip,      nested?.zip, nested?.postal_code, nested?.postal);
+  const country = pickFirst(r.ship_country, r.country, nested?.country);
 
-  const parts = [name, a1, a2, [city, st, zip].filter(Boolean).join(', ')].filter(Boolean);
+  const parts = [
+    name,
+    a1,
+    a2,
+    [city, st, zip].filter(Boolean).join(', '),
+    country
+  ].filter(Boolean);
+
   if (!parts.length) return '';
   return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
 }
@@ -475,7 +480,7 @@ function renderCardsTable(cards) {
       <div class="ct-row">
         <div>${escapeHtml(String(date || ''))}</div>
         <div>${escapeHtml(String(chan || ''))}</div>
-        <div class="right">${escapeHtml(String(num || ''))}</div>
+        <div>${escapeHtml(String(num || ''))}</div>
         <div>${escapeHtml(String(desc || ''))}</div>
       </div>
     `;
@@ -490,13 +495,6 @@ function renderCardsTable(cards) {
   `;
 }
 
-function renderKV(label, valueHtml) {
-  return `<dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd>`;
-}
-function renderIf(label, value) {
-  if (value == null || value === '') return '';
-  return renderKV(label, escapeHtml(String(value)));
-}
 function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
 function fmtDate(iso){
   try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
@@ -522,23 +520,67 @@ async function openSubmissionDetails(id) {
     const grand   = r?.totals?.grand ?? r.grand_total ?? r.total ?? r.grand ?? 0;
     const paidAmt = r.paid_amount || 0;
     const cards   = r.card_info || r.cards || r.items || [];
-
+    const email   = r.customer_email || r.email || '';
     const shipHTML = renderAddress(r);
 
-    const gridHTML = `
-      <dl class="dl">
-        ${renderKV('Submission', `<code>${escapeHtml(String(r.submission_id || r.id || id))}</code>`)}
-        ${renderIf('Email', r.customer_email || r.email)}
-        ${renderIf('Status', r.status)}
-        ${renderKV('Created', escapeHtml(fmtDate(r.created_at || r.inserted_at || r.submitted_at_iso || r.submitted_at)))}
-        ${renderKV('Cards', String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}
-        ${renderKV('Evaluation', evalYesNo)}
-        ${renderKV('Grand', escapeHtml(fmtMoney(grand)))}
-        ${renderIf('Grading Service', r.grading_service || r.grading_services || r.service || r.grading)}
-        ${renderKV('Paid', escapeHtml(fmtMoney(paidAmt)))}
-        ${r.shopify_order_name ? renderKV('Order', `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>`) : ''}
-        ${shipHTML ? renderKV('Ship-to', shipHTML) : ''}
-      </dl>
+    // ---- INFO GRID (card-style) ----
+    const infoGrid = `
+      <div class="info-grid">
+        <div class="info">
+          <div class="info-label">Submission</div>
+          <div class="info-value"><code>${escapeHtml(String(r.submission_id || r.id || id))}</code></div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="pill">${escapeHtml(String(r.status || '')) || '—'}</span></div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Cards</div>
+          <div class="info-value">${escapeHtml(String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Evaluation</div>
+          <div class="info-value">${evalYesNo}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Grand</div>
+          <div class="info-value">${escapeHtml(fmtMoney(grand))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Paid</div>
+          <div class="info-value">${escapeHtml(fmtMoney(paidAmt))}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Grading Service</div>
+          <div class="info-value ellip">${escapeHtml(String(r.grading_service || r.grading_services || r.service || r.grading || '')) || '—'}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Created</div>
+          <div class="info-value">${escapeHtml(fmtDate(r.created_at || r.inserted_at || r.submitted_at_iso || r.submitted_at))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Order</div>
+          <div class="info-value">${r.shopify_order_name ? `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>` : '—'}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Email</div>
+          <div class="info-value">${email ? `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>` : '—'}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Ship-to</div>
+          <div class="info-value">${shipHTML || '—'}</div>
+        </div>
+      </div>
     `;
 
     const cardsHTML = renderCardsTable(cards);
@@ -549,7 +591,7 @@ async function openSubmissionDetails(id) {
       </details>
     `;
 
-    bodyEl.innerHTML = gridHTML + cardsHTML + jsonHTML;
+    bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
   } catch (e) {
     if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
   }
