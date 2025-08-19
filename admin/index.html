@@ -108,22 +108,31 @@
             <input id="dateTo"   type="date" hidden />
           </div>
 
-          <div class="filters">
-            <select id="fStatus" multiple size="6" aria-label="Status">
-              <!-- no "All" item; empty selection = All -->
-              <option value="submitted">submitted</option>
-              <option value="submitted_paid">submitted_paid</option>
-              <option value="pending_payment">pending_payment</option>
-              <option value="paid">paid</option>
-              <option value="fulfilled">fulfilled</option>
-            </select>
-          
-            <select id="fEval" aria-label="Evaluation">
-              <option value="all">Evaluation: All</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </div>
+<div class="filters">
+  <!-- Status (checkbox dropdown) -->
+  <button id="btnStatus" class="btn" type="button">Status: All</button>
+  <div id="status-popover" class="popover hide" role="dialog" aria-modal="true">
+    <div class="status-list">
+      <label><input type="checkbox" data-status="submitted"> submitted</label>
+      <label><input type="checkbox" data-status="submitted_paid"> submitted_paid</label>
+      <label><input type="checkbox" data-status="pending_payment"> pending_payment</label>
+      <label><input type="checkbox" data-status="paid"> paid</label>
+      <label><input type="checkbox" data-status="fulfilled"> fulfilled</label>
+    </div>
+    <div class="rc-foot">
+      <span class="spacer"></span>
+      <button id="statusClear" class="btn" type="button">Clear</button>
+      <button id="statusApply" class="btn primary" type="button">Apply</button>
+    </div>
+  </div>
+
+  <!-- Evaluation (unchanged) -->
+  <select id="fEval" aria-label="Evaluation">
+    <option value="all">Evaluation: All</option>
+    <option value="yes">Yes</option>
+    <option value="no">No</option>
+  </select>
+</div>
 
           <!-- Grading Service filter -->
           <select id="fService" title="Grading service" style="min-width:220px">
