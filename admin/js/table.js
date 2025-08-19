@@ -259,19 +259,25 @@ export function renderTable(visibleKeys){
   const end = Math.min(start + pageSize, viewRows.length);
   const rows = viewRows.slice(start, end);
 
-body.innerHTML = rows.map(r => `
-  <tr
-    class="rowlink"
-    data-id="${escapeHtml(String(r.submission_id || r.id || ''))}"
-  >
-    ${visibleKeys.map(key => {
-      const col = colMap.get(key);
-      const val = r[key];
-      const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
-      return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
-    }).join('')}
-  </tr>
-`).join('');
+body.innerHTML = rows.map(r => {
+  const id = String(r.submission_id || r.id || '').trim();
+  return `
+    <tr
+      class="rowlink"
+      data-id="${escapeHtml(id)}"
+      tabindex="0"
+      role="button"
+      aria-label="Open details for submission ${escapeHtml(id)}"
+    >
+      ${visibleKeys.map(key => {
+        const col = colMap.get(key);
+        const val = r[key];
+        const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
+        return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
+      }).join('')}
+    </tr>
+  `;
+}).join('');
 
 
   // pagination UI (null-safe)
