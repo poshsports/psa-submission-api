@@ -48,6 +48,41 @@ function positionPopover(pop, anchor){
   pop.style.top  = `${window.scrollY + r.bottom + 6}px`;
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - pop.offsetWidth - 10))}px`;
 }
+// ----- Status popover helpers -----
+function getCheckedStatuses() {
+  return Array.from(
+    document.querySelectorAll('#status-popover input[type="checkbox"][data-status]:checked')
+  ).map(el => el.getAttribute('data-status'));
+}
+
+function updateStatusButtonLabel() {
+  const btn = $('btnStatus'); if (!btn) return;
+  const vals = getCheckedStatuses();
+  btn.textContent = vals.length ? `Status: ${vals.join(', ')}` : 'Status: All';
+}
+
+function openStatusPopover() {
+  const pop = $('status-popover'); const btn = $('btnStatus');
+  if (!pop || !btn) return;
+  if (!pop.classList.contains('hide')) { closeStatusPopover(); return; }
+
+  pop.classList.remove('hide');
+  positionPopover(pop, btn);
+
+  const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== btn) closeStatusPopover(); };
+  const onEsc = (e) => { if (e.key === 'Escape') closeStatusPopover(); };
+  pop.__off = () => {
+    document.removeEventListener('mousedown', onDoc, true);
+    document.removeEventListener('keydown', onEsc, true);
+  };
+  document.addEventListener('mousedown', onDoc, true);
+  document.addEventListener('keydown', onEsc, true);
+}
+
+function closeStatusPopover() {
+  const pop = $('status-popover'); if (!pop) return;
+  pop.classList.add('hide'); pop.__off?.(); pop.__off = null;
+}
 
 // ===== button label for dates =====
 function updateDateButtonLabel(){
@@ -277,8 +312,10 @@ function applyDateAndFilter(){
 function resetFilters(){
   closeDatePopover?.();
   const q = $('q'); if (q) q.value = '';
-  const s = $('fStatus');
-  if (s) Array.from(s.options).forEach(o => (o.selected = false));
+document
+.querySelectorAll('#status-popover input[type="checkbox"][data-status]')
+.forEach(cb => (cb.checked = false));
+updateStatusButtonLabel();
   const e = $('fEval');   if (e) e.value = 'all';
   const g = $('fService');if (g) g.value = '';
 
@@ -294,14 +331,26 @@ function resetFilters(){
 // ===== UI wiring =====
 function wireUI(){
   ensureSignoutWired();
+  updateStatusButtonLabel(); // show "Status: All" on first paint
 
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
+  $('btnStatus')?.addEventListener('click', openStatusPopover);
+$('statusApply')?.addEventListener('click', () => {
+  closeStatusPopover();
+  updateStatusButtonLabel();
+  runFilter();
+});
+$('statusClear')?.addEventListener('click', () => {
+  document
+    .querySelectorAll('#status-popover input[type="checkbox"][data-status]')
+    .forEach(cb => (cb.checked = false));
+  updateStatusButtonLabel();
+});
+
 
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
-  $('fStatus')?.addEventListener('change', runFilter);
-  $('fStatus')?.addEventListener('input',  runFilter);
   $('fEval')?.addEventListener('change', runFilter);
 
   $('fService')?.addEventListener('change', runFilter);
@@ -346,7 +395,11 @@ document.addEventListener('input', (e) => {
 }, true);
 document.addEventListener('change', (e) => {
   const id = e.target && e.target.id;
-  if (id === 'fStatus' || id === 'fEval' || id === 'fService') runFilter();
+  if (id === 'fEval' || id === 'fService') runFilter();
+  if (e.target && e.target.matches('#status-popover input[type="checkbox"][data-status]')) {
+    // if you want immediate filtering on check/uncheck, uncomment next line:
+    // runFilter();
+  }
 }, true);
 document.addEventListener('click', (e) => {
   const t = e.target && e.target.closest && e.target.closest('#sidebar-signout');
@@ -706,6 +759,7 @@ async function doLogin(){
 
     wireUI();
     updateDateButtonLabel();
+    updateDateButtonLabel();
     views.initViews();
     loadReal();
   } catch (e) {
@@ -762,6 +816,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     wireUI();
     updateDateButtonLabel();
+    updateStatusButtonLabel();
     views.initViews();
     loadReal();
   } else {
