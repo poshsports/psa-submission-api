@@ -147,28 +147,7 @@ function getSelectedStatuses() {
     .filter(v => v && v !== 'all');
 }
 // ===== core: filter + sort + paginate =====
-export function applyFilters(){
-  // free-text query
-  const q = ($('q')?.value || '').trim().toLowerCase();
-
-  // toolbar filters
-  const statusSel = $('fStatus');
-  const evalSel   = $('fEval');
-  const fService  = document.getElementById('fService')?.value || '';
-
-  // date range (inclusive end-of-day)
-  const fromStr = document.getElementById('dateFrom')?.value || '';
-  const toStr   = document.getElementById('dateTo')?.value   || '';
-  const fromMs  = fromStr ? Date.parse(fromStr + 'T00:00:00')        : null;
-  const toMs    = toStr   ? Date.parse(toStr   + 'T23:59:59.999')    : null;
-
-  tatusFilter = (statusSel && statusSel.value && statusSel.value.
-    ? statusSel.value.toLowerCase()
-    : null;
-
-  const evalFilter = (evalSel && evalSel.value && evalSel.value.toLowerCase() !== 'all')
-    ? evalSel.value.toLowerCase() // 'yes' | 'no'
-    : null;
+export function applyFilter
 
   // determine visible columns from header
   const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
