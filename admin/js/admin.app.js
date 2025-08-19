@@ -759,7 +759,7 @@ async function doLogin(){
 
     wireUI();
     updateDateButtonLabel();
-    updateDateButtonLabel();
+    updateStatusButtonLabel();
     views.initViews();
     loadReal();
   } catch (e) {
