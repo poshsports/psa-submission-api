@@ -411,71 +411,113 @@ function currentVisibleKeys(){
 }
 
 // ===================================================================
-// Submission details (dynamic right-side sheet)
+// Submission details (uses the static #details-backdrop in index.html)
 // ===================================================================
-function ensureDetailHost() {
-  if ($('subsheet')) return;
 
-  const host = document.createElement('div');
-  host.id = 'subsheet';
-  host.className = 'sheet-backdrop hide';
-  host.innerHTML = `
-    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="subsheet-title">
-      <div class="sheet-head">
-        <div id="subsheet-title" class="sheet-title">Submission</div>
-        <button id="subsheet-close" class="btn" type="button">Close</button>
-      </div>
-      <div id="subsheet-body" class="sheet-body">
-        <div class="muted">Loading…</div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(host);
+function ensureDetailsBackdropWired() {
+  const back = $('details-backdrop');
+  if (!back || back.__wired) return;
+  back.__wired = true;
 
-  $('subsheet-close').onclick = closeSubmissionDetails;
-  host.addEventListener('click', (e) => {
-    if (e.target === host) closeSubmissionDetails();
+  const panel = back.querySelector('.details-panel');
+
+  $('details-close')?.addEventListener('click', closeSubmissionDetails);
+  $('details-close-2')?.addEventListener('click', closeSubmissionDetails);
+
+  // click outside the panel closes
+  back.addEventListener('mousedown', (e) => {
+    if (!panel.contains(e.target)) closeSubmissionDetails();
   });
+
+  // Esc closes
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSubmissionDetails();
   });
 }
 
 function openSubmissionDetailsPanel() {
-  ensureDetailHost();
-  const host = $('subsheet');
-  if (!host) { console.error('[psa-admin] failed to create #subsheet'); return; }
-
-  // Show the overlay and ensure it sits on top
-  host.classList.remove('hide');
-  host.style.display = 'flex';            // <- make visible
-  host.style.position = 'fixed';
-  host.style.inset = '0';
-  host.style.alignItems = 'stretch';
-  host.style.justifyContent = 'flex-end';
-  host.style.background = 'rgba(16,24,40,.35)';
-  host.style.zIndex = '9999';
-
-  host.setAttribute('aria-hidden', 'false');
+  ensureDetailsBackdropWired();
+  const back = $('details-backdrop');
+  if (!back) return;
+  back.classList.add('show');
+  back.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden';
-  $('subsheet-close')?.focus({ preventScroll: true });
+  $('details-close')?.focus({ preventScroll: true });
 }
 
 function closeSubmissionDetails() {
-  const host = $('subsheet');
-  if (!host) return;
-
-  host.classList.add('hide');
-  host.style.display = 'none';            // <- actually hide (beats inline flex)
-  host.setAttribute('aria-hidden', 'true');
+  const back = $('details-backdrop');
+  if (!back) return;
+  back.classList.remove('show');
+  back.setAttribute('aria-hidden', 'true');
   document.body.style.overflow = '';
 }
 
-function renderKV(label, valueHtml) {
-  return `
-    <div class="kv-label">${escapeHtml(label)}</div>
-    <div class="kv-value">${valueHtml}</div>
+// --- helpers for rendering ---
+
+function pickFirst(...vals){
+  for (const v of vals) {
+    if (v != null && String(v).trim() !== '') return v;
+  }
+  return '';
+}
+
+function renderAddress(r) {
+  const nested =
+    r.shipping_address || r.shopify_shipping_address ||
+    r.ship_address || r.ship_to || r.address || null;
+
+  const name = pickFirst(r.ship_name, r.shipping_name, nested?.name, r.name, r.customer_name);
+  const a1   = pickFirst(r.ship_addr1, r.address1, nested?.address1);
+  const a2   = pickFirst(r.ship_addr2, r.address2, nested?.address2);
+  const city = pickFirst(r.ship_city,  r.city,     nested?.city);
+  const st   = pickFirst(r.ship_state, r.state,    nested?.state, nested?.province);
+  const zip  = pickFirst(r.ship_zip,   r.zip,      nested?.zip, nested?.postal_code, nested?.postal);
+
+  const parts = [name, a1, a2, [city, st, zip].filter(Boolean).join(', ')].filter(Boolean);
+  if (!parts.length) return '';
+  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
+}
+
+function renderCardsTable(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return '';
+
+  const head = `
+    <div class="ct-head">
+      <div>Date of break</div>
+      <div>Break channel</div>
+      <div>Break #</div>
+      <div>Card description</div>
+    </div>
   `;
+
+  const rows = cards.map(c => {
+    const date = c.date || c.date_of_break || c.break_date || '';
+    const chan = c.channel || c.break_channel || '';
+    const num  = c.break_no || c.break_number || c.break || '';
+    const desc = c.description || c.card_description || c.title || c.card || '';
+    return `
+      <div class="ct-row">
+        <div>${escapeHtml(String(date || ''))}</div>
+        <div>${escapeHtml(String(chan || ''))}</div>
+        <div class="right">${escapeHtml(String(num || ''))}</div>
+        <div>${escapeHtml(String(desc || ''))}</div>
+      </div>
+    `;
+  }).join('');
+
+  // max-height keeps the panel compact and avoids horizontal scroll
+  return `
+    <h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (${cards.length})</h3>
+    <div class="cards-table" style="max-height: 260px; overflow:auto;">
+      ${head}
+      ${rows}
+    </div>
+  `;
+}
+
+function renderKV(label, valueHtml) {
+  return `<dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd>`;
 }
 function renderIf(label, value) {
   if (value == null || value === '') return '';
@@ -486,65 +528,18 @@ function fmtDate(iso){
   try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
   catch { return ''; }
 }
-function renderCardsTable(cards) {
-  if (!Array.isArray(cards) || cards.length === 0) return '';
-  const rows = cards.map(c => {
-    const date = c.date || c.date_of_break || c.break_date || '';
-    const chan = c.channel || c.break_channel || '';
-    const num  = c.break_no || c.break_number || c.break || '';
-    const desc = c.description || c.card_description || c.title || c.card || '';
-    return `
-      <tr>
-        <td>${escapeHtml(String(date || ''))}</td>
-        <td>${escapeHtml(String(chan || ''))}</td>
-        <td class="right">${escapeHtml(String(num || ''))}</td>
-        <td>${escapeHtml(String(desc || ''))}</td>
-      </tr>
-    `;
-  }).join('');
-  return `
-    <h3 class="sheet-subhead">Cards (${cards.length})</h3>
-    <div class="table-wrap" style="margin:8px 0">
-      <div class="table-scroller">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="left">Date of break</th>
-              <th class="left">Break channel</th>
-              <th class="right">Break #</th>
-              <th class="left">Card description</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-function renderAddress(r) {
-  const parts = [
-    r.ship_name || r.name,
-    r.ship_addr1 || r.address1,
-    r.ship_addr2 || r.address2,
-    [r.ship_city || r.city, r.ship_state || r.state, r.ship_zip || r.zip].filter(Boolean).join(', '),
-  ].filter(Boolean);
-  if (!parts.length) return '';
-  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
-}
 
 async function openSubmissionDetails(id) {
-  ensureDetailHost();
   openSubmissionDetailsPanel();
 
-  const title = $('subsheet-title');
-  const body  = $('subsheet-body');
-  if (title) title.textContent = `Submission ${id}`;
-  if (body)  body.innerHTML = `<div class="muted">Loading…</div>`;
+  const titleEl = $('details-title');
+  const bodyEl  = $('details-body');
+  if (titleEl) titleEl.textContent = `Submission ${id}`;
+  if (bodyEl)  bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
 
   try {
     const r = await fetchSubmission(id);
 
-    // normalize a few aliases we already show in the table
     const evalAmtNum = Number(
       (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
     ) || 0;
@@ -557,7 +552,7 @@ async function openSubmissionDetails(id) {
     const shipHTML = renderAddress(r);
 
     const gridHTML = `
-      <div class="kv-grid">
+      <dl class="dl">
         ${renderKV('Submission', `<code>${escapeHtml(String(r.submission_id || r.id || id))}</code>`)}
         ${renderIf('Email', r.customer_email || r.email)}
         ${renderIf('Status', r.status)}
@@ -567,22 +562,21 @@ async function openSubmissionDetails(id) {
         ${renderKV('Grand', escapeHtml(fmtMoney(grand)))}
         ${renderIf('Grading Service', r.grading_service || r.grading_services || r.service || r.grading)}
         ${renderKV('Paid', escapeHtml(fmtMoney(paidAmt)))}
-        ${renderIf('Order', r.shopify_order_name ? `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>` : '')}
         ${shipHTML ? renderKV('Ship-to', shipHTML) : ''}
-      </div>
+      </dl>
     `;
 
     const cardsHTML = renderCardsTable(cards);
     const jsonHTML = `
       <details style="margin-top:12px">
         <summary>Raw JSON</summary>
-        <pre style="white-space:pre-wrap">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
+        <pre class="json">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
       </details>
     `;
 
-    body.innerHTML = gridHTML + cardsHTML + jsonHTML;
+    bodyEl.innerHTML = gridHTML + cardsHTML + jsonHTML;
   } catch (e) {
-    body.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
+    bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
   }
 }
 
@@ -596,7 +590,6 @@ function wireRowClickDelegation(){
 
   console.debug('[psa-admin] tbody click delegation wired');
 
-  // Click to open (even when clicking an <a> inside the row)
   tb.addEventListener('click', (e) => {
     const tr = e.target?.closest?.('tr[data-id]');
     if (!tr) return;
@@ -604,20 +597,12 @@ function wireRowClickDelegation(){
     const id = tr.dataset.id;
     if (!id) return;
 
-    // If user clicked the "Submission" link (or any <a> in the row),
-    // stop navigation and open our drawer instead.
     const a = e.target.closest('a');
-    if (a) {
-      e.preventDefault();
-      e.stopPropagation();
-      console.debug('[psa-admin] intercepted anchor click for row', id, a.href);
-    }
+    if (a) { e.preventDefault(); e.stopPropagation(); }
 
-    console.debug('[psa-admin] row click → open details', id);
     openSubmissionDetails(id);
   }, true);
 
-  // Keyboard accessibility on rows
   tb.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     const tr = e.target?.closest?.('tr[data-id]');
@@ -625,16 +610,13 @@ function wireRowClickDelegation(){
     const id = tr.dataset.id;
     if (!id) return;
     e.preventDefault();
-    console.debug('[psa-admin] row keydown Enter → open details', id);
     openSubmissionDetails(id);
   });
 }
 
-// If table.js ever dispatches a custom event, handle it too.
 window.addEventListener('psa:open-details', (e) => {
   const { id, friendly } = e.detail || {};
   if (!id && !friendly) return;
-  console.debug('[psa-admin] psa:open-details event', e.detail);
   openSubmissionDetails(id || friendly);
 });
 
