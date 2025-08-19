@@ -229,6 +229,62 @@ export function applyFilters(){
   renderTable(visibleKeys);
 }
 
+/* ---------- NEW: row click/keyboard wiring ---------- */
+function openDetailsFor(id, friendly) {
+  if (!id) return;
+  // Preferred: a global provided by admin.app.js
+  if (typeof window.__openAdminDetails === 'function') {
+    window.__openAdminDetails(id, friendly);
+    return;
+  }
+  // Fallback: fire a custom event other code can listen for
+  try {
+    window.dispatchEvent(new CustomEvent('psa:open-details', {
+      detail: { id, friendly }
+    }));
+  } catch (e) {
+    console.warn('[psa-admin] No details opener wired; id =', id);
+  }
+}
+
+function wireRowOpenHandlers(tbody) {
+  if (!tbody) return;
+
+  // prevent stacking handlers on re-render
+  if (tbody.__rowClick) tbody.removeEventListener('click', tbody.__rowClick);
+  if (tbody.__rowKey)   tbody.removeEventListener('keydown', tbody.__rowKey);
+
+  const onClick = (e) => {
+    const tr = e.target.closest('tr.rowlink');
+    if (!tr || tr.closest('table') !== tbody.closest('table')) return;
+
+    // ignore clicks on interactive children if you add any later
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (['a','button','input','select','textarea','label'].includes(tag)) return;
+
+    const id = tr.getAttribute('data-id');
+    const friendly = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || id;
+    openDetailsFor(id, friendly);
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const tr = e.target.closest('tr.rowlink');
+      if (!tr) return;
+      e.preventDefault();
+      const id = tr.getAttribute('data-id');
+      const friendly = tr.querySelector('td:nth-child(2)')?.textContent?.trim() || id;
+      openDetailsFor(id, friendly);
+    }
+  };
+
+  tbody.addEventListener('click', onClick);
+  tbody.addEventListener('keydown', onKey);
+  tbody.__rowClick = onClick;
+  tbody.__rowKey   = onKey;
+}
+/* ---------- END NEW ---------- */
+
 export function renderTable(visibleKeys){
   const body = $('subsTbody');
   const emptyEl = $('subsEmpty');
@@ -259,26 +315,28 @@ export function renderTable(visibleKeys){
   const end = Math.min(start + pageSize, viewRows.length);
   const rows = viewRows.slice(start, end);
 
-body.innerHTML = rows.map(r => {
-  const id = String(r.submission_id || r.id || '').trim();
-  return `
-    <tr
-      class="rowlink"
-      data-id="${escapeHtml(id)}"
-      tabindex="0"
-      role="button"
-      aria-label="Open details for submission ${escapeHtml(id)}"
-    >
-      ${visibleKeys.map(key => {
-        const col = colMap.get(key);
-        const val = r[key];
-        const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
-        return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
-      }).join('')}
-    </tr>
-  `;
-}).join('');
+  body.innerHTML = rows.map(r => {
+    const id = String(r.submission_id || r.id || '').trim();
+    return `
+      <tr
+        class="rowlink"
+        data-id="${escapeHtml(id)}"
+        tabindex="0"
+        role="button"
+        aria-label="Open details for submission ${escapeHtml(id)}"
+      >
+        ${visibleKeys.map(key => {
+          const col = colMap.get(key);
+          const val = r[key];
+          const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
+          return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
+        }).join('')}
+      </tr>
+    `;
+  }).join('');
 
+  // 🔌 attach row open handlers after every render
+  wireRowOpenHandlers(body);
 
   // pagination UI (null-safe)
   const total = viewRows.length;
