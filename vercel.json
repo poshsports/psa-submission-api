@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "routes": [
     { "src": "^/api/admin-login$",  "methods": ["POST"], "dest": "/api/proxy/admin-login.js" },
     { "src": "^/api/admin-logout$", "methods": ["POST"], "dest": "/api/proxy/admin-logout.js" },
