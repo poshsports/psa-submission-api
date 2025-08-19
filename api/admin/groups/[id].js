@@ -26,12 +26,14 @@ export default async function handler(req, res) {
       res.status(500).json({ ok: false, error: error.message || 'Database error' });
       return;
     }
-    if (!data) {
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
       res.status(404).json({ ok: false, error: 'Group not found' });
       return;
     }
 
-    res.status(200).json({ ok: true, group: data });
+    res.status(200).json({ ok: true, group: row });
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
