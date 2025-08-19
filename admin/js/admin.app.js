@@ -434,18 +434,46 @@ function pickFirst(...vals){
 }
 
 function renderAddress(r) {
-  // accept many shapes
-  const nested =
-    r.shipping_address || r.shopify_shipping_address ||
-    r.ship_address || r.ship_to || r.address || null;
+  // If the backend already gives a single formatted string, use it.
+  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
+    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
+  }
 
-  const name = pickFirst(r.ship_name, r.shipping_name, nested?.name, r.name, r.customer_name);
-  const a1   = pickFirst(r.ship_addr1, r.address1, nested?.address1, nested?.line1);
-  const a2   = pickFirst(r.ship_addr2, r.address2, nested?.address2, nested?.line2);
-  const city = pickFirst(r.ship_city,  r.city,     nested?.city);
-  const st   = pickFirst(r.ship_state, r.state,    nested?.state, nested?.province);
-  const zip  = pickFirst(r.ship_zip,   r.zip,      nested?.zip, nested?.postal_code, nested?.postal);
-  const country = pickFirst(r.ship_country, r.country, nested?.country);
+  // Try common nested objects first
+  const nested =
+    r.shipping_address ||
+    r.shopify_shipping_address ||
+    r.ship_address ||
+    r.address ||
+    r.shipping ||
+    r.shippingAddress ||
+    null;
+
+  const pick = (...vals) => {
+    for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
+    return '';
+  };
+
+  const name = pick(
+    r.ship_name, r.shipping_name, r.ship_to_name,
+    r.customer_name, r.name,
+    nested?.name, nested?.recipient, nested?.full_name
+  );
+
+  const a1 = pick(
+    r.ship_addr1, r.ship_address1, r.address1,
+    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1
+  );
+
+  const a2 = pick(
+    r.ship_addr2, r.ship_address2, r.address2,
+    nested?.address2, nested?.line2, nested?.addr2, nested?.street2, nested?.street_address2
+  );
+
+  const city = pick(r.ship_city, r.city, nested?.city, nested?.town, nested?.locality);
+  const st   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
+  const zip  = pick(r.ship_zip, r.zip, nested?.zip, nested?.postal_code, nested?.postal);
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
 
   const parts = [
     name,
@@ -458,6 +486,7 @@ function renderAddress(r) {
   if (!parts.length) return '';
   return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
 }
+
 
 function renderCardsTable(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return '';
@@ -506,7 +535,10 @@ async function openSubmissionDetails(id) {
 
   const titleEl = $('details-title');
   const bodyEl  = $('details-body');
-  if (titleEl) titleEl.textContent = `Submission ${id}`;
+  if (titleEl) {
+  const titleId = String((r && (r.submission_id || r.id)) || id).toUpperCase();
+  titleEl.innerHTML = `<strong>Submission ${escapeHtml(titleId)}</strong>`;
+}
   if (bodyEl)  bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
 
   try {
