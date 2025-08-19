@@ -1,7 +1,7 @@
 // api/admin/groups/[id].js
 const { requireAdmin } = require('../../_util/adminAuth');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });
     return;
@@ -37,4 +37,4 @@ export default async function handler(req, res) {
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
-}
+};
