@@ -444,9 +444,22 @@ function ensureDetailHost() {
 function openSubmissionDetailsPanel() {
   ensureDetailHost();
   const host = $('subsheet');
+  if (!host) { console.error('[psa-admin] failed to create #subsheet'); return; }
+
+  // Force overlay styling in case CSS didn’t load or gets overridden
   host.classList.remove('hide');
+  host.style.position = 'fixed';
+  host.style.inset = '0';
+  host.style.display = 'flex';
+  host.style.alignItems = 'stretch';
+  host.style.justifyContent = 'flex-end';
+  host.style.background = 'rgba(16,24,40,.35)';
+  host.style.zIndex = '9999';
+
+  host.setAttribute('aria-hidden','false');
   document.body.style.overflow = 'hidden';
 }
+
 
 function closeSubmissionDetails() {
   const host = $('subsheet');
