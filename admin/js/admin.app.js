@@ -185,35 +185,35 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
       if (selEnd && sameDate(d, selEnd)) cell.classList.add('rc-end');
     }
 
-// hover preview (no rebuild — just repaint classes)
-cell.addEventListener('mouseenter', () => {
-  if (selStart && !selEnd){
-    hoverDay = mid(parseYMD(cell.dataset.date));
-    paintRangeClasses();
-  }
-});
+    // hover preview (no rebuild — just repaint classes)
+    cell.addEventListener('mouseenter', () => {
+      if (selStart && !selEnd){
+        hoverDay = mid(parseYMD(cell.dataset.date));
+        paintRangeClasses();
+      }
+    });
 
-// click selection (second click sets end but does not auto-apply)
-cell.addEventListener('click', () => {
-  const d2 = mid(parseYMD(cell.dataset.date));
-  if (!selStart || (selStart && selEnd)){
-    // start new range
-    selStart = d2; selEnd = null; hoverDay = d2;
-    paintRangeClasses();
-  } else {
-    // finish range
-    let a = selStart, b = d2;
-    if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
-    selStart = a; selEnd = b; hoverDay = null;
+    // click selection (second click sets end but does not auto-apply)
+    cell.addEventListener('click', () => {
+      const d2 = mid(parseYMD(cell.dataset.date));
+      if (!selStart || (selStart && selEnd)){
+        // start new range
+        selStart = d2; selEnd = null; hoverDay = d2;
+        paintRangeClasses();
+      } else {
+        // finish range
+        let a = selStart, b = d2;
+        if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
+        selStart = a; selEnd = b; hoverDay = null;
 
-    const from = $('dateFrom'), to = $('dateTo');
-    if (from) from.value = fmtYMD(a);
-    if (to)   to.value   = fmtYMD(b);
+        const from = $('dateFrom'), to = $('dateTo');
+        if (from) from.value = fmtYMD(a);
+        if (to)   to.value   = fmtYMD(b);
 
-    updateDateButtonLabel();  // reflect on button
-    paintRangeClasses();      // keep popover open for review; user clicks Apply
-  }
-});
+        updateDateButtonLabel();  // reflect on button
+        paintRangeClasses();      // keep popover open for review; user clicks Apply
+      }
+    });
 
     gridEl.appendChild(cell);
   }
@@ -234,7 +234,7 @@ function paintCalendars(){
   buildMonth(titleL, gridL, leftMonth);
   buildMonth(titleR, gridR, rightMonth);
 
-  // --- STEP 3: repaint classes + wire leave handlers ---
+  // repaint classes + leave handlers
   paintRangeClasses();
 
   const gl = $('rc-grid-left'), gr = $('rc-grid-right');
@@ -383,6 +383,9 @@ function wireUI(){
   $('close-columns')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
+
+  // row click → details sheet (delegated)
+  wireRowClickDelegation();
 }
 
 // Fallback delegation
@@ -407,112 +410,178 @@ function currentVisibleKeys(){
   return ths.map(th => th.dataset.key);
 }
 
-// ===== Submission Details drawer =====
-let detailsWired = false;
+// ===================================================================
+// Submission details (dynamic right-side sheet)
+// ===================================================================
+function ensureDetailHost() {
+  if ($('subsheet')) return;
 
-function wireDetailsDrawer(){
-  if (detailsWired) return;
-  detailsWired = true;
+  const host = document.createElement('div');
+  host.id = 'subsheet';
+  host.className = 'sheet-backdrop hide';
+  host.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="subsheet-title">
+      <div class="sheet-head">
+        <div id="subsheet-title" class="sheet-title">Submission</div>
+        <button id="subsheet-close" class="btn" type="button">Close</button>
+      </div>
+      <div id="subsheet-body" class="sheet-body">
+        <div class="muted">Loading…</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(host);
 
-  const tbody     = $('subsTbody');
-  const backdrop  = document.getElementById('details-backdrop');
-  const bodyEl    = document.getElementById('details-body');
-  const titleEl   = document.getElementById('details-title');
-  const closeBtn  = document.getElementById('details-close');
-  const closeBtn2 = document.getElementById('details-close-2');
-
-  if (!tbody || !backdrop || !bodyEl || !titleEl) return;
-
-  const close = () => { backdrop.classList.remove('show'); bodyEl.innerHTML = ''; };
-
-  // close interactions
-  closeBtn?.addEventListener('click', close);
-  closeBtn2?.addEventListener('click', close);
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-
-  // open on row click (ignore buttons/links inside row)
-  tbody.addEventListener('click', async (e) => {
-    if (e.target.closest('a,button')) return;
-    const tr = e.target.closest('tr[data-id]');
-    const id = tr?.dataset.id;
-    if (!id) return;
-
-    titleEl.textContent = `Submission ${id}`;
-    bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
-    backdrop.classList.add('show');
-
-    try{
-      const data = await fetchSubmission(id);
-      renderDetails(bodyEl, data);
-    }catch(err){
-      bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(err.message || 'Error')}</div>`;
-    }
+  $('subsheet-close').onclick = closeSubmissionDetails;
+  host.addEventListener('click', (e) => {
+    if (e.target === host) closeSubmissionDetails();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSubmissionDetails();
   });
 }
 
-function renderDetails(container, d){
-  const email   = d.customer_email || d.email || '';
-  const status  = d.status || '';
-  const created = safeDate(d.created_at || d.inserted_at || d.submitted_at_iso || d.submitted_at);
-  const cardsCt = Array.isArray(d.card_info) ? d.card_info.length : (d.cards ?? '');
-  const evalAmt = (d?.totals?.evaluation ?? d.evaluation ?? d.eval_line_sub ?? 0) || 0;
-  const evalYes = Number(evalAmt) > 0 ? 'Yes' : 'No';
-  const grand   = money(d?.totals?.grand ?? d.grand_total ?? d.total ?? 0);
-  const paidAt  = safeDate(d.paid_at_iso);
-  const paidAmt = money(d.paid_amount || 0);
-  const order   = d.shopify_order_name || '';
-  const svc     = (d.grading_service ?? d.grading_services ?? d.service ?? d.grading ?? '') || '';
-
-  let cardsHtml = '';
-  if (Array.isArray(d.card_info) && d.card_info.length){
-    cardsHtml = `
-      <div class="block">
-        <div class="block-title">Cards (${d.card_info.length})</div>
-        <div class="cards-table">
-          <div class="ct-head">
-            <div>Player</div><div>Year</div><div>Brand</div><div>Card</div><div>Notes</div>
-          </div>
-          ${d.card_info.map(c => `
-            <div class="ct-row">
-              <div>${escapeHtml(String(c.player ?? ''))}</div>
-              <div>${escapeHtml(String(c.year ?? ''))}</div>
-              <div>${escapeHtml(String(c.brand ?? ''))}</div>
-              <div>${escapeHtml(String(c.card ?? ''))}</div>
-              <div>${escapeHtml(String(c.notes ?? ''))}</div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  const raw = `<details class="block"><summary class="block-title">Raw JSON</summary><pre class="json">${escapeHtml(JSON.stringify(d, null, 2))}</pre></details>`;
-
-  container.innerHTML = `
-    <div class="dl">
-      <dt>Submission</dt><dd><code>${escapeHtml(String(d.submission_id || d.id || ''))}</code></dd>
-      <dt>Email</dt><dd>${escapeHtml(String(email))}</dd>
-      <dt>Status</dt><dd>${escapeHtml(String(status))}</dd>
-      <dt>Created</dt><dd>${escapeHtml(created)}</dd>
-      <dt>Cards</dt><dd>${escapeHtml(String(cardsCt))}</dd>
-      <dt>Evaluation</dt><dd>${evalYes}${evalYes === 'Yes' ? ` (${money(evalAmt)})` : ''}</dd>
-      <dt>Grand</dt><dd>${grand}</dd>
-      <dt>Grading Service</dt><dd>${escapeHtml(String(svc))}</dd>
-      <dt>Paid</dt><dd>${paidAt ? `${escapeHtml(paidAt)} — ${paidAmt}` : paidAmt}</dd>
-      <dt>Order</dt><dd>${order ? `<span class="pill">${escapeHtml(order)}</span>` : ''}</dd>
-    </div>
-
-    ${cardsHtml}
-    ${raw}
-  `;
+function openSubmissionDetailsPanel() {
+  ensureDetailHost();
+  const host = $('subsheet');
+  host.classList.remove('hide');
+  document.body.style.overflow = 'hidden';
 }
 
-function safeDate(iso){
+function closeSubmissionDetails() {
+  const host = $('subsheet');
+  if (host) host.classList.add('hide');
+  document.body.style.overflow = '';
+}
+
+function renderKV(label, valueHtml) {
+  return `
+    <div class="kv-label">${escapeHtml(label)}</div>
+    <div class="kv-value">${valueHtml}</div>
+  `;
+}
+function renderIf(label, value) {
+  if (value == null || value === '') return '';
+  return renderKV(label, escapeHtml(String(value)));
+}
+function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
+function fmtDate(iso){
   try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
   catch { return ''; }
 }
-function money(n){ return `$${(Number(n)||0).toLocaleString()}`; }
+function renderCardsTable(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return '';
+  const rows = cards.map(c => {
+    const date = c.date || c.date_of_break || c.break_date || '';
+    const chan = c.channel || c.break_channel || '';
+    const num  = c.break_no || c.break_number || c.break || '';
+    const desc = c.description || c.card_description || c.title || c.card || '';
+    return `
+      <tr>
+        <td>${escapeHtml(String(date || ''))}</td>
+        <td>${escapeHtml(String(chan || ''))}</td>
+        <td class="right">${escapeHtml(String(num || ''))}</td>
+        <td>${escapeHtml(String(desc || ''))}</td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <h3 class="sheet-subhead">Cards (${cards.length})</h3>
+    <div class="table-wrap" style="margin:8px 0">
+      <div class="table-scroller">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="left">Date of break</th>
+              <th class="left">Break channel</th>
+              <th class="right">Break #</th>
+              <th class="left">Card description</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+function renderAddress(r) {
+  const parts = [
+    r.ship_name || r.name,
+    r.ship_addr1 || r.address1,
+    r.ship_addr2 || r.address2,
+    [r.ship_city || r.city, r.ship_state || r.state, r.ship_zip || r.zip].filter(Boolean).join(', '),
+  ].filter(Boolean);
+  if (!parts.length) return '';
+  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
+}
+
+async function openSubmissionDetails(id) {
+  ensureDetailHost();
+  openSubmissionDetailsPanel();
+
+  const title = $('subsheet-title');
+  const body  = $('subsheet-body');
+  if (title) title.textContent = `Submission ${id}`;
+  if (body)  body.innerHTML = `<div class="muted">Loading…</div>`;
+
+  try {
+    const r = await fetchSubmission(id);
+
+    // normalize a few aliases we already show in the table
+    const evalAmtNum = Number(
+      (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
+    ) || 0;
+    const evalYesNo  = evalAmtNum > 0 ? 'Yes' : 'No';
+
+    const grand   = r?.totals?.grand ?? r.grand_total ?? r.total ?? r.grand ?? 0;
+    const paidAmt = r.paid_amount || 0;
+    const cards   = r.card_info || r.cards || r.items || [];
+
+    const shipHTML = renderAddress(r);
+
+    const gridHTML = `
+      <div class="kv-grid">
+        ${renderKV('Submission', `<code>${escapeHtml(String(r.submission_id || r.id || id))}</code>`)}
+        ${renderIf('Email', r.customer_email || r.email)}
+        ${renderIf('Status', r.status)}
+        ${renderKV('Created', escapeHtml(fmtDate(r.created_at || r.inserted_at || r.submitted_at_iso || r.submitted_at)))}
+        ${renderKV('Cards', String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}
+        ${renderKV('Evaluation', evalYesNo)}
+        ${renderKV('Grand', escapeHtml(fmtMoney(grand)))}
+        ${renderIf('Grading Service', r.grading_service || r.grading_services || r.service || r.grading)}
+        ${renderKV('Paid', escapeHtml(fmtMoney(paidAmt)))}
+        ${renderIf('Order', r.shopify_order_name ? `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>` : '')}
+        ${shipHTML ? renderKV('Ship-to', shipHTML) : ''}
+      </div>
+    `;
+
+    const cardsHTML = renderCardsTable(cards);
+    const jsonHTML = `
+      <details style="margin-top:12px">
+        <summary>Raw JSON</summary>
+        <pre style="white-space:pre-wrap">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
+      </details>
+    `;
+
+    body.innerHTML = gridHTML + cardsHTML + jsonHTML;
+  } catch (e) {
+    body.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
+  }
+}
+
+function wireRowClickDelegation(){
+  const tb = $('subsTbody');
+  if (!tb || tb.__wiredRowClick) return;
+  tb.__wiredRowClick = true;
+  tb.addEventListener('click', (e) => {
+    if (e.target.closest('a,button')) return; // don't hijack links/buttons
+    const tr = e.target && e.target.closest('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    if (!id) return;
+    openSubmissionDetails(id);
+  });
+}
 
 // ===== auth & boot =====
 async function doLogin(){
@@ -543,7 +612,6 @@ async function doLogin(){
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
-    wireDetailsDrawer()
     updateDateButtonLabel();
     views.initViews();
     loadReal();
@@ -602,7 +670,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (shellEl) shellEl.classList.remove('hide');
 
     wireUI();
-    wireDetailsDrawer();
     updateDateButtonLabel();
     views.initViews();
     loadReal();
