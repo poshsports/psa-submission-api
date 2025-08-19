@@ -358,8 +358,35 @@ function currentVisibleKeys(){
 }
 
 // ===================================================================
-// Submission details (static #details-backdrop in index.html)
+// Submission details – create the drawer DOM on demand
 // ===================================================================
+
+// Create the drawer markup if it's missing (so no HTML edits required)
+function ensureDetailsHost() {
+  if ($('details-backdrop')) return;
+
+  const back = document.createElement('div');
+  back.id = 'details-backdrop';
+  back.className = 'details-backdrop';
+  back.setAttribute('aria-hidden','true');
+  back.innerHTML = `
+    <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="details-title">
+      <div class="details-head">
+        <div id="details-title" class="sheet-title">Submission</div>
+        <button id="details-close" class="btn" type="button">Close</button>
+      </div>
+      <div id="details-body" class="details-body">
+        <div class="loading">Loading…</div>
+      </div>
+      <div class="details-foot">
+        <div></div>
+        <button id="details-close-2" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(back);
+}
+
 function ensureDetailsBackdropWired() {
   const back = $('details-backdrop');
   if (!back || back.__wired) return;
@@ -382,7 +409,10 @@ function ensureDetailsBackdropWired() {
 }
 
 function openSubmissionDetailsPanel() {
+  // make sure DOM exists before we try to render into it
+  ensureDetailsHost();
   ensureDetailsBackdropWired();
+
   const back = $('details-backdrop');
   if (!back) return;
   back.classList.add('show');
@@ -521,7 +551,7 @@ async function openSubmissionDetails(id) {
 
     bodyEl.innerHTML = gridHTML + cardsHTML + jsonHTML;
   } catch (e) {
-    bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
+    if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
   }
 }
 
