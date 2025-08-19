@@ -569,19 +569,57 @@ async function openSubmissionDetails(id) {
   }
 }
 
+// Allow other modules / inline HTML to open the sheet.
+window.__openAdminDetails = (id, friendly) => openSubmissionDetails(id || friendly || '');
+
 function wireRowClickDelegation(){
   const tb = $('subsTbody');
   if (!tb || tb.__wiredRowClick) return;
   tb.__wiredRowClick = true;
+
+  console.debug('[psa-admin] tbody click delegation wired');
+
+  // Click to open (even when clicking an <a> inside the row)
   tb.addEventListener('click', (e) => {
-    if (e.target.closest('a,button')) return; // don't hijack links/buttons
-    const tr = e.target && e.target.closest('tr[data-id]');
+    const tr = e.target?.closest?.('tr[data-id]');
+    if (!tr) return;
+
+    const id = tr.dataset.id;
+    if (!id) return;
+
+    // If user clicked the "Submission" link (or any <a> in the row),
+    // stop navigation and open our drawer instead.
+    const a = e.target.closest('a');
+    if (a) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.debug('[psa-admin] intercepted anchor click for row', id, a.href);
+    }
+
+    console.debug('[psa-admin] row click → open details', id);
+    openSubmissionDetails(id);
+  }, true);
+
+  // Keyboard accessibility on rows
+  tb.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const tr = e.target?.closest?.('tr[data-id]');
     if (!tr) return;
     const id = tr.dataset.id;
     if (!id) return;
+    e.preventDefault();
+    console.debug('[psa-admin] row keydown Enter → open details', id);
     openSubmissionDetails(id);
   });
 }
+
+// If table.js ever dispatches a custom event, handle it too.
+window.addEventListener('psa:open-details', (e) => {
+  const { id, friendly } = e.detail || {};
+  if (!id && !friendly) return;
+  console.debug('[psa-admin] psa:open-details event', e.detail);
+  openSubmissionDetails(id || friendly);
+});
 
 // ===== auth & boot =====
 async function doLogin(){
