@@ -356,3 +356,37 @@ body.col-dragging { cursor: grabbing; }
 
 .loading{ color:var(--muted); padding:12px; }
 .json{ background:#0b1020; color:#d5e1ff; padding:12px; border-radius:8px; overflow:auto; }
+
+/* ===== Right-side sheet for submission details ===== */
+.sheet-backdrop{
+  position:fixed; inset:0; background:rgba(16,24,40,.35);
+  display:flex; align-items:stretch; justify-content:flex-end;
+  z-index:60;
+}
+.sheet-backdrop.hide{ display:none; }
+.sheet{
+  width:760px; max-width:100%; height:100%;
+  background:#fff; border-left:1px solid var(--line);
+  display:flex; flex-direction:column;
+}
+.sheet-head{
+  padding:14px 16px; border-bottom:1px solid var(--line);
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--surface-2);
+}
+.sheet-title{ font-weight:700; }
+.sheet-body{ padding:16px; overflow:auto; }
+
+/* Compact label/value grid */
+.kv-grid{
+  display:grid; grid-template-columns: 200px 1fr;
+  column-gap:16px; row-gap:10px; align-items:baseline;
+  margin-bottom:10px;
+}
+.kv-label{ color:var(--muted); }
+.kv-value{ color:var(--text); }
+.shipto{ font-style:normal; color:var(--text); }
+
+/* Make table rows feel clickable */
+.rowlink{ cursor:pointer; }
+
