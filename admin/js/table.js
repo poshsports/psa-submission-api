@@ -259,16 +259,16 @@ export function renderTable(visibleKeys){
   const end = Math.min(start + pageSize, viewRows.length);
   const rows = viewRows.slice(start, end);
 
-  body.innerHTML = rows.map(r => `
-    <tr data-id="${escapeHtml(String(r.submission_id || ''))}">
-      ${visibleKeys.map(key => {
-        const col = colMap.get(key);
-        const val = r[key];
-        const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
-        return `<td data-key="${key}" style="text-align:center;vertical-align:middle"><div class="tdc">${out}</div></td>`;
-      }).join('')}
-    </tr>
-  `).join('');
+body.innerHTML = rows.map(r => `
+  <tr data-id="${escapeHtml(String(r.submission_id || r.id || ''))}">
+    ${visibleKeys.map(key => {
+      const col = colMap.get(key);
+      const val = r[key];
+      const out = col?.format ? col.format(val) : escapeHtml(String(val ?? ''));
+      return `<td style="text-align:center;vertical-align:middle">${out}</td>`;
+    }).join('')}
+  </tr>
+`).join('');
 
   // pagination UI (null-safe)
   const total = viewRows.length;
