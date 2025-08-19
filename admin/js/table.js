@@ -139,13 +139,11 @@ export function paintCarets(){
   if (el) el.textContent = sortDir === 'asc' ? '▲' : '▼';
 }
 function getSelectedStatuses() {
-  const sel = $('fStatus');
-  if (!sel) return [];
-  // collect selected <option>s, normalize, and ignore any "all"
-  return Array.from(sel.selectedOptions || [])
-    .map(o => String(o.value || '').trim().toLowerCase())
-    .filter(v => v && v !== 'all');
+  return Array.from(
+    document.querySelectorAll('#status-popover input[type="checkbox"][data-status]:checked')
+  ).map(cb => String(cb.getAttribute('data-status') || '').trim().toLowerCase());
 }
+
 export function applyFilters() {
   // free-text query
   const q = ($('q')?.value || '').trim().toLowerCase();
