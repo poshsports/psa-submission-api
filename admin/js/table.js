@@ -141,7 +141,7 @@ export function paintCarets(){
 function getSelectedStatuses() {
   return Array.from(
     document.querySelectorAll('#status-popover input[type="checkbox"][data-status]:checked')
-  ).map(cb => String(cb.getAttribute('data-status') || '').trim().toLowerCase());
+  ).map(el => el.getAttribute('data-status'));
 }
 
 export function applyFilters() {
