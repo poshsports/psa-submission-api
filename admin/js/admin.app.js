@@ -465,13 +465,6 @@ function renderAddress(r) {
   );
 
   // ---- ADDRESS LINES ----
-// BEFORE (your current a1 didn't consider "street")
-const a1 = pick(
-  r.ship_addr1, r.ship_address1, r.address1,
-  nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1
-);
-
-// AFTER (adds fallback to nested?.street so existing rows show street)
 const a1 = pick(
   r.ship_addr1, r.ship_address1, r.address1,
   nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
