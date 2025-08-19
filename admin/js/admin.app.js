@@ -434,7 +434,12 @@ function pickFirst(...vals){
 }
 
 function renderAddress(r) {
-  // Prefer structured fields; only fall back to a single preformatted string.
+  // If backend gives a single formatted string, use it.
+  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
+    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
+  }
+
+  // Common nested containers we see in different sources
   const nested =
     r.shipping_address ||
     r.shopify_shipping_address ||
@@ -449,52 +454,46 @@ function renderAddress(r) {
     return '';
   };
 
-  // Do we have enough structured pieces to build a full address?
-  const hasStructured =
-    !!(pick(r.ship_addr1, r.address1, nested?.address1, nested?.line1, nested?.street1, nested?.addr1) ||
-       pick(r.ship_city,  r.city,     nested?.city,   nested?.locality, nested?.town) ||
-       pick(r.ship_state, r.state,    nested?.state,  nested?.region,   nested?.province, nested?.state_code, nested?.province_code) ||
-       pick(r.ship_zip,   r.zip,      nested?.zip,    nested?.postal_code, nested?.postal));
+  // ---- NAME ----
+  // (Your sample JSON doesn’t include a name. This will show it as soon as the API provides any of these.)
+  const name = pick(
+    r.ship_name, r.shipping_name, r.ship_to_name,
+    r.customer_name, r.name,
+    nested?.name,
+    (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
+    nested?.recipient, nested?.full_name, nested?.contact_name
+  );
 
-  if (nested || hasStructured) {
-    const name = pick(
-      r.ship_name, r.shipping_name, r.ship_to_name, r.customer_name, r.name,
-      nested?.name, nested?.recipient, nested?.full_name
-    );
-    const a1 = pick(
-      r.ship_addr1, r.ship_address1, r.address1,
-      nested?.address1, nested?.line1, nested?.street1, nested?.addr1, nested?.street_address1
-    );
-    const a2 = pick(
-      r.ship_addr2, r.ship_address2, r.address2,
-      nested?.address2, nested?.line2, nested?.street2, nested?.addr2, nested?.street_address2
-    );
-    const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.locality, nested?.town);
-    const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
-    const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
-    const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
+  // ---- ADDRESS LINES ----
+  // Your JSON uses { address: { street: "12 Christopher Way", ... } }
+  const a1 = pick(
+    r.ship_addr1, r.ship_address1, r.address1,
+    nested?.address1, nested?.line1,
+    nested?.street,               // <— NEW: handle {street: "..."}
+    nested?.street1, nested?.address_line1, nested?.address_line_1, nested?.addr1, nested?.street_address1
+  );
 
-    const lines = [];
-    if (name) lines.push(name);
-    if (a1)   lines.push(a1);
-    if (a2)   lines.push(a2);
-    const cityLine = [city, state, zip].filter(Boolean).join(', ').replace(', ,', ', ');
-    if (cityLine) lines.push(cityLine);
-    if (country)  lines.push(country);
+  // address line 2 / suite / unit / apt
+  const a2Raw = pick(
+    r.ship_addr2, r.ship_address2, r.address2,
+    nested?.address2, nested?.line2,
+    nested?.street2, nested?.address_line2, nested?.address_line_2,
+    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
+  );
+  // Normalize common variants like “Suite 500” when only the number is provided
+  const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
+    ? `Suite ${a2Raw}` : a2Raw;
 
-    if (lines.length) {
-      return `<address class="shipto">${lines.map(escapeHtml).join('<br>')}</address>`;
-    }
-  }
+  // ---- CITY / STATE / ZIP / COUNTRY ----
+  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
+  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
+  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
 
-  // Fallback: use whatever single string we were sent.
-  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
-    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
-  }
-
-  return '';
+  const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
+  if (!parts.length) return '';
+  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
 }
-
 
 function renderCardsTable(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return '';
