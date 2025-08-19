@@ -25,8 +25,7 @@ function ensureSignoutWired(){
 function runFilter(){
   tbl.setPageIndex(0);
   tbl.applyFilters();
-  const pill = $('countPill');
-  if (pill) pill.textContent = String(tbl.viewRows.length);
+  updateCountPill();
 }
 
 function buildServiceOptions(){
@@ -57,10 +56,8 @@ function updateDateButtonLabel(){
 
   if (!f && !t){ btn.textContent = 'Dates: All'; return; }
 
-  const fmt = s => {
-    const [y,m,d] = s.split('-'); return `${m}/${d}`;
-  };
-  // quick detection of presets
+  const fmt = s => { const [y,m,d] = s.split('-'); return `${m}/${d}`; };
+
   const today = new Date(); today.setHours(0,0,0,0);
   const fMs = f ? Date.parse(f) : null;
   const tMs = t ? Date.parse(t) : null;
@@ -68,8 +65,8 @@ function updateDateButtonLabel(){
 
   if (fMs && tMs){
     const span = Math.round((tMs - fMs)/day) + 1;
-    if (span === 1 && tMs === today.getTime()) { btn.textContent = 'Dates: Today'; return; }
-    if (span === 7 && tMs === today.getTime()) { btn.textContent = 'Dates: Last 7 days'; return; }
+    if (span === 1  && tMs === today.getTime()) { btn.textContent = 'Dates: Today'; return; }
+    if (span === 7  && tMs === today.getTime()) { btn.textContent = 'Dates: Last 7 days'; return; }
     if (span === 30 && tMs === today.getTime()) { btn.textContent = 'Dates: Last 30 days'; return; }
   }
   btn.textContent = `Dates: ${f?fmt(f):'…'}–${t?fmt(t):'…'}`;
@@ -81,7 +78,6 @@ function updateDateButtonLabel(){
 const DOW = ['S','M','T','W','T','F','S'];
 const MONTH_FMT = { month: 'long', year: 'numeric' };
 
-// selection + UI state (module-scope so we can re-open cleanly)
 let selStart = null;    // Date | null (midnight)
 let selEnd   = null;    // Date | null (midnight)
 let hoverDay = null;    // Date | null (midnight)
@@ -94,11 +90,9 @@ const startOfMonth = d => new Date(d.getFullYear(), d.getMonth(), 1);
 const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth()+n, 1);
 const sameDate = (a,b) => a && b && a.getTime() === b.getTime();
 
-// Paint selection/hover classes without rebuilding the grids
 function paintRangeClasses(){
   const cells = document.querySelectorAll('#date-popover .rc-cell');
 
-  // derive active preview range
   let a = selStart ? mid(selStart) : null;
   let b = selEnd ? mid(selEnd) : (selStart && hoverDay ? mid(hoverDay) : null);
 
@@ -108,21 +102,17 @@ function paintRangeClasses(){
   cells.forEach(cell => {
     const d = parseYMD(cell.dataset.date);
     cell.classList.remove('rc-in-range','rc-start','rc-end');
-
     if (selStart && sameDate(d, selStart)) cell.classList.add('rc-start');
     if (selEnd   && sameDate(d, selEnd))   cell.classList.add('rc-end');
     if (lo && hi && d >= lo && d <= hi)    cell.classList.add('rc-in-range');
   });
 
-  // footer preview label
   const lab = $('rc-range-label');
   if (lab){
     if (a && b){
       const min = a <= b ? a : b, max = a <= b ? b : a;
       lab.textContent = `${min.toLocaleDateString()} – ${max.toLocaleDateString()}`;
-    } else {
-      lab.textContent = '';
-    }
+    } else lab.textContent = '';
   }
 }
 
@@ -133,16 +123,10 @@ function ensureDowRow(gridEl){
   if (!dow){
     dow = document.createElement('div');
     dow.className = 'rc-dow';
-    DOW.forEach(ch => {
-      const s = document.createElement('div');
-      s.textContent = ch;
-      dow.appendChild(s);
-    });
+    DOW.forEach(ch => { const s = document.createElement('div'); s.textContent = ch; dow.appendChild(s); });
     monthEl.insertBefore(dow, gridEl);
-  } else {
-    if (!dow.firstChild) {
-      DOW.forEach(ch => { const s = document.createElement('div'); s.textContent = ch; dow.appendChild(s); });
-    }
+  } else if (!dow.firstChild) {
+    DOW.forEach(ch => { const s = document.createElement('div'); s.textContent = ch; dow.appendChild(s); });
   }
 }
 
@@ -153,13 +137,11 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
   gridEl.innerHTML = '';
   ensureDowRow(gridEl);
 
-  const firstDow = monthFirstDate.getDay(); // 0..6
-  // Start from the Sunday of the first week shown
+  const firstDow = monthFirstDate.getDay();
   const gridStart = new Date(monthFirstDate);
   gridStart.setDate(1 - firstDow);
   gridStart.setHours(0,0,0,0);
 
-  // determine "preview end" (hover when picking)
   const rngA = selStart ? mid(selStart) : null;
   const rngB = selEnd ? mid(selEnd) : (selStart && hoverDay ? mid(hoverDay) : null);
   let minR = null, maxR = null;
@@ -169,14 +151,13 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
   }
 
   for (let i = 0; i < 42; i++){
-    const d = new Date(gridStart); d.setDate(gridStart.getDate()+i); // each cell
+    const d = new Date(gridStart); d.setDate(gridStart.getDate()+i);
     const cell = document.createElement('div');
     cell.className = 'rc-cell';
     cell.dataset.date = fmtYMD(d);
     cell.textContent = String(d.getDate());
     if (d.getMonth() !== monthFirstDate.getMonth()) cell.classList.add('rc-muted');
 
-    // range styles
     if (rngA){
       if (minR && maxR && d.getTime() >= minR.getTime() && d.getTime() <= maxR.getTime()){
         cell.classList.add('rc-in-range');
@@ -185,33 +166,25 @@ function buildMonth(titleEl, gridEl, monthFirstDate){
       if (selEnd && sameDate(d, selEnd)) cell.classList.add('rc-end');
     }
 
-    // hover preview (no rebuild — just repaint classes)
     cell.addEventListener('mouseenter', () => {
-      if (selStart && !selEnd){
-        hoverDay = mid(parseYMD(cell.dataset.date));
-        paintRangeClasses();
-      }
+      if (selStart && !selEnd){ hoverDay = mid(parseYMD(cell.dataset.date)); paintRangeClasses(); }
     });
 
-    // click selection (second click sets end but does not auto-apply)
     cell.addEventListener('click', () => {
       const d2 = mid(parseYMD(cell.dataset.date));
       if (!selStart || (selStart && selEnd)){
-        // start new range
-        selStart = d2; selEnd = null; hoverDay = d2;
-        paintRangeClasses();
+        selStart = d2; selEnd = null; hoverDay = d2; paintRangeClasses();
       } else {
-        // finish range
         let a = selStart, b = d2;
-        if (b.getTime() < a.getTime()) { const t = a; a = b; b = t; }
+        if (b.getTime() < a.getTime()) [a, b] = [b, a];
         selStart = a; selEnd = b; hoverDay = null;
 
         const from = $('dateFrom'), to = $('dateTo');
         if (from) from.value = fmtYMD(a);
         if (to)   to.value   = fmtYMD(b);
 
-        updateDateButtonLabel();  // reflect on button
-        paintRangeClasses();      // keep popover open for review; user clicks Apply
+        updateDateButtonLabel();
+        paintRangeClasses(); // keep open for Apply
       }
     });
 
@@ -234,46 +207,39 @@ function paintCalendars(){
   buildMonth(titleL, gridL, leftMonth);
   buildMonth(titleR, gridR, rightMonth);
 
-  // repaint classes + leave handlers
   paintRangeClasses();
 
-  const gl = $('rc-grid-left'), gr = $('rc-grid-right');
-  if (gl) gl.onmouseleave = () => {
+  $('rc-grid-left')?.addEventListener('mouseleave', () => {
     if (selStart && !selEnd){ hoverDay = null; paintRangeClasses(); }
-  };
-  if (gr) gr.onmouseleave = () => {
+  }, { once:true });
+  $('rc-grid-right')?.addEventListener('mouseleave', () => {
     if (selStart && !selEnd){ hoverDay = null; paintRangeClasses(); }
-  };
+  }, { once:true });
 }
 
 // ===== popover open/close =====
 function openDatePopover(){
   const pop = $('date-popover'); const btn = $('btnDate');
   if (!pop || !btn) return;
-  if (!pop.classList.contains('hide')) { closeDatePopover(); return; } // toggle
+  if (!pop.classList.contains('hide')) { closeDatePopover(); return; }
 
-  // derive selection from hidden inputs (so UI reflects current filters)
   const f = $('dateFrom')?.value || '';
   const t = $('dateTo')?.value   || '';
   selStart = f ? parseYMD(f) : null;
   selEnd   = t ? parseYMD(t) : null;
   hoverDay = null;
 
-  // initial month cursor: chosen start (or today)
   const base = selStart || new Date();
   monthCursor = startOfMonth(base);
 
   pop.classList.remove('hide');
   positionPopover(pop, btn);
 
-  // wire prev/next each time (overwrite old)
   $('rc-prev').onclick = () => { monthCursor = addMonths(monthCursor, -1); paintCalendars(); };
   $('rc-next').onclick = () => { monthCursor = addMonths(monthCursor, +1); paintCalendars(); };
 
-  // show initial calendars
   paintCalendars();
 
-  // outside-click / Esc to close
   const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== btn) closeDatePopover(); };
   const onEsc = (e) => { if (e.key === 'Escape') closeDatePopover(); };
   pop.__off = () => {
@@ -289,7 +255,6 @@ function closeDatePopover(){
   pop.classList.add('hide'); pop.__off?.(); pop.__off = null;
 }
 
-// Presets (keep manual Apply flow; but preview the selection in the calendar)
 function setPreset(days){
   const to = new Date(); to.setHours(0,0,0,0);
   const from = new Date(to.getTime() - (days-1)*86400000);
@@ -310,22 +275,15 @@ function applyDateAndFilter(){
 }
 
 function resetFilters(){
-  // close popover if it's open
   closeDatePopover?.();
-
-  // text search
   const q = $('q'); if (q) q.value = '';
-
-  // selects
   const s = $('fStatus'); if (s) s.value = 'all';
   const e = $('fEval');   if (e) e.value = 'all';
   const g = $('fService');if (g) g.value = '';
 
-  // dates
   const from = $('dateFrom'), to = $('dateTo');
   if (from) from.value = '';
   if (to)   to.value   = '';
-  // clear in-memory range state so the popover shows clean
   selStart = selEnd = hoverDay = null;
 
   updateDateButtonLabel();
@@ -336,20 +294,16 @@ function resetFilters(){
 function wireUI(){
   ensureSignoutWired();
 
-  // refresh (re-fetch)
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
 
-  // local filtering
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
   $('fStatus')?.addEventListener('change', runFilter);
   $('fEval')?.addEventListener('change', runFilter);
 
-  // grading service
   $('fService')?.addEventListener('change', runFilter);
 
-  // date popover (two-month range)
   $('btnDate')?.addEventListener('click', openDatePopover);
   $('datePresetToday')?.addEventListener('click', () => { setPreset(1);  updateDateButtonLabel(); });
   $('datePreset7')?.addEventListener('click',    () => { setPreset(7);  updateDateButtonLabel(); });
@@ -362,11 +316,9 @@ function wireUI(){
   $('dateCancel')?.addEventListener('click', closeDatePopover);
   $('dateApply')?.addEventListener('click', applyDateAndFilter);
 
-  // Optional: live label if hidden inputs are hand-edited elsewhere
   $('dateFrom')?.addEventListener('change', updateDateButtonLabel);
   $('dateTo')?.addEventListener('change', updateDateButtonLabel);
 
-  // pagination
   $('prev-page')?.addEventListener('click', () => {
     tbl.prevPage();
     tbl.renderTable(currentVisibleKeys());
@@ -378,13 +330,11 @@ function wireUI(){
     updateCountPill();
   });
 
-  // columns panel (open + close/save)
   $('btnColumns')?.addEventListener('click', views.openColumnsPanel);
   $('close-columns')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 
-  // row click → details sheet (delegated)
   wireRowClickDelegation();
 }
 
@@ -392,13 +342,10 @@ function wireUI(){
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'q') runFilter();
 }, true);
-
 document.addEventListener('change', (e) => {
   const id = e.target && e.target.id;
   if (id === 'fStatus' || id === 'fEval' || id === 'fService') runFilter();
 }, true);
-
-// Global backstop: sidebar signout
 document.addEventListener('click', (e) => {
   const t = e.target && e.target.closest && e.target.closest('#sidebar-signout');
   if (t) doLogout(e);
@@ -411,9 +358,8 @@ function currentVisibleKeys(){
 }
 
 // ===================================================================
-// Submission details (uses the static #details-backdrop in index.html)
+// Submission details (static #details-backdrop in index.html)
 // ===================================================================
-
 function ensureDetailsBackdropWired() {
   const back = $('details-backdrop');
   if (!back || back.__wired) return;
@@ -454,7 +400,6 @@ function closeSubmissionDetails() {
 }
 
 // --- helpers for rendering ---
-
 function pickFirst(...vals){
   for (const v of vals) {
     if (v != null && String(v).trim() !== '') return v;
@@ -506,10 +451,9 @@ function renderCardsTable(cards) {
     `;
   }).join('');
 
-  // max-height keeps the panel compact and avoids horizontal scroll
   return `
     <h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (${cards.length})</h3>
-    <div class="cards-table" style="max-height: 260px; overflow:auto;">
+    <div class="cards-table">
       ${head}
       ${rows}
     </div>
@@ -562,6 +506,7 @@ async function openSubmissionDetails(id) {
         ${renderKV('Grand', escapeHtml(fmtMoney(grand)))}
         ${renderIf('Grading Service', r.grading_service || r.grading_services || r.service || r.grading)}
         ${renderKV('Paid', escapeHtml(fmtMoney(paidAmt)))}
+        ${r.shopify_order_name ? renderKV('Order', `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>`) : ''}
         ${shipHTML ? renderKV('Ship-to', shipHTML) : ''}
       </dl>
     `;
@@ -588,12 +533,9 @@ function wireRowClickDelegation(){
   if (!tb || tb.__wiredRowClick) return;
   tb.__wiredRowClick = true;
 
-  console.debug('[psa-admin] tbody click delegation wired');
-
   tb.addEventListener('click', (e) => {
     const tr = e.target?.closest?.('tr[data-id]');
     if (!tr) return;
-
     const id = tr.dataset.id;
     if (!id) return;
 
@@ -642,7 +584,6 @@ async function doLogin(){
       return;
     }
 
-    // Flip UI in place
     const loginEl = document.getElementById('login');
     const shellEl = document.getElementById('shell');
     if (loginEl) loginEl.classList.add('hide');
@@ -657,7 +598,6 @@ async function doLogin(){
   }
 }
 
-// console helper
 function bindLoginHandlers(){
   const btn = $('btnLogin');
   const passEl = $('pass');
@@ -680,7 +620,6 @@ async function loadReal(){
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
-    // ensure header/sort, then apply current filters
     views.applyView(views.currentView);
     runFilter();
   } catch (e) {
