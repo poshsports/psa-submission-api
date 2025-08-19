@@ -109,15 +109,15 @@
           </div>
 
           <div class="filters">
-            <select id="fStatus" aria-label="Status">
-              <option value="all">Status: All</option>
+            <select id="fStatus" multiple size="6" aria-label="Status">
+              <!-- no "All" item; empty selection = All -->
               <option value="submitted">submitted</option>
               <option value="submitted_paid">submitted_paid</option>
               <option value="pending_payment">pending_payment</option>
               <option value="paid">paid</option>
               <option value="fulfilled">fulfilled</option>
             </select>
-
+          
             <select id="fEval" aria-label="Evaluation">
               <option value="all">Evaluation: All</option>
               <option value="yes">Yes</option>
