@@ -7,24 +7,34 @@ function fmt(ts) {
   try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
 }
 
+// Try to place the container in a visible spot.
 function ensureContainer() {
   let root = $('view-groups');
-  if (!root) {
-    root = document.createElement('div');
-    root.id = 'view-groups';
-    root.style.padding = '12px';
+  if (root) return root;
+
+  root = document.createElement('div');
+  root.id = 'view-groups';
+  root.style.padding = '16px';
+  root.style.marginTop = '16px';
+  root.style.background = 'transparent';
+
+  const shell = document.getElementById('shell');
+  if (shell) {
+    // Put it right after the main shell so it’s visible without hunting.
+    shell.parentNode.insertBefore(root, shell.nextSibling);
+  } else {
     document.body.appendChild(root);
   }
   return root;
 }
 
-/* ---------------- Drawer ---------------- */
+/* ---------------- Drawer (reuses your .details-* styles) ---------------- */
 function ensureGroupDrawer() {
   if ($('group-backdrop')) return;
 
   const back = document.createElement('div');
   back.id = 'group-backdrop';
-  back.className = 'details-backdrop'; // reuse existing styles
+  back.className = 'details-backdrop';
   back.setAttribute('aria-hidden','true');
   back.innerHTML = `
     <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="group-title">
@@ -67,7 +77,7 @@ function closeGroupDrawer() {
   document.body.style.overflow = '';
 }
 
-/* ------------- Detail render ------------- */
+/* ---------------- Detail render ---------------- */
 function renderGroupHeader(g) {
   return `
     <div class="info-grid">
@@ -91,7 +101,7 @@ function renderMembers(members) {
       <td style="padding:6px 10px;text-align:right;width:70px">${m.position}</td>
       <td style="padding:6px 10px"><code>${escapeHtml(String(m.submission_id).toLowerCase())}</code></td>
     </tr>
-  `).join('');
+ `).join('');
   return `
     <h3 class="sheet-subhead" style="margin:14px 0 6px">Members (${members.length})</h3>
     <div style="overflow:auto;border:1px solid #eee;border-radius:8px;background:#fff">
@@ -117,10 +127,7 @@ async function openGroupDetail(id) {
 
   try {
     const r = await fetchGroup(id);
-    if (r?.notFound) {
-      body.innerHTML = `<div class="error">Group not found.</div>`;
-      return;
-    }
+    if (r?.notFound) { body.innerHTML = `<div class="error">Group not found.</div>`; return; }
     const g = r?.group || {};
     if (title && g.code) title.textContent = `Group ${g.code}`;
     body.innerHTML = renderGroupHeader(g) + renderMembers(g.members || []);
@@ -129,7 +136,7 @@ async function openGroupDetail(id) {
   }
 }
 
-/* ------------- List view ------------- */
+/* ---------------- List view ---------------- */
 export async function showGroupsView() {
   const root = ensureContainer();
   root.innerHTML = `<div>Loading groups…</div>`;
@@ -143,10 +150,7 @@ export async function showGroupsView() {
   }
 
   const items = Array.isArray(resp?.items) ? resp.items : [];
-  if (!items.length) {
-    root.innerHTML = `<div>No groups yet.</div>`;
-    return;
-  }
+  if (!items.length) { root.innerHTML = `<div>No groups yet.</div>`; return; }
 
   const rows = items.map(g => `
     <tr data-id="${escapeHtml(g.id)}" class="grp-row" style="cursor:pointer">
