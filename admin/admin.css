@@ -256,6 +256,7 @@ body.col-dragging { cursor: grabbing; }
   padding:14px; overflow:auto; flex:1; min-height:0; background:#fff;
   overscroll-behavior: contain;     /* stop trackpad scroll leak */
 }
+.sheet-title { font-weight:700; }
 
 /* Definition list layout */
 .dl{ display:grid; grid-template-columns: 160px 1fr; gap:8px 12px; margin-bottom:14px; }
@@ -267,36 +268,6 @@ body.col-dragging { cursor: grabbing; }
   display:inline-block; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
   background:var(--surface-2); color:var(--text); font-style:normal;
 }
-
-/* Cards table inside drawer (grid, not <table>) */
-.cards-table{
-  border:1px solid var(--line);
-  border-radius:10px;
-  overflow:auto;
-  max-height:260px;
-}
-.cards-table .ct-head,
-.cards-table .ct-row{
-  display:grid;
-  grid-template-columns: 1.2fr .8fr .6fr 1.4fr; /* Date | Channel | # | Description */
-  gap:0;
-  border-bottom:1px solid var(--line);
-}
-.cards-table .ct-head > div{
-  background:var(--surface-2);
-  font-weight:600;
-  color:var(--muted);
-  padding:8px;
-  position:sticky; top:0; z-index:1; /* sticky header while scrolling */
-}
-.cards-table .ct-row > div{
-  padding:8px;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-.cards-table .ct-row > div:last-child{ white-space: normal; overflow:visible; text-overflow:clip; }
-.cards-table .right{ text-align:right; }
 
 /* Raw JSON viewer */
 pre.json{
@@ -348,9 +319,6 @@ pre.json{
   .info.span-2{ grid-column: auto; }
 }
 
-/* Make ship-to look like normal text */
-.shipto{ font-style:normal; color:var(--text); }
-
 /* ---------- Cards list: centered, tidy, sticky head ---------- */
 .cards-table{
   border:1px solid var(--line);
@@ -381,8 +349,15 @@ pre.json{
   overflow:hidden;
   text-overflow:ellipsis;
 }
+
 .cards-table .ct-row:nth-child(odd){ background:#fff; }
 .cards-table .ct-row:nth-child(even){ background:var(--surface-2); }
+
+/* Center all columns, but make Description left-aligned and wrap */
+.cards-table .ct-row > div:last-child,
+.cards-table .ct-head > div:last-child { text-align: left; }
+.cards-table .ct-row > div:last-child { white-space: normal; overflow: visible; text-overflow: clip; }
+
 
 /* Keep drawer scroll contained */
 .details-body { overscroll-behavior: contain; }
