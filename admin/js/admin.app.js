@@ -301,6 +301,7 @@ function wireUI(){
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
   $('fStatus')?.addEventListener('change', runFilter);
+  $('fStatus')?.addEventListener('input',  runFilter);
   $('fEval')?.addEventListener('change', runFilter);
 
   $('fService')?.addEventListener('change', runFilter);
