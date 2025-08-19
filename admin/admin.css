@@ -357,7 +357,3 @@ pre.json{
 .cards-table .ct-row > div:last-child,
 .cards-table .ct-head > div:last-child { text-align: left; }
 .cards-table .ct-row > div:last-child { white-space: normal; overflow: visible; text-overflow: clip; }
-
-
-/* Keep drawer scroll contained */
-.details-body { overscroll-behavior: contain; }
