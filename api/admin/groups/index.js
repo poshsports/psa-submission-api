@@ -1,20 +1,17 @@
-// api/admin/groups/index.js
-const { requireAdmin } = require('../../_util/adminAuth');
+// api/admin/groups/index.js (ESM)
+import { requireAdmin } from '../../_util/adminAuth.js';
+import { sb } from '../../_util/supabase.js';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.status(405).json({ ok: false, error: 'Method Not Allowed' });
     return;
   }
 
-  // Auth first — bail before touching Supabase
   if (!requireAdmin(req)) {
     res.status(401).json({ ok: false, error: 'Unauthorized' });
     return;
   }
-
-  // Lazy-load Supabase helper after auth
-  const { sb } = require('../../_util/supabase');
 
   try {
     const status = (req.query.status || '').trim() || null;
@@ -47,4 +44,7 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
-};
+}
+
+// Force Node runtime
+export const config = { runtime: 'nodejs' };
