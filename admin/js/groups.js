@@ -250,13 +250,13 @@ async function renderDetail(root, id, codeHint) {
   const $box = $('gdetail');
   try {
 // Fetch the group (include members directly)
-const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members`, {
-  credentials: 'same-origin'
-});
-if (!res.ok) throw new Error(`Group fetch failed: ${res.status}`);
+const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members`, { credentials:'same-origin' });
+if (!res.ok) throw new Error('group fetch failed');
 const payload = await res.json();
-// tolerate either { ok, group } or a raw group object
+// catch { ok:false } payloads
+if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
 const grp = payload?.group ?? payload;
+
 
 const safe = (v) => escapeHtml(String(v ?? ''));
 
@@ -283,6 +283,14 @@ if (ids.length) {
   const uniq = Array.from(new Set(ids));
   const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
   subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
+
+  // 🔹 keep the same order as members[] (ids)
+  const order = new Map(ids.map((sid, i) => [String(sid), i]));
+  subRows.sort(
+    (a, b) =>
+      (order.get(String(a?.submission_id)) ?? 0) -
+      (order.get(String(b?.submission_id)) ?? 0)
+  );
 }
 
 console.debug('[groups] group:', grp);
