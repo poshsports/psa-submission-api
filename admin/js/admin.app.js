@@ -593,38 +593,38 @@ function renderAddress(r) {
 function renderCardsTable(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return '';
 
-  const head = `
-    <div class="ct-head">
-      <div>Date of break</div>
-      <div>Break channel</div>
-      <div>Break #</div>
-      <div>Card description</div>
-    </div>
-  `;
+  const head =
+    '<div class="ct-head">' +
+      '<div>Date of break</div>' +
+      '<div>Break channel</div>' +
+      '<div>Break #</div>' +
+      '<div>Card description</div>' +
+    '</div>';
 
   const rows = cards.map(c => {
     const date = c.date || c.date_of_break || c.break_date || '';
-    the chan = c.channel || c.break_channel || '';
+    const chan = c.channel || c.break_channel || '';
     const num  = c.break_no || c.break_number || c.break || '';
     const desc = c.description || c.card_description || c.title || c.card || '';
-    return `
-      <div class="ct-row">
-        <div>${escapeHtml(String(date || ''))}</div>
-        <div>${escapeHtml(String(chan || ''))}</div>
-        <div>${escapeHtml(String(num || ''))}</div>
-        <div>${escapeHtml(String(desc || ''))}</div>
-      </div>
-    `;
+
+    return (
+      '<div class="ct-row">' +
+        '<div>' + escapeHtml(String(date || '')) + '</div>' +
+        '<div>' + escapeHtml(String(chan || '')) + '</div>' +
+        '<div>' + escapeHtml(String(num  || '')) + '</div>' +
+        '<div>' + escapeHtml(String(desc || '')) + '</div>' +
+      '</div>'
+    );
   }).join('');
 
-  return `
-    <h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (${cards.length})</h3>
-    <div class="cards-table">
-      ${head}
-      ${rows}
-    </div>
-  `;
+  return (
+    '<h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (' + (cards.length) + ')</h3>' +
+    '<div class="cards-table">' +
+      head + rows +
+    '</div>'
+  );
 }
+
 
 function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
 function fmtDate(iso){
