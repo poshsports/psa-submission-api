@@ -76,6 +76,14 @@ html,body{height:100%;overflow:hidden}
 .sidebar-spacer{flex:1}
 .admin-main{display:flex;flex-direction:column;overflow:hidden;min-height:0}
 
+/* Let each view be a flex column that can shrink, so the table can scroll */
+#view-submissions,
+#view-groups {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;   /* CRITICAL for inner overflow to work */
+}
+
 .topbar{
   height:56px;display:flex;align-items:center;justify-content:space-between;
   padding:0 var(--gutter-x);
@@ -364,5 +372,6 @@ pre.json{
 .data-table tr.clickable { cursor: pointer; }
 .data-table tr.clickable:hover { background: #fafafa; }
 button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px 12px; }
-.table-wrap { overflow:auto; background:#fff; border:1px solid #eee; border-radius:12px; }
+/* Optional: keep pager visible while table scrolls */
+.pagination { position: sticky; bottom: 0; z-index: 2; }
 
