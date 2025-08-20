@@ -1,34 +1,35 @@
-// api/admin/groups/[id].js (ESM)
+// api/admin/groups/[id].js  (ESM)
 import { requireAdmin } from '../../_util/adminAuth.js';
 import { sb } from '../../_util/supabase.js';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.status(405).json({ ok: false, error: 'Method Not Allowed' });
-    return;
-  }
-
-  if (!requireAdmin(req)) {
-    res.status(401).json({ ok: false, error: 'Unauthorized' });
-    return;
-  }
-
-  const raw = String(req.query.id || '').trim();
-  if (!raw) {
-    res.status(400).json({ ok: false, error: 'Missing group id' });
-    return;
-  }
-
-  const includeMembers =
-    String(req.query.include || req.query.with || '')
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .includes('members');
-
   try {
-    // Resolve UUID: if "raw" isn't a UUID, treat it as a code (e.g. "GRP-0005")
+    // --- method/auth guards ---
+    if (req.method !== 'GET') {
+      res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+      return;
+    }
+    if (!requireAdmin(req)) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+
+    // --- parse params ---
+    const raw = String(req.query.id || '').trim();
+    if (!raw) {
+      res.status(400).json({ ok: false, error: 'Missing group id' });
+      return;
+    }
+    const includeMembers =
+      String(req.query.include || req.query.with || '')
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .includes('members');
+
+    // --- resolve group id: accept UUID or code like "GRP-0005" ---
     let groupId = raw;
     if (!UUID_RE.test(raw)) {
       const { data: byCode, error: codeErr } = await sb()
@@ -36,31 +37,30 @@ export default async function handler(req, res) {
         .select('id')
         .eq('code', raw)
         .single();
-
-      if (codeErr || !byCode) {
-        res.status(404).json({ ok: false, error: `Group not found for code "${raw}"` });
+      if (codeErr || !byCode?.id) {
+        res.status(404).json({ ok: false, error: 'Group not found' });
         return;
       }
       groupId = byCode.id;
     }
 
-    // Base group
-    const { data: group, error: gErr } = await sb()
-      .from('groups')
-      .select('id, code, status, notes, shipped_at, returned_at, updated_at, created_at')
-      .eq('id', groupId)
-      .single();
+    // --- fetch base group (use RPC if you rely on it to shape columns) ---
+    const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', {
+      p_group_id: groupId,
+    });
 
-    if (gErr) {
-      res.status(500).json({ ok: false, error: gErr.message || 'Database error fetching group' });
+    if (rpcErr) {
+      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error' });
       return;
     }
+
+    const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
     if (!group) {
       res.status(404).json({ ok: false, error: 'Group not found' });
       return;
     }
 
-    // Optional members
+    // --- optionally include members from group_members ---
     if (includeMembers) {
       const { data: members, error: mErr } = await sb()
         .from('group_members')
@@ -69,17 +69,22 @@ export default async function handler(req, res) {
         .order('position', { ascending: true });
 
       if (mErr) {
-        res.status(500).json({ ok: false, error: mErr.message || 'Database error fetching members' });
+        // Prefer returning the group over failing entirely — the UI can still render
+        // but do surface the error so you can see it during dev.
+        res
+          .status(200)
+          .json({ ...group, members: [], _members_error: mErr.message });
         return;
       }
       group.members = members || [];
     }
 
-    // Return the plain group object (frontend expects this)
+    // IMPORTANT: return the *group object itself* (not { ok, group })
     res.status(200).json(group);
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
 }
 
+// Force Node runtime on Vercel
 export const config = { runtime: 'nodejs' };
