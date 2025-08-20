@@ -224,83 +224,9 @@ function fmtTs(ts) {
   } catch { return String(ts); }
 }
 
-// --- helpers for detail fetch ---
-function pick(v, ...alts){ for (const x of [v, ...alts]) if (x != null && String(x).trim() !== '') return x; return ''; }
-
-function memberSubmissionId(m){
-  const v = pick(
-    m?.submission_id,
-    m?.submissionId,
-    (typeof m?.submission === 'string' || typeof m?.submission === 'number') ? m.submission : '',
-    m?.submission?.id,
-    m?.submission?.submission_id,
-    m?.id // sometimes a plain id is the submission id
-  );
-  return v ? String(v).trim() : '';
+function getMembersArray(grp) {
+  return Array.isArray(grp?.members) ? grp.members : [];
 }
-
-// Always fetch by UUID id; code is only for display
-async function loadGroupSmart(id){
-  try { return await fetchGroup(id); }
-  catch { return {}; }
-}
-
-/**
- * Try a variety of id-based endpoints to retrieve members for a group.
- * Returns an array of member-ish objects (we only need submission id, note, position).
- */
-async function fetchMembersFallback(id){
-  const urls = [
-    // common REST-ish shapes
-    `/api/admin/groups/${encodeURIComponent(id)}/members`,
-    `/api/admin/groups/${encodeURIComponent(id)}/submissions`,
-    // query param shapes
-    `/api/admin/group-members?group_id=${encodeURIComponent(id)}`,
-    `/api/admin/groups/${encodeURIComponent(id)}?include=members`,
-    `/api/admin/groups/${encodeURIComponent(id)}?with=members`,
-  ];
-
-  for (const u of urls){
-    try {
-      const res = await fetch(u, { credentials: 'same-origin' });
-      if (!res.ok) continue;
-      const j = await res.json().catch(() => null);
-      if (!j) continue;
-
-      // 1) If the endpoint is already a list of members
-      if (Array.isArray(j)) return j;
-
-      // 2) If it returned a group-like object
-      if (j && Array.isArray(j.members)) return j.members;
-      if (j && Array.isArray(j.group_members)) return j.group_members;
-      if (j && Array.isArray(j.submissions)) return j.submissions; // could be ids or objects
-      if (j && Array.isArray(j.submission_ids)) {
-        return j.submission_ids.map((sid, i) => ({ submission_id: sid, position: i+1 }));
-      }
-    } catch {}
-  }
-  return [];
-}
-
-/**
- * Given a raw group payload, extract "members" in whatever shape it uses.
- * Returns an array of member-ish objects.
- */
-function extractMembersFromGroup(grp){
-  if (!grp || typeof grp !== 'object') return [];
-
-  // Direct arrays in the group
-  if (Array.isArray(grp.members))        return grp.members;
-  if (Array.isArray(grp.group_members))  return grp.group_members;
-
-  // If the group carries submissions/ids:
-  if (Array.isArray(grp.submissions))    return grp.submissions;
-  if (Array.isArray(grp.submission_ids)) return grp.submission_ids.map((sid, i) => ({ submission_id: sid, position: i+1 }));
-
-  // Nothing recognizable
-  return [];
-}
-
 
 // ========== Detail View ==========
 async function renderDetail(root, id, codeHint) {
@@ -323,10 +249,15 @@ async function renderDetail(root, id, codeHint) {
 
   const $box = $('gdetail');
   try {
-// Fetch the group by id (UUID), use code only to display a label
-const grp = await loadGroupSmart(id);
+// Fetch the group (include members directly)
+const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members`, {
+  credentials: 'same-origin'
+});
+if (!res.ok) throw new Error(`Group fetch failed: ${res.status}`);
+const grp = await res.json();
 const safe = (v) => escapeHtml(String(v ?? ''));
 
+// Header fields
 const codeOut     = safe(grp?.code || codeHint || '');
 const statusOut   = safe(grp?.status || '');
 const notesOut    = safe(grp?.notes || '');
@@ -335,19 +266,15 @@ const returnedOut = fmtTs(grp?.returned_at) || '—';
 const updatedOut  = fmtTs(grp?.updated_at)  || '—';
 const createdOut  = fmtTs(grp?.created_at)  || '—';
 
-// Members: prefer grp.members if present; otherwise try id-based fallbacks
-// Members: prefer what the group returned; otherwise try id-based fallbacks
-let members = extractMembersFromGroup(grp);
-if (!members.length) {
-  members = await fetchMembersFallback(id);
-}
+// Members come straight from the API
+const members = getMembersArray(grp);
 
-// Normalize submission IDs from member objects (support ids or objects)
+// Build submission IDs for rich rows
 const ids = members
-  .map(m => (typeof m === 'string' || typeof m === 'number') ? String(m) : memberSubmissionId(m))
+  .map(m => String(m?.submission_id || '').trim())
   .filter(Boolean);
 
-// Pull rich submission rows when we have IDs
+// Fetch rich submission rows
 let subRows = [];
 if (ids.length) {
   const uniq = Array.from(new Set(ids));
@@ -355,8 +282,8 @@ if (ids.length) {
   subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
 }
 
-console.debug('[groups] group by id:', grp);
-console.debug('[groups] members (raw):', members);
+console.debug('[groups] group:', grp);
+console.debug('[groups] members:', members);
 console.debug('[groups] submission ids:', ids);
 
     // Detailed columns (if we could fetch submissions)
