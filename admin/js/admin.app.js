@@ -313,10 +313,10 @@ function applyDateAndFilter(){
 function resetFilters(){
   closeDatePopover?.();
   const q = $('q'); if (q) q.value = '';
-document
-.querySelectorAll('#status-popover input[type="checkbox"][data-status]')
-.forEach(cb => (cb.checked = false));
-updateStatusButtonLabel();
+  document
+    .querySelectorAll('#status-popover input[type="checkbox"][data-status]')
+    .forEach(cb => (cb.checked = false));
+  updateStatusButtonLabel();
   const e = $('fEval');   if (e) e.value = 'all';
   const g = $('fService');if (g) g.value = '';
 
@@ -350,9 +350,12 @@ function showSubmissionsView(){
   setTopbarTitle('Active submissions');
   document.getElementById('view-submissions')?.classList.remove('hide');
 
-  // Render/refresh table safely
-  if (typeof tbl.render === 'function') tbl.render();
-  else if (typeof tbl.ensureRendered === 'function') tbl.ensureRendered();
+  // Render/refresh table safely (prefer idempotent ensureRendered)
+  if (typeof tbl.ensureRendered === 'function') {
+    tbl.ensureRendered();
+  } else if (typeof tbl.render === 'function') {
+    tbl.render();
+  }
 }
 
 function showGroups(){
@@ -367,8 +370,6 @@ function showGroups(){
   try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
 }
 
-
-
 // ===== UI wiring =====
 function wireUI(){
   ensureSignoutWired();
@@ -379,18 +380,17 @@ function wireUI(){
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
   $('btnStatus')?.addEventListener('click', openStatusPopover);
-$('statusApply')?.addEventListener('click', () => {
-  closeStatusPopover();
-  updateStatusButtonLabel();
-  runFilter();
-});
-$('statusClear')?.addEventListener('click', () => {
-  document
-    .querySelectorAll('#status-popover input[type="checkbox"][data-status]')
-    .forEach(cb => (cb.checked = false));
-  updateStatusButtonLabel();
-});
-
+  $('statusApply')?.addEventListener('click', () => {
+    closeStatusPopover();
+    updateStatusButtonLabel();
+    runFilter();
+  });
+  $('statusClear')?.addEventListener('click', () => {
+    document
+      .querySelectorAll('#status-popover input[type="checkbox"][data-status]')
+      .forEach(cb => (cb.checked = false));
+    updateStatusButtonLabel();
+  });
 
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
@@ -563,11 +563,11 @@ function renderAddress(r) {
   );
 
   // ---- ADDRESS LINES ----
-const a1 = pick(
-  r.ship_addr1, r.ship_address1, r.address1,
-  nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
-  nested?.street           // <-- this is the key your JSON currently has
-);
+  const a1 = pick(
+    r.ship_addr1, r.ship_address1, r.address1,
+    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
+    nested?.street
+  );
 
   // address line 2 / suite / unit / apt
   const a2Raw = pick(
@@ -576,7 +576,6 @@ const a1 = pick(
     nested?.street2, nested?.address_line2, nested?.address_line_2,
     nested?.unit, nested?.apt, nested?.apartment, nested?.suite
   );
-  // Normalize common variants like “Suite 500” when only the number is provided
   const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
     ? `Suite ${a2Raw}` : a2Raw;
 
@@ -605,7 +604,7 @@ function renderCardsTable(cards) {
 
   const rows = cards.map(c => {
     const date = c.date || c.date_of_break || c.break_date || '';
-    const chan = c.channel || c.break_channel || '';
+    the chan = c.channel || c.break_channel || '';
     const num  = c.break_no || c.break_number || c.break || '';
     const desc = c.description || c.card_description || c.title || c.card || '';
     return `
@@ -636,21 +635,21 @@ function fmtDate(iso){
 async function openSubmissionDetails(id) {
   openSubmissionDetailsPanel();
 
-const titleEl = $('details-title');
-const bodyEl  = $('details-body');
+  const titleEl = $('details-title');
+  const bodyEl  = $('details-body');
 
-// provisional title while loading
-if (titleEl) {
-  titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
-}
-if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
+  // provisional title while loading
+  if (titleEl) {
+    titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
+  }
+  if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
 
   try {
     const r = await fetchSubmission(id);
     if (titleEl) {
-  const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
-  titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
-}  
+      const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
+      titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
+    }
     const evalAmtNum = Number(
       (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
     ) || 0;
@@ -865,7 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Default view after login
     showSubmissionsView();
     loadReal();
-    
+
   } else {
     if (loginEl) loginEl.classList.remove('hide');
     if (shellEl) shellEl.classList.add('hide');
