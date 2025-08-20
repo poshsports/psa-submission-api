@@ -328,11 +328,39 @@ updateStatusButtonLabel();
   updateDateButtonLabel();
   runFilter();
 }
+function activateNav(id){
+  document.querySelectorAll('.admin-sidebar .sidebar-item')
+    .forEach(a => a.classList.toggle('active', a.id === id));
+}
+
+function setTopbarTitle(text){
+  const el = document.querySelector('.topbar .brand strong');
+  if (el) el.textContent = text;
+}
+
+function showSubmissionsView(){
+  activateNav('nav-active');
+  setTopbarTitle('Active submissions');
+  document.getElementById('view-submissions')?.classList.remove('hide');
+  document.getElementById('view-groups')?.classList.add('hide');
+}
+
+function showGroups(){
+  activateNav('nav-groups');
+  setTopbarTitle('Groups');
+  document.getElementById('view-submissions')?.classList.add('hide');
+  document.getElementById('view-groups')?.classList.remove('hide');
+  // render/populate groups each time Groups is opened
+  try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
+}
+
 
 // ===== UI wiring =====
 function wireUI(){
   ensureSignoutWired();
   updateStatusButtonLabel(); // show "Status: All" on first paint
+  $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); showSubmissionsView(); });
+  $('nav-groups')?.addEventListener('click', (e) => { e.preventDefault(); showGroups(); });
 
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
@@ -819,9 +847,10 @@ document.addEventListener('DOMContentLoaded', () => {
     updateDateButtonLabel();
     updateStatusButtonLabel();
     views.initViews();
-    loadReal();
 
-     try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
+    // Default view after login
+    showSubmissionsView();
+    loadReal();
     
   } else {
     if (loginEl) loginEl.classList.remove('hide');
