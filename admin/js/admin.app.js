@@ -337,22 +337,36 @@ function setTopbarTitle(text){
   const el = document.querySelector('.topbar .brand strong');
   if (el) el.textContent = text;
 }
+function hideAllViews(){
+  ['view-submissions','view-groups'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hide');
+  });
+}
 
 function showSubmissionsView(){
+  hideAllViews();
   activateNav('nav-active');
   setTopbarTitle('Active submissions');
   document.getElementById('view-submissions')?.classList.remove('hide');
-  document.getElementById('view-groups')?.classList.add('hide');
+
+  // Render/refresh table safely
+  if (typeof tbl.render === 'function') tbl.render();
+  else if (typeof tbl.ensureRendered === 'function') tbl.ensureRendered();
 }
 
 function showGroups(){
+  hideAllViews();
   activateNav('nav-groups');
   setTopbarTitle('Groups');
-  document.getElementById('view-submissions')?.classList.add('hide');
-  document.getElementById('view-groups')?.classList.remove('hide');
-  // render/populate groups each time Groups is opened
+  const vg = document.getElementById('view-groups');
+  if (vg) {
+    vg.classList.remove('hide');
+    vg.innerHTML = '';            // clear stale markup to avoid stacking
+  }
   try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
 }
+
 
 
 // ===== UI wiring =====
