@@ -1,6 +1,8 @@
 // /admin/js/groups.js
 import { $, debounce, escapeHtml } from './util.js';
-import { logout, fetchGroups, fetchGroup } from './api.js';
+import { fetchGroups, fetchGroup, fetchSubmission, logout } from './api.js';
+import * as tbl from './table.js';
+
 
 // ========== Auth & sidebar wiring (standalone Groups page) ==========
 async function doLogout(e){
@@ -169,16 +171,17 @@ async function refreshList() {
       const updated = fmtTs(row.updated_at);
       const created = fmtTs(row.created_at);
 
-      return `
-        <tr class="clickable" data-id="${escapeHtml(row.id)}" title="Open ${code}">
-          <td><strong>${code}</strong></td>
-          <td>${status}</td>
-          <td>${cnt}</td>
-          <td>${notes}</td>
-          <td>${updated}</td>
-          <td>${created}</td>
-        </tr>
-      `;
+     return `
+  <tr class="clickable" data-code="${code}" title="Open ${code}">
+    <td><strong>${code}</strong></td>
+    <td>${status}</td>
+    <td>${cnt}</td>
+    <td>${notes}</td>
+    <td>${updated}</td>
+    <td>${created}</td>
+  </tr>
+`;
+
     }).join('');
 
     $body.innerHTML = rows;
@@ -192,16 +195,17 @@ async function refreshList() {
     if ($count) $count.textContent = `Showing ${start}–${end}`;
 
     // Row click -> detail
-    $body.querySelectorAll('tr.clickable').forEach(tr => {
-      tr.addEventListener('click', () => {
-        const id = tr.getAttribute('data-id');
-        if (!id) return;
-        state.view = 'detail';
-        state.currentId = id;
-        const root = $('view-groups');
-        if (root) renderDetail(root, id);
-      });
-    });
+$body.querySelectorAll('tr.clickable').forEach(tr => {
+  tr.addEventListener('click', () => {
+    const code = tr.getAttribute('data-code');
+    if (!code) return;
+    state.view = 'detail';
+    state.currentId = code;
+    const root = $('view-groups');
+    if (root) renderDetail(root, code);
+  });
+});
+
 
   } catch (e) {
     if ($body) $body.innerHTML = `<tr><td colspan="6" class="note">Error: ${escapeHtml(e.message || 'Failed to load')}</td></tr>`;
@@ -218,82 +222,104 @@ function fmtTs(ts) {
 }
 
 // ========== Detail View ==========
-async function renderDetail(root, id) {
+async function renderDetail(root, code) {
   root.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <button id="gback" class="ghost">← Back</button>
       <h2 style="margin:0">Group</h2>
       <span class="note">Read-only</span>
       <div style="flex:1"></div>
-      <a id="goto-subs" class="ghost" href="/admin">Open Active submissions</a>
+      <a id="open-subs" href="/admin/index.html">Open Active submissions</a>
     </div>
     <div id="gdetail">Loading…</div>
   `;
 
-  $('gback')?.addEventListener('click', (e) => {
-    e.preventDefault();
+  $('gback')?.addEventListener('click', () => {
     state.view = 'list';
     state.currentId = null;
     renderList(root);
   });
 
-  $('goto-subs')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    window.location.assign('/admin');
-  });
-
   const $box = $('gdetail');
   try {
-    const g = await fetchGroup(id);
-    const grp = g || {};
-    const code = escapeHtml(grp.code || '');
-    const status = escapeHtml(grp.status || '');
-    const notes = escapeHtml(grp.notes || '');
-    const shipped = fmtTs(grp.shipped_at);
-    const returned = fmtTs(grp.returned_at);
-    const updated = fmtTs(grp.updated_at);
-    const created = fmtTs(grp.created_at);
+    // API expects code (e.g., "GRP-0005")
+    const grp = await fetchGroup(code);
+    const safe = (v) => escapeHtml(String(v ?? ''));
 
-    const members = Array.isArray(grp.members) ? grp.members : [];
-    members.sort((a,b) => (a.position ?? 0) - (b.position ?? 0));
+    const codeOut    = safe(grp?.code);
+    const statusOut  = safe(grp?.status);
+    const notesOut   = safe(grp?.notes);
+    const shippedOut = fmtTs(grp?.shipped_at) || '—';
+    const returnedOut= fmtTs(grp?.returned_at) || '—';
+    const updatedOut = fmtTs(grp?.updated_at) || '';
+    const createdOut = fmtTs(grp?.created_at) || '';
 
-    const rows = members.length
-      ? members.map(m => `
-          <tr>
-            <td style="width:90px">${Number(m.position ?? 0)}</td>
-            <td style="width:280px"><code>${escapeHtml(m.submission_id || '')}</code></td>
-            <td>${escapeHtml(m.note || '')}</td>
-          </tr>
-        `).join('')
-      : `<tr><td colspan="3" class="note">No members.</td></tr>`;
+    // Fetch member submissions (full details) and normalize them
+    const members = Array.isArray(grp?.members) ? grp.members : [];
+    const ids = members
+      .map(m => (m?.submission_id ? String(m.submission_id).trim() : ''))
+      .filter(Boolean);
+
+    let subRows = [];
+    if (ids.length) {
+      const uniq = Array.from(new Set(ids));
+      const fetched = await Promise.all(uniq.map(id => fetchSubmission(id).catch(() => null)));
+      subRows = fetched
+        .filter(Boolean)
+        .map(r => tbl.normalizeRow(r));
+    }
+
+    // Columns to mirror the main Submissions table at a glance
+    const COLS = [
+      { key: 'created_at',       label: 'Created',        fmt: (r) => fmtTs(r.created_at) },
+      { key: 'submission_id',    label: 'Submission',     fmt: (r) => safe(r.submission_id) },
+      { key: 'customer_email',   label: 'Email',          fmt: (r) => safe(r.customer_email) },
+      { key: 'status',           label: 'Status',         fmt: (r) => safe(r.status) },
+      { key: 'cards',            label: 'Cards',          fmt: (r) => String(Number(r.cards||0)) },
+      { key: 'evaluation',       label: 'Evaluation',     fmt: (r) => (r.evaluation_bool ? 'Yes' : 'No') },
+      { key: 'grand',            label: 'Grand',          fmt: (r) => `$${(Number(r.grand)||0).toLocaleString()}` },
+      { key: 'grading_service',  label: 'Grading Service',fmt: (r) => safe(r.grading_service) },
+    ];
+
+    const tableHead = `
+      <thead>
+        <tr>
+          ${COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}
+        </tr>
+      </thead>
+    `;
+
+    const tableBody = subRows.length
+      ? `<tbody>
+          ${subRows.map(r => `
+            <tr>
+              ${COLS.map(c => `<td>${c.fmt(r)}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>`
+      : `<tbody><tr><td colspan="${COLS.length}" class="note">No members.</td></tr></tbody>`;
 
     if ($box) {
       $box.innerHTML = `
         <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-            <div><div class="note">Code</div><div><strong>${code}</strong></div></div>
-            <div><div class="note">Status</div><div>${status}</div></div>
-            <div><div class="note">Shipped</div><div>${shipped || '—'}</div></div>
-            <div><div class="note">Returned</div><div>${returned || '—'}</div></div>
-            <div><div class="note">Updated</div><div>${updated}</div></div>
-            <div><div class="note">Created</div><div>${created}</div></div>
+            <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
+            <div><div class="note">Status</div><div>${statusOut}</div></div>
+            <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
+            <div><div class="note">Returned</div><div>${returnedOut}</div></div>
+            <div><div class="note">Updated</div><div>${updatedOut}</div></div>
+            <div><div class="note">Created</div><div>${createdOut}</div></div>
           </div>
           <div style="margin-top:10px">
             <div class="note">Notes</div>
-            <div>${notes || '—'}</div>
+            <div>${notesOut || '—'}</div>
           </div>
         </div>
 
         <div class="table-wrap">
           <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-            <thead>
-              <tr>
-                <th style="width:90px">#</th>
-                <th style="width:280px">Submission</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
+            ${tableHead}
+            ${tableBody}
           </table>
         </div>
       `;
@@ -302,6 +328,7 @@ async function renderDetail(root, id) {
     if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
+
 
 // ===== Boot for Groups page =====
 function bootGroupsPage(){
