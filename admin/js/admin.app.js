@@ -727,9 +727,18 @@ function wireUI(){
   ensureSignoutWired();
   updateStatusButtonLabel(); // show "Status: All" on first paint
 
-  // Sidebar nav -> real pages
-  $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); window.location.assign('/admin'); });
-  $('nav-groups')?.addEventListener('click', (e) => { e.preventDefault(); window.location.assign('/admin/groups'); });
+  // Sidebar nav -> use real page navigation
+  $('nav-active')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    // You are already on the Submissions app, but keep this explicit & future-proof:
+    window.location.assign('/admin/index.html');
+  });
+
+  // IMPORTANT: navigate to the dedicated Groups page
+  $('nav-groups')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.location.assign('/admin/groups.html');
+  });
 
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
