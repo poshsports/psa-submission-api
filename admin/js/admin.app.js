@@ -3,7 +3,6 @@ import { $, debounce, escapeHtml } from './util.js';
 import { fetchSubmissions, logout, fetchSubmission } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
-import { showGroupsView } from './groups.js';
 
 window.__tbl = tbl; // DevTools
 
@@ -49,7 +48,6 @@ function positionPopover(pop, anchor){
   pop.style.top  = `${window.scrollY + r.bottom + 6}px`;
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - pop.offsetWidth - 10))}px`;
 }
-
 // ----- Status popover helpers -----
 function getCheckedStatuses() {
   return Array.from(
@@ -318,8 +316,8 @@ function resetFilters(){
     .querySelectorAll('#status-popover input[type="checkbox"][data-status]')
     .forEach(cb => (cb.checked = false));
   updateStatusButtonLabel();
-  const e = $('fEval');   if (e) e.value = 'all';
-  const g = $('fService');if (g) g.value = '';
+  const e = $('fEval');    if (e) e.value = 'all';
+  const g = $('fService'); if (g) g.value = '';
 
   const from = $('dateFrom'), to = $('dateTo');
   if (from) from.value = '';
@@ -330,55 +328,412 @@ function resetFilters(){
   runFilter();
 }
 
-function activateNav(id){
-  document.querySelectorAll('.admin-sidebar .sidebar-item')
-    .forEach(a => a.classList.toggle('active', a.id === id));
-}
-
 function setTopbarTitle(text){
   const el = document.querySelector('.topbar .brand strong');
   if (el) el.textContent = text;
 }
 
-function hideAllViews(){
-  ['view-submissions','view-groups'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.add('hide');
-  });
+function currentVisibleKeys(){
+  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
+    .filter(th => th.style.display !== 'none');
+  return ths.map(th => th.dataset.key);
 }
 
 function showSubmissionsView(){
-  hideAllViews();
-  activateNav('nav-active');
-  setTopbarTitle('Active submissions');
-  document.getElementById('view-submissions')?.classList.remove('hide');
-
-  // Render/refresh table safely
-  if (typeof tbl.ensureRendered === 'function') tbl.ensureRendered();
-  else if (typeof tbl.render === 'function') tbl.render();
+  setTopbarTitle('Active submissions'); // purely cosmetic on this page
+  // Render/refresh table safely (explicit call; no hidden Groups view anymore)
+  tbl.renderTable(currentVisibleKeys());
 }
 
-function showGroups(){
-  hideAllViews();
-  activateNav('nav-groups');
-  setTopbarTitle('Groups');
-  const vg = document.getElementById('view-groups');
-  if (vg) vg.classList.remove('hide');
-  try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
+// ===== Submission details drawer =====
+function ensureDetailsHost() {
+  if ($('details-backdrop')) return;
+
+  const back = document.createElement('div');
+  back.id = 'details-backdrop';
+  back.className = 'details-backdrop';
+  back.setAttribute('aria-hidden','true');
+  back.innerHTML = `
+    <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="details-title">
+      <div class="details-head">
+        <div id="details-title" class="sheet-title">Submission</div>
+        <button id="details-close" class="btn" type="button">Close</button>
+      </div>
+      <div id="details-body" class="details-body">
+        <div class="loading">Loading…</div>
+      </div>
+      <div class="details-foot">
+        <div></div>
+        <button id="details-close-2" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(back);
 }
 
-// ===== UI wiring =====
+function ensureDetailsBackdropWired() {
+  const back = $('details-backdrop');
+  if (!back || back.__wired) return;
+  back.__wired = true;
+
+  const panel = back.querySelector('.details-panel');
+
+  $('details-close')?.addEventListener('click', closeSubmissionDetails);
+  $('details-close-2')?.addEventListener('click', closeSubmissionDetails);
+
+  back.addEventListener('mousedown', (e) => {
+    if (!panel.contains(e.target)) closeSubmissionDetails();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSubmissionDetails();
+  });
+}
+
+function openSubmissionDetailsPanel() {
+  ensureDetailsHost();
+  ensureDetailsBackdropWired();
+
+  const back = $('details-backdrop');
+  if (!back) return;
+  back.classList.add('show');
+  back.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden';
+  $('details-close')?.focus({ preventScroll: true });
+}
+
+function closeSubmissionDetails() {
+  const back = $('details-backdrop');
+  if (!back) return;
+  back.classList.remove('show');
+  back.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+}
+
+// --- helpers for rendering ---
+function renderAddress(r) {
+  // If backend gives a single formatted string, use it.
+  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
+    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
+  }
+
+  // Common nested containers we see in different sources
+  const nested =
+    r.shipping_address ||
+    r.shopify_shipping_address ||
+    r.ship_address ||
+    r.address ||
+    r.shipping ||
+    r.shippingAddress ||
+    null;
+
+  const pick = (...vals) => {
+    for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
+    return '';
+  };
+
+  // ---- NAME ----
+  const name = pick(
+    r.ship_name, r.shipping_name, r.ship_to_name,
+    r.customer_name, r.name,
+    nested?.name,
+    (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
+    nested?.recipient, nested?.full_name, nested?.contact_name
+  );
+
+  // ---- ADDRESS LINES ----
+  const a1 = pick(
+    r.ship_addr1, r.ship_address1, r.address1,
+    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
+    nested?.street
+  );
+
+  const a2Raw = pick(
+    r.ship_addr2, r.ship_address2, r.address2,
+    nested?.address2, nested?.line2,
+    nested?.street2, nested?.address_line2, nested?.address_line_2,
+    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
+  );
+  const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
+    ? `Suite ${a2Raw}` : a2Raw;
+
+  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
+  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
+  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
+
+  const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
+  if (!parts.length) return '';
+  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
+}
+
+function renderCardsTable(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return '';
+
+  const head = `
+    <div class="ct-head">
+      <div>Date of break</div>
+      <div>Break channel</div>
+      <div>Break #</div>
+      <div>Card description</div>
+    </div>
+  `;
+
+  const rows = cards.map(c => {
+    const date = c.date || c.date_of_break || c.break_date || '';
+    const chan = c.channel || c.break_channel || '';
+    const num  = c.break_no || c.break_number || c.break || '';
+    const desc = c.description || c.card_description || c.title || c.card || '';
+    return `
+      <div class="ct-row">
+        <div>${escapeHtml(String(date || ''))}</div>
+        <div>${escapeHtml(String(chan || ''))}</div>
+        <div>${escapeHtml(String(num || ''))}</div>
+        <div>${escapeHtml(String(desc || ''))}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (${cards.length})</h3>
+    <div class="cards-table">
+      ${head}
+      ${rows}
+    </div>
+  `;
+}
+
+function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
+function fmtDate(iso){
+  try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
+  catch { return ''; }
+}
+
+async function openSubmissionDetails(id) {
+  openSubmissionDetailsPanel();
+
+  const titleEl = $('details-title');
+  const bodyEl  = $('details-body');
+
+  // provisional title while loading
+  if (titleEl) {
+    titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
+  }
+  if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
+
+  try {
+    const r = await fetchSubmission(id);
+    if (titleEl) {
+      const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
+      titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
+    }
+    const evalAmtNum = Number(
+      (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
+    ) || 0;
+    const evalYesNo  = evalAmtNum > 0 ? 'Yes' : 'No';
+
+    const grand   = r?.totals?.grand ?? r.grand_total ?? r.total ?? r.grand ?? 0;
+    const paidAmt = r.paid_amount || 0;
+    const cards   = r.card_info || r.cards || r.items || [];
+    const email   = r.customer_email || r.email || '';
+    const shipHTML = renderAddress(r);
+
+    // ---- INFO GRID (card-style) ----
+    const infoGrid = `
+      <div class="info-grid">
+        <div class="info">
+          <div class="info-label">Submission</div>
+          <div class="info-value"><code>${escapeHtml(String(r.submission_id || r.id || id))}</code></div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Status</div>
+          <div class="info-value"><span class="pill">${escapeHtml(String(r.status || '')) || '—'}</span></div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Cards</div>
+          <div class="info-value">${escapeHtml(String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Evaluation</div>
+          <div class="info-value">${evalYesNo}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Grand</div>
+          <div class="info-value">${escapeHtml(fmtMoney(grand))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Paid</div>
+          <div class="info-value">${escapeHtml(fmtMoney(paidAmt))}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Grading Service</div>
+          <div class="info-value ellip">${escapeHtml(String(r.grading_service || r.grading_services || r.service || r.grading || '')) || '—'}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Created</div>
+          <div class="info-value">${escapeHtml(fmtDate(r.created_at || r.inserted_at || r.submitted_at_iso || r.submitted_at))}</div>
+        </div>
+
+        <div class="info">
+          <div class="info-label">Order</div>
+          <div class="info-value">${r.shopify_order_name ? `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>` : '—'}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Email</div>
+          <div class="info-value">${email ? `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>` : '—'}</div>
+        </div>
+
+        <div class="info span-2">
+          <div class="info-label">Ship-to</div>
+          <div class="info-value">${shipHTML || '—'}</div>
+        </div>
+      </div>
+    `;
+
+    const cardsHTML = renderCardsTable(cards);
+    const jsonHTML = `
+      <details style="margin-top:12px">
+        <summary>Raw JSON</summary>
+        <pre class="json">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
+      </details>
+    `;
+
+    if (bodyEl) bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
+  } catch (e) {
+    if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
+  }
+}
+
+// Allow other modules / inline HTML to open the sheet.
+window.__openAdminDetails = (id, friendly) => openSubmissionDetails(id || friendly || '');
+
+// ===== row click delegation (submissions table) =====
+function wireRowClickDelegation(){
+  const tb = $('subsTbody');
+  if (!tb || tb.__wiredRowClick) return;
+  tb.__wiredRowClick = true;
+
+  tb.addEventListener('click', (e) => {
+    const tr = e.target?.closest?.('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    if (!id) return;
+
+    const a = e.target.closest('a');
+    if (a) { e.preventDefault(); e.stopPropagation(); }
+
+    openSubmissionDetails(id);
+  }, true);
+
+  tb.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const tr = e.target?.closest?.('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    if (!id) return;
+    e.preventDefault();
+    openSubmissionDetails(id);
+  });
+}
+
+window.addEventListener('psa:open-details', (e) => {
+  const { id, friendly } = e.detail || {};
+  if (!id && !friendly) return;
+  openSubmissionDetails(id || friendly);
+});
+
+// ===== auth & boot (Submissions page only) =====
+async function doLogin(){
+  const pass = document.getElementById('pass')?.value?.trim() || '';
+  const errEl = document.getElementById('err');
+  if (errEl) errEl.textContent = '';
+
+  try {
+    const res = await fetch('/api/admin-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ pass })
+    });
+    const j = await res.json().catch(() => ({}));
+
+    if (!res.ok || j.ok !== true) {
+      if (errEl) errEl.textContent = (j.error === 'invalid_pass'
+        ? 'Invalid passcode'
+        : (j.error || 'Login failed'));
+      return;
+    }
+
+    const loginEl = document.getElementById('login');
+    const shellEl = document.getElementById('shell');
+    if (loginEl) loginEl.classList.add('hide');
+    if (shellEl) shellEl.classList.remove('hide');
+
+    bootSubmissionsUI();
+  } catch (e) {
+    if (errEl) errEl.textContent = 'Network error';
+  }
+}
+
+function bootSubmissionsUI(){
+  wireUI();
+  updateDateButtonLabel();
+  updateStatusButtonLabel();
+  views.initViews?.();
+  showSubmissionsView();
+  loadReal();
+}
+
+function bindLoginHandlers(){
+  const btn = $('btnLogin');
+  const passEl = $('pass');
+  window.__psaLogin = doLogin;
+  if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
+  if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+}
+
+function updateCountPill(){
+  const pill = $('countPill');
+  if (pill) pill.textContent = String(tbl.viewRows.length);
+}
+
+async function loadReal(){
+  const err = $('subsErr');
+  if (err) { err.classList.add('hide'); err.textContent = ''; }
+
+  try {
+    const items = await fetchSubmissions(); // fetch all; filter client-side
+    tbl.setRows(items.map(tbl.normalizeRow));
+    buildServiceOptions();
+
+    views.applyView?.(views.currentView);
+    runFilter();
+  } catch (e) {
+    if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
+    console.error('[admin] loadReal error:', e);
+  }
+}
+
+// ===== UI wiring (Submissions page) =====
 function wireUI(){
   ensureSignoutWired();
   updateStatusButtonLabel(); // show "Status: All" on first paint
 
-  $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); showSubmissionsView(); });
-  $('nav-groups')?.addEventListener('click', (e) => { e.preventDefault(); showGroups(); });
+  // Sidebar nav -> real pages
+  $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); window.location.assign('/admin'); });
+  $('nav-groups')?.addEventListener('click', (e) => { e.preventDefault(); window.location.assign('/admin/groups'); });
 
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
   $('btnStatus')?.addEventListener('click', openStatusPopover);
-
   $('statusApply')?.addEventListener('click', () => {
     closeStatusPopover();
     updateStatusButtonLabel();
@@ -447,388 +802,6 @@ document.addEventListener('click', (e) => {
   if (t) doLogout(e);
 });
 
-function currentVisibleKeys(){
-  const ths = Array.from(document.querySelectorAll('#subsHead th[data-key]'))
-    .filter(th => th.style.display !== 'none');
-  return ths.map(th => th.dataset.key);
-}
-
-// ===================================================================
-// Submission details – create the drawer DOM on demand
-// ===================================================================
-
-function ensureDetailsHost() {
-  if ($('details-backdrop')) return;
-
-  const back = document.createElement('div');
-  back.id = 'details-backdrop';
-  back.className = 'details-backdrop';
-  back.setAttribute('aria-hidden','true');
-  back.innerHTML = `
-    <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="details-title">
-      <div class="details-head">
-        <div id="details-title" class="sheet-title">Submission</div>
-        <button id="details-close" class="btn" type="button">Close</button>
-      </div>
-      <div id="details-body" class="details-body">
-        <div class="loading">Loading…</div>
-      </div>
-      <div class="details-foot">
-        <div></div>
-        <button id="details-close-2" class="btn" type="button">Close</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(back);
-}
-
-function ensureDetailsBackdropWired() {
-  const back = $('details-backdrop');
-  if (!back || back.__wired) return;
-  back.__wired = true;
-
-  const panel = back.querySelector('.details-panel');
-
-  $('details-close')?.addEventListener('click', closeSubmissionDetails);
-  $('details-close-2')?.addEventListener('click', closeSubmissionDetails);
-
-  back.addEventListener('mousedown', (e) => {
-    if (!panel.contains(e.target)) closeSubmissionDetails();
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSubmissionDetails();
-  });
-}
-
-function openSubmissionDetailsPanel() {
-  ensureDetailsHost();
-  ensureDetailsBackdropWired();
-
-  const back = $('details-backdrop');
-  if (!back) return;
-  back.classList.add('show');
-  back.setAttribute('aria-hidden', 'false');
-  document.body.style.overflow = 'hidden';
-  $('details-close')?.focus({ preventScroll: true });
-}
-
-function closeSubmissionDetails() {
-  const back = $('details-backdrop');
-  if (!back) return;
-  back.classList.remove('show');
-  back.setAttribute('aria-hidden', 'true');
-  document.body.style.overflow = '';
-}
-
-// --- helpers for rendering ---
-function pickFirst(...vals){
-  for (const v of vals) {
-    if (v != null && String(v).trim() !== '') return v;
-  }
-  return '';
-}
-
-// SAFER: no template literals here to avoid parse-killing backtick mistakes
-function renderCardsTable(cards) {
-  if (!Array.isArray(cards) || cards.length === 0) return '';
-
-  const head =
-    '<div class="ct-head">' +
-      '<div>Date of break</div>' +
-      '<div>Break channel</div>' +
-      '<div>Break #</div>' +
-      '<div>Card description</div>' +
-    '</div>';
-
-  const rows = cards.map(c => {
-    const date = c.date || c.date_of_break || c.break_date || '';
-    const chan = c.channel || c.break_channel || '';
-    const num  = c.break_no || c.break_number || c.break || '';
-    const desc = c.description || c.card_description || c.title || c.card || '';
-
-    return (
-      '<div class="ct-row">' +
-        '<div>' + escapeHtml(String(date || '')) + '</div>' +
-        '<div>' + escapeHtml(String(chan || '')) + '</div>' +
-        '<div>' + escapeHtml(String(num  || '')) + '</div>' +
-        '<div>' + escapeHtml(String(desc || '')) + '</div>' +
-      '</div>'
-    );
-  }).join('');
-
-  return (
-    '<h3 class="sheet-subhead" style="margin:12px 0 6px">Cards (' + (cards.length) + ')</h3>' +
-    '<div class="cards-table">' +
-      head + rows +
-    '</div>'
-  );
-}
-
-function renderAddress(r) {
-  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
-    return '<address class="shipto">' + escapeHtml(r.ship_to) + '</address>';
-  }
-
-  const nested =
-    r.shipping_address ||
-    r.shopify_shipping_address ||
-    r.ship_address ||
-    r.address ||
-    r.shipping ||
-    r.shippingAddress ||
-    null;
-
-  const pick = (...vals) => {
-    for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
-    return '';
-  };
-
-  const name = pick(
-    r.ship_name, r.shipping_name, r.ship_to_name,
-    r.customer_name, r.name,
-    nested?.name,
-    (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
-    nested?.recipient, nested?.full_name, nested?.contact_name
-  );
-
-  const a1 = pick(
-    r.ship_addr1, r.ship_address1, r.address1,
-    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
-    nested?.street
-  );
-
-  const a2Raw = pick(
-    r.ship_addr2, r.ship_address2, r.address2,
-    nested?.address2, nested?.line2,
-    nested?.street2, nested?.address_line2, nested?.address_line_2,
-    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
-  );
-  const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
-    ? `Suite ${a2Raw}` : a2Raw;
-
-  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
-  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
-  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
-  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
-
-  const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
-  if (!parts.length) return '';
-  return '<address class="shipto">' + parts.map(escapeHtml).join('<br>') + '</address>';
-}
-
-function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
-function fmtDate(iso){
-  try { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(); }
-  catch { return ''; }
-}
-
-async function openSubmissionDetails(id) {
-  openSubmissionDetailsPanel();
-
-  const titleEl = $('details-title');
-  const bodyEl  = $('details-body');
-
-  if (titleEl) {
-    titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
-  }
-  if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
-
-  try {
-    const r = await fetchSubmission(id);
-    if (titleEl) {
-      const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
-      titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
-    }
-
-    const evalAmtNum = Number(
-      (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
-    ) || 0;
-    const evalYesNo  = evalAmtNum > 0 ? 'Yes' : 'No';
-
-    const grand   = r?.totals?.grand ?? r.grand_total ?? r.total ?? r.grand ?? 0;
-    const paidAmt = r.paid_amount || 0;
-    const cards   = r.card_info || r.cards || r.items || [];
-    const email   = r.customer_email || r.email || '';
-    const shipHTML = renderAddress(r);
-
-    const infoGrid = `
-      <div class="info-grid">
-        <div class="info">
-          <div class="info-label">Submission</div>
-          <div class="info-value"><code>${escapeHtml(String(r.submission_id || r.id || id))}</code></div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Status</div>
-          <div class="info-value"><span class="pill">${escapeHtml(String(r.status || '')) || '—'}</span></div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Cards</div>
-          <div class="info-value">${escapeHtml(String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}</div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Evaluation</div>
-          <div class="info-value">${evalYesNo}</div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Grand</div>
-          <div class="info-value">${escapeHtml(fmtMoney(grand))}</div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Paid</div>
-          <div class="info-value">${escapeHtml(fmtMoney(paidAmt))}</div>
-        </div>
-
-        <div class="info span-2">
-          <div class="info-label">Grading Service</div>
-          <div class="info-value ellip">${escapeHtml(String(r.grading_service || r.grading_services || r.service || r.grading || '')) || '—'}</div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Created</div>
-          <div class="info-value">${escapeHtml(fmtDate(r.created_at || r.inserted_at || r.submitted_at_iso || r.submitted_at))}</div>
-        </div>
-
-        <div class="info">
-          <div class="info-label">Order</div>
-          <div class="info-value">${r.shopify_order_name ? `<span class="pill">${escapeHtml(r.shopify_order_name)}</span>` : '—'}</div>
-        </div>
-
-        <div class="info span-2">
-          <div class="info-label">Email</div>
-          <div class="info-value">${email ? `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>` : '—'}</div>
-        </div>
-
-        <div class="info span-2">
-          <div class="info-label">Ship-to</div>
-          <div class="info-value">${shipHTML || '—'}</div>
-        </div>
-      </div>
-    `;
-
-    const cardsHTML = renderCardsTable(cards);
-    const jsonHTML = `
-      <details style="margin-top:12px">
-        <summary>Raw JSON</summary>
-        <pre class="json">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
-      </details>
-    `;
-
-    bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
-  } catch (e) {
-    if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
-  }
-}
-
-// Allow other modules / inline HTML to open the sheet.
-window.__openAdminDetails = (id, friendly) => openSubmissionDetails(id || friendly || '');
-
-function wireRowClickDelegation(){
-  const tb = $('subsTbody');
-  if (!tb || tb.__wiredRowClick) return;
-  tb.__wiredRowClick = true;
-
-  tb.addEventListener('click', (e) => {
-    const tr = e.target?.closest?.('tr[data-id]');
-    if (!tr) return;
-    const id = tr.dataset.id;
-    if (!id) return;
-
-    const a = e.target.closest('a');
-    if (a) { e.preventDefault(); e.stopPropagation(); }
-
-    openSubmissionDetails(id);
-  }, true);
-
-  tb.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    const tr = e.target?.closest?.('tr[data-id]');
-    if (!tr) return;
-    const id = tr.dataset.id;
-    if (!id) return;
-    e.preventDefault();
-    openSubmissionDetails(id);
-  });
-}
-
-window.addEventListener('psa:open-details', (e) => {
-  const { id, friendly } = e.detail || {};
-  if (!id && !friendly) return;
-  openSubmissionDetails(id || friendly);
-});
-
-// ===== auth & boot =====
-async function doLogin(){
-  const pass = document.getElementById('pass')?.value?.trim() || '';
-  const errEl = document.getElementById('err');
-  if (errEl) errEl.textContent = '';
-
-  try {
-    const res = await fetch('/api/admin-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ pass })
-    });
-    const j = await res.json().catch(() => ({}));
-
-    if (!res.ok || j.ok !== true) {
-      if (errEl) errEl.textContent = (j.error === 'invalid_pass'
-        ? 'Invalid passcode'
-        : (j.error || 'Login failed'));
-      return;
-    }
-
-    const loginEl = document.getElementById('login');
-    const shellEl = document.getElementById('shell');
-    if (loginEl) loginEl.classList.add('hide');
-    if (shellEl) shellEl.classList.remove('hide');
-
-    wireUI();
-    updateDateButtonLabel();
-    updateStatusButtonLabel();
-    views.initViews();
-    loadReal();
-  } catch (e) {
-    if (errEl) errEl.textContent = 'Network error';
-  }
-}
-
-function bindLoginHandlers(){
-  const btn = $('btnLogin');
-  const passEl = $('pass');
-  window.__psaLogin = doLogin;
-  if (btn) { btn.addEventListener('click', doLogin); btn.onclick = doLogin; }
-  if (passEl) passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-}
-
-function updateCountPill(){
-  const pill = $('countPill');
-  if (pill) pill.textContent = String(tbl.viewRows.length);
-}
-
-async function loadReal(){
-  const err = $('subsErr');
-  if (err) { err.classList.add('hide'); err.textContent = ''; }
-
-  try {
-    const items = await fetchSubmissions(); // fetch all; filter client-side
-    tbl.setRows(items.map(tbl.normalizeRow));
-    buildServiceOptions();
-
-    views.applyView(views.currentView);
-    runFilter();
-  } catch (e) {
-    if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
-    console.error('[admin] loadReal error:', e);
-  }
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
 
@@ -845,16 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (authed) {
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
-
-    wireUI();
-    updateDateButtonLabel();
-    updateStatusButtonLabel();
-    views.initViews();
-
-    // Default view after login
-    showSubmissionsView();
-    loadReal();
-
+    bootSubmissionsUI();
   } else {
     if (loginEl) loginEl.classList.remove('hide');
     if (shellEl) shellEl.classList.add('hide');
