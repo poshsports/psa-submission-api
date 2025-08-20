@@ -60,25 +60,35 @@ export default async function handler(req, res) {
       return;
     }
 
-    // --- optionally include members from group_members ---
-    if (includeMembers) {
-      const { data: members, error: mErr } = await sb()
-        .from('group_members')
+// --- optionally include members (try a few common table names) ---
+if (includeMembers) {
+  const candidates = [
+    { table: 'group_members',      col: 'group_id' },
+    { table: 'groups_submissions', col: 'group_id' },
+    { table: 'group_submissions',  col: 'group_id' },
+    { table: 'groups_members',     col: 'group_id' },
+  ];
+
+  let members = [];
+  for (const c of candidates) {
+    try {
+      const { data, error } = await sb()
+        .from(c.table)
         .select('submission_id, position, note')
-        .eq('group_id', groupId)
+        .eq(c.col, groupId)
         .order('position', { ascending: true });
 
-      if (mErr) {
-        // Prefer returning the group over failing entirely — the UI can still render
-        // but do surface the error so you can see it during dev.
-        res
-          .status(200)
-          .json({ ...group, members: [], _members_error: mErr.message });
-        return;
+      if (!error && Array.isArray(data) && data.length) {
+        members = data;
+        break; // found them
       }
-      group.members = members || [];
+    } catch {
+      // ignore and try next candidate
     }
+  }
 
+  group.members = members; // empty array if nothing found
+}
     // IMPORTANT: return the *group object itself* (not { ok, group })
     res.status(200).json(group);
   } catch (e) {
