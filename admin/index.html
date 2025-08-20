@@ -36,6 +36,7 @@
       <aside class="admin-sidebar">
         <div class="sidebar-title">PSA Admin</div>
         <a id="nav-active" class="sidebar-item active" href="#">Active submissions</a>
+        <a id="nav-groups" class="sidebar-item" href="#">Groups</a>
         <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
         <a id="nav-settings" class="sidebar-item" href="#" title="Coming soon">Settings</a>
         <div class="sidebar-spacer"></div>
@@ -60,112 +61,120 @@
           <!-- rendered by JS -->
         </div>
 
-        <!-- Toolbar -->
-        <div class="toolbar">
-          <input id="q" type="search" placeholder="Search email or submission…" />
+        <!-- ===================== Submissions view ===================== -->
+        <section id="view-submissions">
+          <!-- Toolbar -->
+          <div class="toolbar">
+            <input id="q" type="search" placeholder="Search email or submission…" />
 
-          <!-- Date range button + popover (right after search) -->
-          <button id="btnDate" class="btn" type="button" title="Filter by date">Dates: All</button>
-          <div id="date-popover" class="popover hide" role="dialog" aria-modal="true">
-            <div id="rangeCal" class="range-cal">
-              <div class="rc-side">
-                <button id="datePresetToday" class="btn" type="button">Today</button>
-                <button id="datePreset7" class="btn" type="button">Last 7 days</button>
-                <button id="datePreset30" class="btn" type="button">Last 30 days</button>
-              </div>
-
-              <div class="rc-months">
-                <!-- Left month -->
-                <div class="rc-month">
-                  <div class="rc-head">
-                    <button id="rc-prev" class="btn" type="button" title="Previous month">‹</button>
-                    <div id="rc-title-left" class="rc-title"></div>
-                  </div>
-                  <div id="rc-grid-left" class="rc-grid"></div>
+            <!-- Date range button + popover (right after search) -->
+            <button id="btnDate" class="btn" type="button" title="Filter by date">Dates: All</button>
+            <div id="date-popover" class="popover hide" role="dialog" aria-modal="true">
+              <div id="rangeCal" class="range-cal">
+                <div class="rc-side">
+                  <button id="datePresetToday" class="btn" type="button">Today</button>
+                  <button id="datePreset7" class="btn" type="button">Last 7 days</button>
+                  <button id="datePreset30" class="btn" type="button">Last 30 days</button>
                 </div>
 
-                <!-- Right month -->
-                <div class="rc-month">
-                  <div class="rc-head">
-                    <div id="rc-title-right" class="rc-title"></div>
-                    <button id="rc-next" class="btn" type="button" title="Next month">›</button>
+                <div class="rc-months">
+                  <!-- Left month -->
+                  <div class="rc-month">
+                    <div class="rc-head">
+                      <button id="rc-prev" class="btn" type="button" title="Previous month">‹</button>
+                      <div id="rc-title-left" class="rc-title"></div>
+                    </div>
+                    <div id="rc-grid-left" class="rc-grid"></div>
                   </div>
-                  <div id="rc-grid-right" class="rc-grid"></div>
+
+                  <!-- Right month -->
+                  <div class="rc-month">
+                    <div class="rc-head">
+                      <div id="rc-title-right" class="rc-title"></div>
+                      <button id="rc-next" class="btn" type="button" title="Next month">›</button>
+                    </div>
+                    <div id="rc-grid-right" class="rc-grid"></div>
+                  </div>
                 </div>
               </div>
+
+              <div class="rc-foot">
+                <span id="rc-range-label" class="muted"></span>
+                <div class="spacer"></div>
+                <button id="dateClear"  class="btn" type="button">Clear</button>
+                <button id="dateCancel" class="btn" type="button">Cancel</button>
+                <button id="dateApply"  class="btn primary" type="button">Apply</button>
+              </div>
+
+              <!-- hidden inputs the table code reads -->
+              <input id="dateFrom" type="date" hidden />
+              <input id="dateTo"   type="date" hidden />
             </div>
 
-            <div class="rc-foot">
-              <span id="rc-range-label" class="muted"></span>
-              <div class="spacer"></div>
-              <button id="dateClear"  class="btn" type="button">Clear</button>
-              <button id="dateCancel" class="btn" type="button">Cancel</button>
-              <button id="dateApply"  class="btn primary" type="button">Apply</button>
+            <div class="filters">
+              <!-- Status (checkbox dropdown) -->
+              <button id="btnStatus" class="btn" type="button">Status: All</button>
+              <div id="status-popover" class="popover hide" role="dialog" aria-modal="true">
+                <div class="status-list">
+                  <label><input type="checkbox" data-status="submitted"> submitted</label>
+                  <label><input type="checkbox" data-status="submitted_paid"> submitted_paid</label>
+                  <label><input type="checkbox" data-status="pending_payment"> pending_payment</label>
+                  <label><input type="checkbox" data-status="paid"> paid</label>
+                  <label><input type="checkbox" data-status="fulfilled"> fulfilled</label>
+                </div>
+                <div class="rc-foot">
+                  <span class="spacer"></span>
+                  <button id="statusClear" class="btn" type="button">Clear</button>
+                  <button id="statusApply" class="btn primary" type="button">Apply</button>
+                </div>
+              </div>
+
+              <!-- Evaluation (unchanged) -->
+              <select id="fEval" aria-label="Evaluation">
+                <option value="all">Evaluation: All</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
             </div>
 
-            <!-- hidden inputs the table code reads -->
-            <input id="dateFrom" type="date" hidden />
-            <input id="dateTo"   type="date" hidden />
+            <!-- Grading Service filter -->
+            <select id="fService" title="Grading service" style="min-width:220px">
+              <option value="">Grading: All</option>
+            </select>
+
+            <span class="count-pill"><span id="countPill">0</span></span>
+            <div class="spacer"></div>
+            <button id="btnResetFilters" class="btn" type="button" title="Reset all filters">Reset</button>
+            <button id="btnRefresh" class="btn" type="button">Refresh</button>
           </div>
 
-<div class="filters">
-  <!-- Status (checkbox dropdown) -->
-  <button id="btnStatus" class="btn" type="button">Status: All</button>
-  <div id="status-popover" class="popover hide" role="dialog" aria-modal="true">
-    <div class="status-list">
-      <label><input type="checkbox" data-status="submitted"> submitted</label>
-      <label><input type="checkbox" data-status="submitted_paid"> submitted_paid</label>
-      <label><input type="checkbox" data-status="pending_payment"> pending_payment</label>
-      <label><input type="checkbox" data-status="paid"> paid</label>
-      <label><input type="checkbox" data-status="fulfilled"> fulfilled</label>
-    </div>
-    <div class="rc-foot">
-      <span class="spacer"></span>
-      <button id="statusClear" class="btn" type="button">Clear</button>
-      <button id="statusApply" class="btn primary" type="button">Apply</button>
-    </div>
-  </div>
+          <!-- Error line -->
+          <div id="subsErr" class="error hide"></div>
 
-  <!-- Evaluation (unchanged) -->
-  <select id="fEval" aria-label="Evaluation">
-    <option value="all">Evaluation: All</option>
-    <option value="yes">Yes</option>
-    <option value="no">No</option>
-  </select>
-</div>
-
-          <!-- Grading Service filter -->
-          <select id="fService" title="Grading service" style="min-width:220px">
-            <option value="">Grading: All</option>
-          </select>
-
-          <span class="count-pill"><span id="countPill">0</span></span>
-          <div class="spacer"></div>
-          <button id="btnResetFilters" class="btn" type="button" title="Reset all filters">Reset</button>
-          <button id="btnRefresh" class="btn" type="button">Refresh</button>
-        </div>
-
-        <!-- Error line -->
-        <div id="subsErr" class="error hide"></div>
-
-        <!-- Table -->
-        <div class="table-wrap">
-          <div class="table-scroller">
-            <table class="table" id="subsTable">
-              <thead id="subsHead"></thead>
-              <tbody id="subsTbody"></tbody>
-            </table>
+          <!-- Table -->
+          <div class="table-wrap">
+            <div class="table-scroller">
+              <table class="table" id="subsTable">
+                <thead id="subsHead"></thead>
+                <tbody id="subsTbody"></tbody>
+              </table>
+            </div>
+            <div id="subsEmpty" class="empty hide">No submissions found.</div>
           </div>
-          <div id="subsEmpty" class="empty hide">No submissions found.</div>
-        </div>
 
-        <!-- Pagination -->
-        <div class="pagination">
-          <span class="page-range" id="page-range">0–0 of 0</span>
-          <button class="page-btn" id="prev-page">‹</button>
-          <button class="page-btn" id="next-page">›</button>
-        </div>
-        <div id="view-groups"></div>
+          <!-- Pagination -->
+          <div class="pagination">
+            <span class="page-range" id="page-range">0–0 of 0</span>
+            <button class="page-btn" id="prev-page">‹</button>
+            <button class="page-btn" id="next-page">›</button>
+          </div>
+        </section>
+        <!-- =================== /Submissions view ===================== -->
+
+        <!-- ======================= Groups view ======================= -->
+        <section id="view-groups" class="hide"><!-- rendered by JS --></section>
+        <!-- ===================== /Groups view ======================= -->
+
       </main>
     </div>
   </div>
