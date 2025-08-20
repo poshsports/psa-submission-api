@@ -224,8 +224,55 @@ function fmtTs(ts) {
   } catch { return String(ts); }
 }
 
+// --- helpers for detail fetch ---
+function pick(v, ...alts){ for (const x of [v, ...alts]) if (x != null && String(x).trim() !== '') return x; return ''; }
+
+function memberSubmissionId(m){
+  // tolerate a few common shapes
+  return pick(
+    m?.submission_id,
+    m?.submissionId,
+    (typeof m?.submission === 'string' || typeof m?.submission === 'number') ? m.submission : '',
+    m?.submission?.id,   // nested object
+    m?.submission?.submission_id
+  )?.toString().trim();
+}
+
+async function loadGroupSmart(id, codeHint){
+  // Try by code first (many APIs key groups by code); if that fails or is empty, try id.
+  let g = null;
+  try { g = await fetchGroup(codeHint || id); } catch {}
+  const looksEmpty = !g || (g && !g.status && !g.updated_at && !Array.isArray(g.members));
+  if (looksEmpty) {
+    try { g = await fetchGroup(id); } catch {}
+  }
+  return g || {};
+}
+// Try a few likely endpoints to fetch members when the base group payload lacks them.
+async function fetchMembersFallback(idOrCode){
+  const urls = [
+    `/api/admin/groups/${encodeURIComponent(idOrCode)}?include=members`,
+    `/api/admin/groups/${encodeURIComponent(idOrCode)}?with=members`,
+    `/api/admin/groups/${encodeURIComponent(idOrCode)}/members`
+  ];
+  for (const u of urls){
+    try {
+      const res = await fetch(u, { credentials: 'same-origin' });
+      if (!res.ok) continue;
+      const j = await res.json().catch(() => null);
+      // Some endpoints return the full group again, others just an array
+      if (Array.isArray(j)) return j;
+      if (j && Array.isArray(j.members)) return j.members;
+    } catch {}
+  }
+  return [];
+}
+
+
 // ========== Detail View ==========
-async function renderDetail(root, id, codeHint) {  root.innerHTML = `
+// ========== Detail View ==========
+async function renderDetail(root, id, codeHint) {
+  root.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <button id="gback" class="ghost">← Back</button>
       <h2 style="margin:0">Group</h2>
@@ -244,69 +291,99 @@ async function renderDetail(root, id, codeHint) {  root.innerHTML = `
 
   const $box = $('gdetail');
   try {
-    // API expects code (e.g., "GRP-0005")
-    const grp = await fetchGroup(id); 
+    const grp = await loadGroupSmart(id, codeHint);
     const safe = (v) => escapeHtml(String(v ?? ''));
 
-    const codeOut    = safe(grp?.code || codeHint || '');
-    const statusOut  = safe(grp?.status);
-    const notesOut   = safe(grp?.notes);
-    const shippedOut = fmtTs(grp?.shipped_at) || '—';
-    const returnedOut= fmtTs(grp?.returned_at) || '—';
-    const updatedOut = fmtTs(grp?.updated_at) || '';
-    const createdOut = fmtTs(grp?.created_at) || '';
+    const codeOut     = safe(grp?.code || codeHint || '');
+    const statusOut   = safe(grp?.status || '');
+    const notesOut    = safe(grp?.notes || '');
+    const shippedOut  = fmtTs(grp?.shipped_at)  || '—';
+    const returnedOut = fmtTs(grp?.returned_at) || '—';
+    const updatedOut  = fmtTs(grp?.updated_at)  || '—';
+    const createdOut  = fmtTs(grp?.created_at)  || '—';
+    
+    // Gather member submission IDs (try fallback endpoints if needed)
+    let members = Array.isArray(grp?.members) ? grp.members : [];
+    if (!members.length) {
+      // try by code first (more common), then id
+      const maybeCode = grp?.code || codeHint || id;
+      members = await fetchMembersFallback(maybeCode);
+      if (!members.length && id && id !== maybeCode) {
+        members = await fetchMembersFallback(id);
+      }
+    }
+    
+    const ids = members.map(memberSubmissionId).filter(Boolean);
 
-    // Fetch member submissions (full details) and normalize them
-    const members = Array.isArray(grp?.members) ? grp.members : [];
-    const ids = members
-      .map(m => (m?.submission_id ? String(m.submission_id).trim() : ''))
-      .filter(Boolean);
 
+    // Try to show full submission info (like the Submissions table)
     let subRows = [];
     if (ids.length) {
       const uniq = Array.from(new Set(ids));
-      const fetched = await Promise.all(uniq.map(id => fetchSubmission(id).catch(() => null)));
-      subRows = fetched
-        .filter(Boolean)
-        .map(r => tbl.normalizeRow(r));
+      const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
+      subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
     }
 
-    // Columns to mirror the main Submissions table at a glance
-    const COLS = [
-      { key: 'created_at',       label: 'Created',        fmt: (r) => fmtTs(r.created_at) },
-      { key: 'submission_id',    label: 'Submission',     fmt: (r) => safe(r.submission_id) },
-      { key: 'customer_email',   label: 'Email',          fmt: (r) => safe(r.customer_email) },
-      { key: 'status',           label: 'Status',         fmt: (r) => safe(r.status) },
-      { key: 'cards',            label: 'Cards',          fmt: (r) => String(Number(r.cards||0)) },
-      { key: 'evaluation',       label: 'Evaluation',     fmt: (r) => (r.evaluation_bool ? 'Yes' : 'No') },
-      { key: 'grand',            label: 'Grand',          fmt: (r) => `$${(Number(r.grand)||0).toLocaleString()}` },
-      { key: 'grading_service',  label: 'Grading Service',fmt: (r) => safe(r.grading_service) },
+    // Detailed columns (if we could fetch submissions)
+    const RICH_COLS = [
+      { label: 'Created',         fmt: (r) => fmtTs(r.created_at) },
+      { label: 'Submission',      fmt: (r) => safe(r.submission_id) },
+      { label: 'Email',           fmt: (r) => safe(r.customer_email) },
+      { label: 'Status',          fmt: (r) => safe(r.status) },
+      { label: 'Cards',           fmt: (r) => String(Number(r.cards || 0)) },
+      { label: 'Evaluation',      fmt: (r) => (r.evaluation_bool ? 'Yes' : 'No') },
+      { label: 'Grand',           fmt: (r) => `$${(Number(r.grand)||0).toLocaleString()}` },
+      { label: 'Grading Service', fmt: (r) => safe(r.grading_service) },
     ];
 
-    const tableHead = `
-      <thead>
-        <tr>
-          ${COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}
-        </tr>
-      </thead>
-    `;
+    // Fallback columns (if API doesn't let us fetch submissions)
+    const FALLBACK_ROWS = members
+      .slice()
+      .sort((a,b) => (a?.position ?? 0) - (b?.position ?? 0))
+      .map(m => ({
+        position: Number(m?.position ?? 0),
+        submission_id: memberSubmissionId(m) || '—',
+        note: safe(m?.note || '')
+      }));
 
-    const tableBody = subRows.length
-      ? `<tbody>
-          ${subRows.map(r => `
-            <tr>
-              ${COLS.map(c => `<td>${c.fmt(r)}</td>`).join('')}
-            </tr>
-          `).join('')}
-        </tbody>`
-      : `<tbody><tr><td colspan="${COLS.length}" class="note">No members.</td></tr></tbody>`;
+    const table =
+      subRows.length > 0
+        ? `
+          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+            <thead><tr>${RICH_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${subRows.map(r => `<tr>${RICH_COLS.map(c => `<td>${c.fmt(r)}</td>`).join('')}</tr>`).join('')}
+            </tbody>
+          </table>`
+        : `
+          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+            <thead>
+              <tr>
+                <th style="width:90px">#</th>
+                <th style="width:280px">Submission</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                FALLBACK_ROWS.length
+                  ? FALLBACK_ROWS.map(r => `
+                      <tr>
+                        <td>${r.position}</td>
+                        <td><code>${escapeHtml(r.submission_id)}</code></td>
+                        <td>${r.note}</td>
+                      </tr>`).join('')
+                  : `<tr><td colspan="3" class="note">No members.</td></tr>`
+              }
+            </tbody>
+          </table>`;
 
     if ($box) {
       $box.innerHTML = `
         <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
             <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
-            <div><div class="note">Status</div><div>${statusOut}</div></div>
+            <div><div class="note">Status</div><div>${statusOut || '—'}</div></div>
             <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
             <div><div class="note">Returned</div><div>${returnedOut}</div></div>
             <div><div class="note">Updated</div><div>${updatedOut}</div></div>
@@ -319,10 +396,7 @@ async function renderDetail(root, id, codeHint) {  root.innerHTML = `
         </div>
 
         <div class="table-wrap">
-          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-            ${tableHead}
-            ${tableBody}
-          </table>
+          ${table}
         </div>
       `;
     }
@@ -330,7 +404,6 @@ async function renderDetail(root, id, codeHint) {  root.innerHTML = `
     if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
-
 
 // ===== Boot for Groups page =====
 function bootGroupsPage(){
