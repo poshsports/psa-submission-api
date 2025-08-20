@@ -1,7 +1,25 @@
 // /admin/js/groups.js
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchGroups, fetchGroup } from './api.js';
+import { logout, fetchGroups, fetchGroup } from './api.js';
 
+// ========== Auth & sidebar wiring (standalone Groups page) ==========
+async function doLogout(e){
+  e?.preventDefault?.();
+  try { await logout(); } catch {}
+  window.location.replace('/admin'); // leave
+}
+function ensureSignoutWired(){
+  const el = $('sidebar-signout');
+  if (!el) return;
+  el.addEventListener('click', doLogout);
+  el.onclick = doLogout;
+}
+function wireSidebarNav(){
+  $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); window.location.assign('/admin'); });
+  $('nav-groups')?.classList?.add('active');
+}
+
+// ========== Local state ==========
 let state = {
   status: null,     // 'Draft' | 'ReadyToShip' | 'AtPSA' | 'Returned' | 'Closed' | null
   q: '',
@@ -12,15 +30,15 @@ let state = {
   currentId: null,
   lastItems: [],    // cache last page for quick re-render on back
 };
-
 // sequence guard to avoid stale async renders clobbering the UI
 let listReqSeq = 0;
 
+// Public entry (idempotent mount)
 export function showGroupsView() {
   const root = $('view-groups');
   if (!root) return;
 
-  // Idempotent clear (safer than innerHTML=''; removes children and their listeners)
+  // Safer than innerHTML='' — removes children + their listeners in one go
   root.replaceChildren();
   root.classList.remove('hide');
 
@@ -84,20 +102,20 @@ async function renderList(root) {
     refreshList();
   }, 250);
 
-  $q.addEventListener('input', deb);
-  $s.addEventListener('change', () => {
+  $q?.addEventListener('input', deb);
+  $s?.addEventListener('change', () => {
     const v = $s.value.trim();
     state.status = v || null;
     state.offset = 0;
     refreshList();
   });
 
-  $('gprev').addEventListener('click', () => {
+  $('gprev')?.addEventListener('click', () => {
     if (state.offset <= 0) return;
     state.offset = Math.max(0, state.offset - state.limit);
     refreshList();
   });
-  $('gnext').addEventListener('click', () => {
+  $('gnext')?.addEventListener('click', () => {
     if (!state.hasMore) return;
     state.offset = state.offset + state.limit;
     refreshList();
@@ -106,9 +124,7 @@ async function renderList(root) {
   await refreshList();
 }
 
-function sel(v) {
-  return state.status === v ? 'selected' : '';
-}
+function sel(v) { return state.status === v ? 'selected' : ''; }
 
 async function refreshList() {
   const mySeq = ++listReqSeq;
@@ -208,14 +224,22 @@ async function renderDetail(root, id) {
       <button id="gback" class="ghost">← Back</button>
       <h2 style="margin:0">Group</h2>
       <span class="note">Read-only</span>
+      <div style="flex:1"></div>
+      <a id="goto-subs" class="ghost" href="/admin">Open Active submissions</a>
     </div>
     <div id="gdetail">Loading…</div>
   `;
 
-  $('gback').addEventListener('click', () => {
+  $('gback')?.addEventListener('click', (e) => {
+    e.preventDefault();
     state.view = 'list';
     state.currentId = null;
     renderList(root);
+  });
+
+  $('goto-subs')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.location.assign('/admin');
   });
 
   const $box = $('gdetail');
@@ -278,3 +302,31 @@ async function renderDetail(root, id) {
     if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
+
+// ===== Boot for Groups page =====
+function bootGroupsPage(){
+  ensureSignoutWired();
+  wireSidebarNav();
+
+  const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
+  const loginEl = document.getElementById('login');
+  const shellEl = document.getElementById('shell');
+
+  const authNote = document.getElementById('auth-note');
+  if (authNote) authNote.textContent = authed ? 'passcode session' : 'not signed in';
+  const authNoteTop = document.getElementById('auth-note-top');
+  if (authNoteTop) authNoteTop.textContent = authed ? 'passcode session' : 'not signed in';
+
+  // Groups page is read-only and behind pass cookie the same as /admin
+  if (authed) {
+    if (loginEl) loginEl.classList.add('hide');
+    if (shellEl) shellEl.classList.remove('hide');
+    showGroupsView();
+  } else {
+    // If you want a dedicated login on the groups page, you can redirect or show the same login shell.
+    // For now, redirect to /admin for login.
+    window.location.replace('/admin');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', bootGroupsPage);
