@@ -233,7 +233,8 @@ function memberSubmissionId(m){
     m?.submissionId,
     (typeof m?.submission === 'string' || typeof m?.submission === 'number') ? m.submission : '',
     m?.submission?.id,
-    m?.submission?.submission_id
+    m?.submission?.submission_id,
+    m?.id // sometimes a plain id is the submission id
   );
   return v ? String(v).trim() : '';
 }
@@ -244,25 +245,62 @@ async function loadGroupSmart(id){
   catch { return {}; }
 }
 
-// Try a couple of id-based shapes the backend might support
+/**
+ * Try a variety of id-based endpoints to retrieve members for a group.
+ * Returns an array of member-ish objects (we only need submission id, note, position).
+ */
 async function fetchMembersFallback(id){
   const urls = [
+    // common REST-ish shapes
     `/api/admin/groups/${encodeURIComponent(id)}/members`,
+    `/api/admin/groups/${encodeURIComponent(id)}/submissions`,
+    // query param shapes
+    `/api/admin/group-members?group_id=${encodeURIComponent(id)}`,
     `/api/admin/groups/${encodeURIComponent(id)}?include=members`,
     `/api/admin/groups/${encodeURIComponent(id)}?with=members`,
   ];
 
-  for (const u of urls) {
+  for (const u of urls){
     try {
       const res = await fetch(u, { credentials: 'same-origin' });
       if (!res.ok) continue;
       const j = await res.json().catch(() => null);
-      if (Array.isArray(j)) return j;           // pure list of members
-      if (j && Array.isArray(j.members)) return j.members; // group with members
+      if (!j) continue;
+
+      // 1) If the endpoint is already a list of members
+      if (Array.isArray(j)) return j;
+
+      // 2) If it returned a group-like object
+      if (j && Array.isArray(j.members)) return j.members;
+      if (j && Array.isArray(j.group_members)) return j.group_members;
+      if (j && Array.isArray(j.submissions)) return j.submissions; // could be ids or objects
+      if (j && Array.isArray(j.submission_ids)) {
+        return j.submission_ids.map((sid, i) => ({ submission_id: sid, position: i+1 }));
+      }
     } catch {}
   }
   return [];
 }
+
+/**
+ * Given a raw group payload, extract "members" in whatever shape it uses.
+ * Returns an array of member-ish objects.
+ */
+function extractMembersFromGroup(grp){
+  if (!grp || typeof grp !== 'object') return [];
+
+  // Direct arrays in the group
+  if (Array.isArray(grp.members))        return grp.members;
+  if (Array.isArray(grp.group_members))  return grp.group_members;
+
+  // If the group carries submissions/ids:
+  if (Array.isArray(grp.submissions))    return grp.submissions;
+  if (Array.isArray(grp.submission_ids)) return grp.submission_ids.map((sid, i) => ({ submission_id: sid, position: i+1 }));
+
+  // Nothing recognizable
+  return [];
+}
+
 
 // ========== Detail View ==========
 async function renderDetail(root, id, codeHint) {
@@ -298,10 +336,16 @@ const updatedOut  = fmtTs(grp?.updated_at)  || '—';
 const createdOut  = fmtTs(grp?.created_at)  || '—';
 
 // Members: prefer grp.members if present; otherwise try id-based fallbacks
-let members = Array.isArray(grp?.members) ? grp.members : await fetchMembersFallback(id);
+// Members: prefer what the group returned; otherwise try id-based fallbacks
+let members = extractMembersFromGroup(grp);
+if (!members.length) {
+  members = await fetchMembersFallback(id);
+}
 
-// Normalize submission IDs from member objects
-const ids = members.map(memberSubmissionId).filter(Boolean);
+// Normalize submission IDs from member objects (support ids or objects)
+const ids = members
+  .map(m => (typeof m === 'string' || typeof m === 'number') ? String(m) : memberSubmissionId(m))
+  .filter(Boolean);
 
 // Pull rich submission rows when we have IDs
 let subRows = [];
@@ -310,9 +354,10 @@ if (ids.length) {
   const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
   subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
 }
-    
+
 console.debug('[groups] group by id:', grp);
-console.debug('[groups] members length:', Array.isArray(members) ? members.length : 0, members);
+console.debug('[groups] members (raw):', members);
+console.debug('[groups] submission ids:', ids);
 
     // Detailed columns (if we could fetch submissions)
     const RICH_COLS = [
