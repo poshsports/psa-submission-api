@@ -96,6 +96,7 @@ export function normalizeRow(r){
 export function renderHead(order, hidden){
   const hiddenSet = new Set(hidden || []);
   const head = $('subsHead');
+  if (!head) return;
 
   head.innerHTML = `
     <tr>
@@ -104,7 +105,6 @@ export function renderHead(order, hidden){
         if (!col) return '';
         const caretId = 'car-' + key;
 
-        // inline center + optional hide flag (keeps data-hidden marker)
         const attrs = hiddenSet.has(key)
           ? ' style="text-align:center;vertical-align:middle;display:none" data-hidden="1"'
           : ' style="text-align:center;vertical-align:middle"';
@@ -134,10 +134,11 @@ export function renderHead(order, hidden){
 }
 
 export function paintCarets(){
-  document.querySelectorAll('#subsHead .caret').forEach(el => el.textContent = '');
+  document.querySelectorAll('#subsHead .caret').forEach(el => { if (el) el.textContent = ''; });
   const el = document.getElementById('car-' + sortKey);
   if (el) el.textContent = sortDir === 'asc' ? '▲' : '▼';
 }
+
 function getSelectedStatuses() {
   return Array.from(
     document.querySelectorAll('#status-popover input[type="checkbox"][data-status]:checked')
@@ -230,15 +231,13 @@ export function applyFilters() {
   renderTable(visibleKeys);
 }
 
-/* ---------- NEW: row click/keyboard wiring ---------- */
+/* ---------- Row open handlers (details sheet trigger) ---------- */
 function openDetailsFor(id, friendly) {
   if (!id) return;
-  // Preferred: a global provided by admin.app.js
   if (typeof window.__openAdminDetails === 'function') {
     window.__openAdminDetails(id, friendly);
     return;
   }
-  // Fallback: fire a custom event other code can listen for
   try {
     window.dispatchEvent(new CustomEvent('psa:open-details', {
       detail: { id, friendly }
@@ -256,10 +255,9 @@ function wireRowOpenHandlers(tbody) {
   if (tbody.__rowKey)   tbody.removeEventListener('keydown', tbody.__rowKey);
 
   const onClick = (e) => {
-    const tr = e.target.closest('tr.rowlink');
+    const tr = e.target.closest?.('tr.rowlink');
     if (!tr || tr.closest('table') !== tbody.closest('table')) return;
 
-    // ignore clicks on interactive children if you add any later
     const tag = (e.target.tagName || '').toLowerCase();
     if (['a','button','input','select','textarea','label'].includes(tag)) return;
 
@@ -270,7 +268,7 @@ function wireRowOpenHandlers(tbody) {
 
   const onKey = (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
-      const tr = e.target.closest('tr.rowlink');
+      const tr = e.target.closest?.('tr.rowlink');
       if (!tr) return;
       e.preventDefault();
       const id = tr.getAttribute('data-id');
@@ -284,13 +282,13 @@ function wireRowOpenHandlers(tbody) {
   tbody.__rowClick = onClick;
   tbody.__rowKey   = onKey;
 }
-/* ---------- END NEW ---------- */
 
+/* ---------- Render ---------- */
 export function renderTable(visibleKeys){
   const body = $('subsTbody');
   const emptyEl = $('subsEmpty');
 
-  // If the table body isn't mounted yet, safely bail (e.g., mid-login transition)
+  // If the table body isn't mounted yet, safely bail
   if (!body) {
     const total0 = viewRows.length;
     const start0 = pageIndex * pageSize;
@@ -336,7 +334,7 @@ export function renderTable(visibleKeys){
     `;
   }).join('');
 
-  // 🔌 attach row open handlers after every render
+  // attach row open handlers after every render
   wireRowOpenHandlers(body);
 
   // pagination UI (null-safe)
