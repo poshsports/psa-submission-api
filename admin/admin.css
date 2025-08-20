@@ -357,3 +357,12 @@ pre.json{
 .cards-table .ct-row > div:last-child,
 .cards-table .ct-head > div:last-child { text-align: left; }
 .cards-table .ct-row > div:last-child { white-space: normal; overflow: visible; text-overflow: clip; }
+
+/* groups view minor polish */
+.data-table { border-collapse: collapse; }
+.data-table th, .data-table td { padding: 10px 12px; border-bottom: 1px solid #eee; }
+.data-table tr.clickable { cursor: pointer; }
+.data-table tr.clickable:hover { background: #fafafa; }
+button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px 12px; }
+.table-wrap { overflow:auto; background:#fff; border:1px solid #eee; border-radius:12px; }
+
