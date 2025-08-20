@@ -49,6 +49,7 @@ function positionPopover(pop, anchor){
   pop.style.top  = `${window.scrollY + r.bottom + 6}px`;
   pop.style.left = `${Math.min(window.scrollX + r.left, window.scrollX + (window.innerWidth - pop.offsetWidth - 10))}px`;
 }
+
 // ----- Status popover helpers -----
 function getCheckedStatuses() {
   return Array.from(
@@ -328,6 +329,7 @@ function resetFilters(){
   updateDateButtonLabel();
   runFilter();
 }
+
 function activateNav(id){
   document.querySelectorAll('.admin-sidebar .sidebar-item')
     .forEach(a => a.classList.toggle('active', a.id === id));
@@ -337,6 +339,7 @@ function setTopbarTitle(text){
   const el = document.querySelector('.topbar .brand strong');
   if (el) el.textContent = text;
 }
+
 function hideAllViews(){
   ['view-submissions','view-groups'].forEach(id => {
     const el = document.getElementById(id);
@@ -350,12 +353,9 @@ function showSubmissionsView(){
   setTopbarTitle('Active submissions');
   document.getElementById('view-submissions')?.classList.remove('hide');
 
-  // Render/refresh table safely (prefer idempotent ensureRendered)
-  if (typeof tbl.ensureRendered === 'function') {
-    tbl.ensureRendered();
-  } else if (typeof tbl.render === 'function') {
-    tbl.render();
-  }
+  // Render/refresh table safely
+  if (typeof tbl.ensureRendered === 'function') tbl.ensureRendered();
+  else if (typeof tbl.render === 'function') tbl.render();
 }
 
 function showGroups(){
@@ -363,10 +363,7 @@ function showGroups(){
   activateNav('nav-groups');
   setTopbarTitle('Groups');
   const vg = document.getElementById('view-groups');
-  if (vg) {
-    vg.classList.remove('hide');
-    vg.innerHTML = '';            // clear stale markup to avoid stacking
-  }
+  if (vg) vg.classList.remove('hide');
   try { showGroupsView(); } catch (e) { console.warn('showGroupsView failed', e); }
 }
 
@@ -374,12 +371,14 @@ function showGroups(){
 function wireUI(){
   ensureSignoutWired();
   updateStatusButtonLabel(); // show "Status: All" on first paint
+
   $('nav-active')?.addEventListener('click', (e) => { e.preventDefault(); showSubmissionsView(); });
   $('nav-groups')?.addEventListener('click', (e) => { e.preventDefault(); showGroups(); });
 
   $('btnRefresh')?.addEventListener('click', loadReal);
   $('btnResetFilters')?.addEventListener('click', resetFilters);
   $('btnStatus')?.addEventListener('click', openStatusPopover);
+
   $('statusApply')?.addEventListener('click', () => {
     closeStatusPopover();
     updateStatusButtonLabel();
@@ -395,7 +394,6 @@ function wireUI(){
   const debouncedFilter = debounce(runFilter, 150);
   $('q')?.addEventListener('input', debouncedFilter);
   $('fEval')?.addEventListener('change', runFilter);
-
   $('fService')?.addEventListener('change', runFilter);
 
   $('btnDate')?.addEventListener('click', openDatePopover);
@@ -531,65 +529,7 @@ function pickFirst(...vals){
   return '';
 }
 
-function renderAddress(r) {
-  // If backend gives a single formatted string, use it.
-  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
-    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
-  }
-
-  // Common nested containers we see in different sources
-  const nested =
-    r.shipping_address ||
-    r.shopify_shipping_address ||
-    r.ship_address ||
-    r.address ||
-    r.shipping ||
-    r.shippingAddress ||
-    null;
-
-  const pick = (...vals) => {
-    for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
-    return '';
-  };
-
-  // ---- NAME ----
-  // (Your sample JSON doesn’t include a name. This will show it as soon as the API provides any of these.)
-  const name = pick(
-    r.ship_name, r.shipping_name, r.ship_to_name,
-    r.customer_name, r.name,
-    nested?.name,
-    (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
-    nested?.recipient, nested?.full_name, nested?.contact_name
-  );
-
-  // ---- ADDRESS LINES ----
-  const a1 = pick(
-    r.ship_addr1, r.ship_address1, r.address1,
-    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
-    nested?.street
-  );
-
-  // address line 2 / suite / unit / apt
-  const a2Raw = pick(
-    r.ship_addr2, r.ship_address2, r.address2,
-    nested?.address2, nested?.line2,
-    nested?.street2, nested?.address_line2, nested?.address_line_2,
-    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
-  );
-  const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
-    ? `Suite ${a2Raw}` : a2Raw;
-
-  // ---- CITY / STATE / ZIP / COUNTRY ----
-  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
-  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
-  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
-  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
-
-  const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
-  if (!parts.length) return '';
-  return `<address class="shipto">${parts.map(escapeHtml).join('<br>')}</address>`;
-}
-
+// SAFER: no template literals here to avoid parse-killing backtick mistakes
 function renderCardsTable(cards) {
   if (!Array.isArray(cards) || cards.length === 0) return '';
 
@@ -625,6 +565,57 @@ function renderCardsTable(cards) {
   );
 }
 
+function renderAddress(r) {
+  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
+    return '<address class="shipto">' + escapeHtml(r.ship_to) + '</address>';
+  }
+
+  const nested =
+    r.shipping_address ||
+    r.shopify_shipping_address ||
+    r.ship_address ||
+    r.address ||
+    r.shipping ||
+    r.shippingAddress ||
+    null;
+
+  const pick = (...vals) => {
+    for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
+    return '';
+  };
+
+  const name = pick(
+    r.ship_name, r.shipping_name, r.ship_to_name,
+    r.customer_name, r.name,
+    nested?.name,
+    (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
+    nested?.recipient, nested?.full_name, nested?.contact_name
+  );
+
+  const a1 = pick(
+    r.ship_addr1, r.ship_address1, r.address1,
+    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
+    nested?.street
+  );
+
+  const a2Raw = pick(
+    r.ship_addr2, r.ship_address2, r.address2,
+    nested?.address2, nested?.line2,
+    nested?.street2, nested?.address_line2, nested?.address_line_2,
+    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
+  );
+  const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
+    ? `Suite ${a2Raw}` : a2Raw;
+
+  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
+  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
+  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
+
+  const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
+  if (!parts.length) return '';
+  return '<address class="shipto">' + parts.map(escapeHtml).join('<br>') + '</address>';
+}
 
 function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
 function fmtDate(iso){
@@ -638,7 +629,6 @@ async function openSubmissionDetails(id) {
   const titleEl = $('details-title');
   const bodyEl  = $('details-body');
 
-  // provisional title while loading
   if (titleEl) {
     titleEl.innerHTML = `Submission <strong>${escapeHtml(String(id).toUpperCase())}</strong>`;
   }
@@ -650,6 +640,7 @@ async function openSubmissionDetails(id) {
       const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
       titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
     }
+
     const evalAmtNum = Number(
       (r.evaluation ?? 0) || (r.eval_line_sub ?? 0) || (r?.totals?.evaluation ?? 0)
     ) || 0;
@@ -661,7 +652,6 @@ async function openSubmissionDetails(id) {
     const email   = r.customer_email || r.email || '';
     const shipHTML = renderAddress(r);
 
-    // ---- INFO GRID (card-style) ----
     const infoGrid = `
       <div class="info-grid">
         <div class="info">
