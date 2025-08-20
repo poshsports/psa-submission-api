@@ -228,48 +228,42 @@ function fmtTs(ts) {
 function pick(v, ...alts){ for (const x of [v, ...alts]) if (x != null && String(x).trim() !== '') return x; return ''; }
 
 function memberSubmissionId(m){
-  // tolerate a few common shapes
-  return pick(
+  const v = pick(
     m?.submission_id,
     m?.submissionId,
     (typeof m?.submission === 'string' || typeof m?.submission === 'number') ? m.submission : '',
-    m?.submission?.id,   // nested object
+    m?.submission?.id,
     m?.submission?.submission_id
-  )?.toString().trim();
+  );
+  return v ? String(v).trim() : '';
 }
 
-async function loadGroupSmart(id, codeHint){
-  // Try by code first (many APIs key groups by code); if that fails or is empty, try id.
-  let g = null;
-  try { g = await fetchGroup(codeHint || id); } catch {}
-  const looksEmpty = !g || (g && !g.status && !g.updated_at && !Array.isArray(g.members));
-  if (looksEmpty) {
-    try { g = await fetchGroup(id); } catch {}
-  }
-  return g || {};
+// Always fetch by UUID id; code is only for display
+async function loadGroupSmart(id){
+  try { return await fetchGroup(id); }
+  catch { return {}; }
 }
-// Try a few likely endpoints to fetch members when the base group payload lacks them.
-async function fetchMembersFallback(idOrCode){
+
+// Try a couple of id-based shapes the backend might support
+async function fetchMembersFallback(id){
   const urls = [
-    `/api/admin/groups/${encodeURIComponent(idOrCode)}?include=members`,
-    `/api/admin/groups/${encodeURIComponent(idOrCode)}?with=members`,
-    `/api/admin/groups/${encodeURIComponent(idOrCode)}/members`
+    `/api/admin/groups/${encodeURIComponent(id)}/members`,
+    `/api/admin/groups/${encodeURIComponent(id)}?include=members`,
+    `/api/admin/groups/${encodeURIComponent(id)}?with=members`,
   ];
-  for (const u of urls){
+
+  for (const u of urls) {
     try {
       const res = await fetch(u, { credentials: 'same-origin' });
       if (!res.ok) continue;
       const j = await res.json().catch(() => null);
-      // Some endpoints return the full group again, others just an array
-      if (Array.isArray(j)) return j;
-      if (j && Array.isArray(j.members)) return j.members;
+      if (Array.isArray(j)) return j;           // pure list of members
+      if (j && Array.isArray(j.members)) return j.members; // group with members
     } catch {}
   }
   return [];
 }
 
-
-// ========== Detail View ==========
 // ========== Detail View ==========
 async function renderDetail(root, id, codeHint) {
   root.innerHTML = `
@@ -291,38 +285,34 @@ async function renderDetail(root, id, codeHint) {
 
   const $box = $('gdetail');
   try {
-    const grp = await loadGroupSmart(id, codeHint);
-    const safe = (v) => escapeHtml(String(v ?? ''));
+// Fetch the group by id (UUID), use code only to display a label
+const grp = await loadGroupSmart(id);
+const safe = (v) => escapeHtml(String(v ?? ''));
 
-    const codeOut     = safe(grp?.code || codeHint || '');
-    const statusOut   = safe(grp?.status || '');
-    const notesOut    = safe(grp?.notes || '');
-    const shippedOut  = fmtTs(grp?.shipped_at)  || '—';
-    const returnedOut = fmtTs(grp?.returned_at) || '—';
-    const updatedOut  = fmtTs(grp?.updated_at)  || '—';
-    const createdOut  = fmtTs(grp?.created_at)  || '—';
+const codeOut     = safe(grp?.code || codeHint || '');
+const statusOut   = safe(grp?.status || '');
+const notesOut    = safe(grp?.notes || '');
+const shippedOut  = fmtTs(grp?.shipped_at)  || '—';
+const returnedOut = fmtTs(grp?.returned_at) || '—';
+const updatedOut  = fmtTs(grp?.updated_at)  || '—';
+const createdOut  = fmtTs(grp?.created_at)  || '—';
+
+// Members: prefer grp.members if present; otherwise try id-based fallbacks
+let members = Array.isArray(grp?.members) ? grp.members : await fetchMembersFallback(id);
+
+// Normalize submission IDs from member objects
+const ids = members.map(memberSubmissionId).filter(Boolean);
+
+// Pull rich submission rows when we have IDs
+let subRows = [];
+if (ids.length) {
+  const uniq = Array.from(new Set(ids));
+  const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
+  subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
+}
     
-    // Gather member submission IDs (try fallback endpoints if needed)
-    let members = Array.isArray(grp?.members) ? grp.members : [];
-    if (!members.length) {
-      // try by code first (more common), then id
-      const maybeCode = grp?.code || codeHint || id;
-      members = await fetchMembersFallback(maybeCode);
-      if (!members.length && id && id !== maybeCode) {
-        members = await fetchMembersFallback(id);
-      }
-    }
-    
-    const ids = members.map(memberSubmissionId).filter(Boolean);
-
-
-    // Try to show full submission info (like the Submissions table)
-    let subRows = [];
-    if (ids.length) {
-      const uniq = Array.from(new Set(ids));
-      const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
-      subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
-    }
+console.debug('[groups] group by id:', grp);
+console.debug('[groups] members length:', Array.isArray(members) ? members.length : 0, members);
 
     // Detailed columns (if we could fetch submissions)
     const RICH_COLS = [
