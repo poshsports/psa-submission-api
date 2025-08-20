@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PSA Admin – Groups</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div id="login">
+    <div class="psa-login">
+      <h1>PSA Admin</h1>
+      <div id="auth-note" class="muted">not signed in</div>
+      <div class="login-row">
+        <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password" />
+        <button id="btnLogin" class="btn primary" type="button">Sign in</button>
+      </div>
+      <div id="err" class="error"></div>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="shell" class="hide">
+    <div class="admin-shell">
+      <!-- Sidebar -->
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a id="nav-active" class="sidebar-item" href="/admin/index.html">Active submissions</a>
+        <a id="nav-groups" class="sidebar-item active" href="/admin/groups.html">Groups</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item" href="#" title="Coming soon">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
+
+      <!-- Main -->
+      <main class="admin-main">
+        <!-- Top bar -->
+        <div class="topbar">
+          <div class="brand">
+            <span class="dot"></span>
+            <strong>Groups</strong>
+          </div>
+          <div class="top-actions">
+            <span id="auth-note-top" class="muted">passcode session</span>
+          </div>
+        </div>
+
+        <!-- Groups view host -->
+        <section id="view-groups"></section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Minimal auth + page boot just for Groups page -->
+  <script type="module">
+    // tiny helpers
+    const $ = (id) => document.getElementById(id);
+
+    async function doLogin(){
+      const pass = $('pass')?.value?.trim() || '';
+      const errEl = $('err');
+      if (errEl) errEl.textContent = '';
+
+      try {
+        const res = await fetch('/api/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ pass })
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.ok !== true) {
+          if (errEl) errEl.textContent = (j.error === 'invalid_pass'
+            ? 'Invalid passcode'
+            : (j.error || 'Login failed'));
+          return;
+        }
+        boot();
+      } catch { if (errEl) errEl.textContent = 'Network error'; }
+    }
+
+    function wireAuthUI(){
+      $('btnLogin')?.addEventListener('click', doLogin);
+      $('pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+      const signout = $('sidebar-signout');
+      if (signout) {
+        signout.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try { await fetch('/api/admin-logout', { method:'POST', credentials:'same-origin' }); } catch {}
+          window.location.replace('/admin'); // back to login
+        });
+      }
+    }
+
+    function boot(){
+      const loginEl = $('login');
+      const shellEl = $('shell');
+      if (loginEl) loginEl.classList.add('hide');
+      if (shellEl) shellEl.classList.remove('hide');
+
+      const note = $('auth-note');      if (note) note.textContent = 'passcode session';
+      const noteTop = $('auth-note-top');if (noteTop) noteTop.textContent = 'passcode session';
+
+      // hand off to groups renderer
+      import('/admin/js/groups.js').then(mod => {
+        mod.showGroupsView?.();
+      }).catch(err => {
+        const host = $('view-groups');
+        if (host) host.innerHTML = `<div class="error">Failed to load groups module: ${String(err?.message || err)}</div>`;
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      wireAuthUI();
+
+      const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
+      const loginEl = $('login');
+      const shellEl = $('shell');
+      const note = $('auth-note');       if (note) note.textContent = authed ? 'passcode session' : 'not signed in';
+      const noteTop = $('auth-note-top');if (noteTop) noteTop.textContent = authed ? 'passcode session' : 'not signed in';
+
+      if (authed) boot();
+      else {
+        if (loginEl) loginEl.classList.remove('hide');
+        if (shellEl) shellEl.classList.add('hide');
+      }
+    });
+  </script>
+
+</body>
+</html>
