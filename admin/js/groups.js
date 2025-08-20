@@ -1,6 +1,6 @@
 // /admin/js/groups.js
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchGroups, fetchGroup, fetchSubmission, logout } from './api.js';
+import { fetchGroups, fetchSubmission, logout } from './api.js';
 import * as tbl from './table.js';
 
 
@@ -254,7 +254,10 @@ const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=mem
   credentials: 'same-origin'
 });
 if (!res.ok) throw new Error(`Group fetch failed: ${res.status}`);
-const grp = await res.json();
+const payload = await res.json();
+// tolerate either { ok, group } or a raw group object
+const grp = payload?.group ?? payload;
+
 const safe = (v) => escapeHtml(String(v ?? ''));
 
 // Header fields
@@ -299,14 +302,15 @@ console.debug('[groups] submission ids:', ids);
     ];
 
     // Fallback columns (if API doesn't let us fetch submissions)
-    const FALLBACK_ROWS = members
-      .slice()
-      .sort((a,b) => (a?.position ?? 0) - (b?.position ?? 0))
-      .map(m => ({
-        position: Number(m?.position ?? 0),
-        submission_id: memberSubmissionId(m) || '—',
-        note: safe(m?.note || '')
-      }));
+const FALLBACK_ROWS = members
+  .slice()
+  .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
+  .map(m => ({
+    position: Number(m?.position ?? 0),
+    submission_id: (m?.submission_id ?? m?.id ?? '').toString().trim() || '—',
+    note: safe(m?.note ?? '')
+  }));
+
 
     const table =
       subRows.length > 0
