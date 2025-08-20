@@ -163,26 +163,27 @@ async function refreshList() {
       return;
     }
 
-    const rows = items.map(row => {
-      const code = escapeHtml(row.code || '');
-      const status = escapeHtml(row.status || '');
-      const notes = escapeHtml(row.notes || '');
-      const cnt = Number(row.submission_count || 0);
-      const updated = fmtTs(row.updated_at);
-      const created = fmtTs(row.created_at);
+const rows = items.map(row => {
+  const id    = String(row.id ?? '').trim();
+  const code  = escapeHtml(row.code || '');
+  const status = escapeHtml(row.status || '');
+  const notes  = escapeHtml(row.notes  || '');
+  const cnt    = Number(row.submission_count || 0);
+  const updated = fmtTs(row.updated_at);
+  const created = fmtTs(row.created_at);
 
-     return `
-  <tr class="clickable" data-code="${code}" title="Open ${code}">
-    <td><strong>${code}</strong></td>
-    <td>${status}</td>
-    <td>${cnt}</td>
-    <td>${notes}</td>
-    <td>${updated}</td>
-    <td>${created}</td>
-  </tr>
-`;
+  return `
+    <tr class="clickable" data-id="${escapeHtml(id)}" data-code="${code}" title="Open ${code}">
+      <td><strong>${code}</strong></td>
+      <td>${status}</td>
+      <td>${cnt}</td>
+      <td>${notes}</td>
+      <td>${updated}</td>
+      <td>${created}</td>
+    </tr>
+  `;
+}).join('');
 
-    }).join('');
 
     $body.innerHTML = rows;
 
@@ -197,14 +198,16 @@ async function refreshList() {
     // Row click -> detail
 $body.querySelectorAll('tr.clickable').forEach(tr => {
   tr.addEventListener('click', () => {
-    const code = tr.getAttribute('data-code');
-    if (!code) return;
+    const id   = tr.getAttribute('data-id');
+    const code = tr.getAttribute('data-code'); // for display only
+    if (!id) return;
     state.view = 'detail';
-    state.currentId = code;
+    state.currentId = id;
     const root = $('view-groups');
-    if (root) renderDetail(root, code);
+    if (root) renderDetail(root, id, code);
   });
 });
+
 
 
   } catch (e) {
@@ -222,8 +225,7 @@ function fmtTs(ts) {
 }
 
 // ========== Detail View ==========
-async function renderDetail(root, code) {
-  root.innerHTML = `
+async function renderDetail(root, id, codeHint) {  root.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <button id="gback" class="ghost">← Back</button>
       <h2 style="margin:0">Group</h2>
@@ -243,10 +245,10 @@ async function renderDetail(root, code) {
   const $box = $('gdetail');
   try {
     // API expects code (e.g., "GRP-0005")
-    const grp = await fetchGroup(code);
+    const grp = await fetchGroup(id); 
     const safe = (v) => escapeHtml(String(v ?? ''));
 
-    const codeOut    = safe(grp?.code);
+    const codeOut    = safe(grp?.code || codeHint || '');
     const statusOut  = safe(grp?.status);
     const notesOut   = safe(grp?.notes);
     const shippedOut = fmtTs(grp?.shipped_at) || '—';
