@@ -13,10 +13,15 @@ let state = {
   lastItems: [],    // cache last page for quick re-render on back
 };
 
+// sequence guard to avoid stale async renders clobbering the UI
+let listReqSeq = 0;
+
 export function showGroupsView() {
   const root = $('view-groups');
   if (!root) return;
-  root.innerHTML = '';
+
+  // Idempotent clear (safer than innerHTML=''; removes children and their listeners)
+  root.replaceChildren();
   root.classList.remove('hide');
 
   if (state.view === 'detail' && state.currentId) {
@@ -106,10 +111,12 @@ function sel(v) {
 }
 
 async function refreshList() {
+  const mySeq = ++listReqSeq;
+
   const $body = $('gtbody');
   const $count = $('gcount');
-  $body.innerHTML = `<tr><td colspan="6" class="note">Loading…</td></tr>`;
-  $count.textContent = '';
+  if ($body) $body.innerHTML = `<tr><td colspan="6" class="note">Loading…</td></tr>`;
+  if ($count) $count.textContent = '';
 
   try {
     const { items, hasMore, limit, offset } = await fetchGroups({
@@ -118,16 +125,23 @@ async function refreshList() {
       limit: state.limit,
       offset: state.offset
     });
+
+    // If a newer request started while this one was in-flight, abort applying it
+    if (mySeq !== listReqSeq) return;
+
     state.hasMore = !!hasMore;
     state.limit = limit;
     state.offset = offset;
     state.lastItems = items || [];
 
+    if (!$body) return;
+
     if (!items || items.length === 0) {
       $body.innerHTML = `<tr><td colspan="6" class="note">No groups found.</td></tr>`;
-      $('gprev').disabled = state.offset <= 0;
-      $('gnext').disabled = true;
-      $count.textContent = '';
+      const prev = $('gprev'), next = $('gnext');
+      if (prev) prev.disabled = state.offset <= 0;
+      if (next) next.disabled = true;
+      if ($count) $count.textContent = '';
       return;
     }
 
@@ -152,12 +166,14 @@ async function refreshList() {
     }).join('');
 
     $body.innerHTML = rows;
-    $('gprev').disabled = state.offset <= 0;
-    $('gnext').disabled = !state.hasMore;
+
+    const prev = $('gprev'), next = $('gnext');
+    if (prev) prev.disabled = state.offset <= 0;
+    if (next) next.disabled = !state.hasMore;
 
     const start = state.offset + 1;
     const end = state.offset + state.lastItems.length + (state.hasMore ? '+' : '');
-    $count.textContent = `Showing ${start}–${end}`;
+    if ($count) $count.textContent = `Showing ${start}–${end}`;
 
     // Row click -> detail
     $body.querySelectorAll('tr.clickable').forEach(tr => {
@@ -172,7 +188,7 @@ async function refreshList() {
     });
 
   } catch (e) {
-    $body.innerHTML = `<tr><td colspan="6" class="note">Error: ${escapeHtml(e.message || 'Failed to load')}</td></tr>`;
+    if ($body) $body.innerHTML = `<tr><td colspan="6" class="note">Error: ${escapeHtml(e.message || 'Failed to load')}</td></tr>`;
   }
 }
 
@@ -227,36 +243,38 @@ async function renderDetail(root, id) {
         `).join('')
       : `<tr><td colspan="3" class="note">No members.</td></tr>`;
 
-    $box.innerHTML = `
-      <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-          <div><div class="note">Code</div><div><strong>${code}</strong></div></div>
-          <div><div class="note">Status</div><div>${status}</div></div>
-          <div><div class="note">Shipped</div><div>${shipped || '—'}</div></div>
-          <div><div class="note">Returned</div><div>${returned || '—'}</div></div>
-          <div><div class="note">Updated</div><div>${updated}</div></div>
-          <div><div class="note">Created</div><div>${created}</div></div>
+    if ($box) {
+      $box.innerHTML = `
+        <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <div><div class="note">Code</div><div><strong>${code}</strong></div></div>
+            <div><div class="note">Status</div><div>${status}</div></div>
+            <div><div class="note">Shipped</div><div>${shipped || '—'}</div></div>
+            <div><div class="note">Returned</div><div>${returned || '—'}</div></div>
+            <div><div class="note">Updated</div><div>${updated}</div></div>
+            <div><div class="note">Created</div><div>${created}</div></div>
+          </div>
+          <div style="margin-top:10px">
+            <div class="note">Notes</div>
+            <div>${notes || '—'}</div>
+          </div>
         </div>
-        <div style="margin-top:10px">
-          <div class="note">Notes</div>
-          <div>${notes || '—'}</div>
-        </div>
-      </div>
 
-      <div class="table-wrap">
-        <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-          <thead>
-            <tr>
-              <th style="width:90px">#</th>
-              <th style="width:280px">Submission</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    `;
+        <div class="table-wrap">
+          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+            <thead>
+              <tr>
+                <th style="width:90px">#</th>
+                <th style="width:280px">Submission</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
   } catch (e) {
-    $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
+    if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
