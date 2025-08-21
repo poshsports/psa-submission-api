@@ -36,9 +36,19 @@ export default async function handler(req, res) {
       return;
     }
 
+    // ✅ Query group_members + join submissions
     const { data, error } = await sb()
       .from('group_members')
-      .select('position, note, submission_id')
+      .select(`
+        position,
+        note,
+        submission_id,
+        submission:psa_submissions (
+          customer_email,
+          status,
+          created_at
+        )
+      `)
       .eq('group_id', group_id)
       .order('position', { ascending: true });
 
