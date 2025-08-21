@@ -87,9 +87,10 @@ export default async function handler(req, res) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
         const { data: subs, error: sErr } = await sb()
-          .from('submissions')
-          .select('id, created_at, status, grading_service, customer_email')
-          .in('id', ids);
+          .from('psa_submissions')
+          .select('submission_id as id, created_at, status, grading_service, customer_email')
+          .in('submission_id', ids);
+
         if (sErr) {
           res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message });
           return;
