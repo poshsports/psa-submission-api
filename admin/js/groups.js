@@ -167,7 +167,7 @@ const rows = items.map(row => {
   const code  = escapeHtml(row.code || '');
   const status = escapeHtml(row.status || '');
   const notes  = escapeHtml(row.notes  || '');
-  const cnt = Number(row.cards_count ?? 0);
+  const cnt = Number(row.submission_count ?? 0);
   const updated = fmtTs(row.updated_at);
   const created = fmtTs(row.created_at);
 
