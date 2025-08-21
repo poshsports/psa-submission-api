@@ -2,7 +2,8 @@
 import { requireAdmin } from './_util/adminAuth.js';
 import { sb } from './_util/supabase.js';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -17,7 +18,7 @@ export default async function handler(req, res) {
 
   let { group_id, code } = req.query;
   try {
-    // Resolve code->uuid when needed
+    // Allow lookup by code string
     if (!group_id && code && !UUID_RE.test(code)) {
       const { data: g, error } = await sb()
         .from('groups')
@@ -32,34 +33,42 @@ export default async function handler(req, res) {
     }
 
     if (!group_id || !UUID_RE.test(group_id)) {
-      res.status(400).json({ ok: false, error: 'Provide group_id (uuid) or code' });
+      res
+        .status(400)
+        .json({ ok: false, error: 'Provide group_id (uuid) or code' });
       return;
     }
 
-    // ✅ Query group_members + join submissions
+    // ✅ Query group_submissions + join psa_submissions
     const { data, error } = await sb()
-      .from('group_members')
-      .select(`
+      .from('group_submissions')
+      .select(
+        `
         position,
-        note,
+        created_at,
         submission_id,
         submission:psa_submissions (
           customer_email,
           status,
           created_at
         )
-      `)
+      `
+      )
       .eq('group_id', group_id)
       .order('position', { ascending: true });
 
     if (error) {
-      res.status(500).json({ ok: false, error: error.message || 'Database error' });
+      res
+        .status(500)
+        .json({ ok: false, error: error.message || 'Database error' });
       return;
     }
 
     res.status(200).json(Array.isArray(data) ? data : []);
   } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
+    res
+      .status(500)
+      .json({ ok: false, error: e?.message || 'Unexpected error' });
   }
 }
 
