@@ -250,7 +250,7 @@ async function renderDetail(root, id, codeHint) {
   const $box = $('gdetail');
   try {
 // Fetch the group (include members directly)
-const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members`, { credentials:'same-origin' });
+const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members&debug=1`, { credentials:'same-origin' });
 if (!res.ok) throw new Error('group fetch failed');
 const payload = await res.json();
 // catch { ok:false } payloads
