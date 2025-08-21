@@ -1,7 +1,6 @@
 // /admin/js/groups.js
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchGroups, fetchSubmission, logout } from './api.js';
-import * as tbl from './table.js';
+import { fetchGroups, logout } from './api.js';
 
 
 // ========== Auth & sidebar wiring (standalone Groups page) ==========
@@ -224,10 +223,6 @@ function fmtTs(ts) {
   } catch { return String(ts); }
 }
 
-function getMembersArray(grp) {
-  return Array.isArray(grp?.members) ? grp.members : [];
-}
-
 // ========== Detail View ==========
 async function renderDetail(root, id, codeHint) {
   root.innerHTML = `
@@ -247,136 +242,120 @@ async function renderDetail(root, id, codeHint) {
     renderList(root);
   });
 
-  const $box = $('gdetail');
-  try {
-// Fetch the group (include members directly)
-const res = await fetch(`/api/admin/groups/${encodeURIComponent(id)}?include=members&debug=1`, { credentials:'same-origin' });
-if (!res.ok) throw new Error('group fetch failed');
-const payload = await res.json();
-// catch { ok:false } payloads
-if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
-const grp = payload?.group ?? payload;
-
-
-const safe = (v) => escapeHtml(String(v ?? ''));
-
-// Header fields
-const codeOut     = safe(grp?.code || codeHint || '');
-const statusOut   = safe(grp?.status || '');
-const notesOut    = safe(grp?.notes || '');
-const shippedOut  = fmtTs(grp?.shipped_at)  || '—';
-const returnedOut = fmtTs(grp?.returned_at) || '—';
-const updatedOut  = fmtTs(grp?.updated_at)  || '—';
-const createdOut  = fmtTs(grp?.created_at)  || '—';
-
-// Members come straight from the API
-const members = getMembersArray(grp);
-
-// Build submission IDs for rich rows
-const ids = members
-  .map(m => String(m?.submission_id || '').trim())
-  .filter(Boolean);
-
-// Fetch rich submission rows
-let subRows = [];
-if (ids.length) {
-  const uniq = Array.from(new Set(ids));
-  const fetched = await Promise.all(uniq.map(sid => fetchSubmission(sid).catch(() => null)));
-  subRows = fetched.filter(Boolean).map(r => tbl.normalizeRow(r));
-
-  // 🔹 keep the same order as members[] (ids)
-  const order = new Map(ids.map((sid, i) => [String(sid), i]));
-  subRows.sort(
-    (a, b) =>
-      (order.get(String(a?.submission_id)) ?? 0) -
-      (order.get(String(b?.submission_id)) ?? 0)
+const $box = $('gdetail');
+try {
+  // Fetch the group (include all the data we need in one go)
+  const res = await fetch(
+    `/api/admin/groups/${encodeURIComponent(id)}?include=members,submissions,cards`,
+    { credentials: 'same-origin' }
   );
-}
+  if (!res.ok) throw new Error('group fetch failed');
+  const payload = await res.json();
+  if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
+  const grp = payload?.group ?? payload;
 
-console.debug('[groups] group:', grp);
-console.debug('[groups] members:', members);
-console.debug('[groups] submission ids:', ids);
+  const safe = (v) => escapeHtml(String(v ?? ''));
 
-    // Detailed columns (if we could fetch submissions)
-    const RICH_COLS = [
-      { label: 'Created',         fmt: (r) => fmtTs(r.created_at) },
-      { label: 'Submission',      fmt: (r) => safe(r.submission_id) },
-      { label: 'Email',           fmt: (r) => safe(r.customer_email) },
-      { label: 'Status',          fmt: (r) => safe(r.status) },
-      { label: 'Cards',           fmt: (r) => String(Number(r.cards || 0)) },
-      { label: 'Evaluation',      fmt: (r) => (r.evaluation_bool ? 'Yes' : 'No') },
-      { label: 'Grand',           fmt: (r) => `$${(Number(r.grand)||0).toLocaleString()}` },
-      { label: 'Grading Service', fmt: (r) => safe(r.grading_service) },
-    ];
+  // Header fields
+  const codeOut     = safe(grp?.code || codeHint || '');
+  const statusOut   = safe(grp?.status || '');
+  const notesOut    = safe(grp?.notes || '');
+  const shippedOut  = fmtTs(grp?.shipped_at)  || '—';
+  const returnedOut = fmtTs(grp?.returned_at) || '—';
+  const updatedOut  = fmtTs(grp?.updated_at)  || '—';
+  const createdOut  = fmtTs(grp?.created_at)  || '—';
 
-    // Fallback columns (if API doesn't let us fetch submissions)
-const FALLBACK_ROWS = members
-  .slice()
-  .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-  .map(m => ({
-    position: Number(m?.position ?? 0),
-    submission_id: (m?.submission_id ?? m?.id ?? '').toString().trim() || '—',
-    note: safe(m?.note ?? '')
-  }));
+  // Data returned by API
+  const members = Array.isArray(grp?.members) ? grp.members : [];
+  const submissions = Array.isArray(grp?.submissions) ? grp.submissions : [];
+  const cards = Array.isArray(grp?.cards) ? grp.cards : [];
 
+  // Map submissions for quick lookup (status/email/grading_service fallback)
+  const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-    const table =
-      subRows.length > 0
-        ? `
-          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-            <thead><tr>${RICH_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
-            <tbody>
-              ${subRows.map(r => `<tr>${RICH_COLS.map(c => `<td>${c.fmt(r)}</td>`).join('')}</tr>`).join('')}
-            </tbody>
-          </table>`
-        : `
-          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-            <thead>
-              <tr>
-                <th style="width:90px">#</th>
-                <th style="width:280px">Submission</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${
-                FALLBACK_ROWS.length
-                  ? FALLBACK_ROWS.map(r => `
-                      <tr>
-                        <td>${r.position}</td>
-                        <td><code>${escapeHtml(r.submission_id)}</code></td>
-                        <td>${r.note}</td>
-                      </tr>`).join('')
-                  : `<tr><td colspan="3" class="note">No members.</td></tr>`
-              }
-            </tbody>
-          </table>`;
+  // Define card-level columns
+  const CARD_COLS = [
+    { label: 'Created',    fmt: (c) => fmtTs(c.created_at) },
+    { label: 'Submission', fmt: (c) => safe(c.submission_id) },
+    {
+      label: 'Card',
+      fmt: (c) => {
+        const bits = [
+          c.year, c.brand, c.set, c.player, c.card_number, c.variation
+        ]
+          .filter(v => v != null && String(v).trim() !== '')
+          .map(v => safe(v));
+        return bits.join(' · ') || '—';
+      }
+    },
+    {
+      label: 'Status',
+      fmt: (c) => safe(
+        c.status ||
+        subById.get(String(c.submission_id))?.status ||
+        ''
+      )
+    },
+    {
+      label: 'Service',
+      fmt: (c) => safe(
+        c.grading_service ||
+        subById.get(String(c.submission_id))?.grading_service ||
+        ''
+      )
+    },
+    { label: 'Notes', fmt: (c) => safe(c.notes || '') },
+  ];
 
-    if ($box) {
-      $box.innerHTML = `
-        <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
-          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-            <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
-            <div><div class="note">Status</div><div>${statusOut || '—'}</div></div>
-            <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
-            <div><div class="note">Returned</div><div>${returnedOut}</div></div>
-            <div><div class="note">Updated</div><div>${updatedOut}</div></div>
-            <div><div class="note">Created</div><div>${createdOut}</div></div>
-          </div>
-          <div style="margin-top:10px">
-            <div class="note">Notes</div>
-            <div>${notesOut || '—'}</div>
-          </div>
+  // Keep card list aligned to member order, then by card_index if present
+const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
+cards.sort((a, b) => {
+  const oa = memberOrder.get(String(a.submission_id)) ?? 0;
+  const ob = memberOrder.get(String(b.submission_id)) ?? 0;
+  if (oa !== ob) return oa - ob;
+  return (a.card_index ?? 0) - (b.card_index ?? 0);
+});
+
+  // Build the table HTML for cards
+  const table = `
+    <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+      <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
+      <tbody>
+        ${
+          cards.length
+            ? cards.map(c => `<tr>${CARD_COLS.map(col => `<td>${col.fmt(c)}</td>`).join('')}</tr>`).join('')
+            : `<tr><td colspan="${CARD_COLS.length}" class="note">No Cards.</td></tr>`
+        }
+      </tbody>
+    </table>
+  `;
+
+  // Render
+  if ($box) {
+    $box.innerHTML = `
+      <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+          <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
+          <div><div class="note">Status</div><div>${statusOut || '—'}</div></div>
+          <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
+          <div><div class="note">Returned</div><div>${returnedOut}</div></div>
+          <div><div class="note">Updated</div><div>${updatedOut}</div></div>
+          <div><div class="note">Created</div><div>${createdOut}</div></div>
         </div>
-
-        <div class="table-wrap">
-          ${table}
+        <div style="margin-top:10px">
+          <div class="note">Notes</div>
+          <div>${notesOut || '—'}</div>
         </div>
-      `;
-    }
-  } catch (e) {
-    if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
+      </div>
+
+      <div class="table-wrap">
+        ${table}
+      </div>
+    `;
   }
+} catch (e) {
+  if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
+}
 }
 
 // ===== Boot for Groups page =====
