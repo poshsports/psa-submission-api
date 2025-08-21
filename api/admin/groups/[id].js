@@ -60,35 +60,70 @@ export default async function handler(req, res) {
       return;
     }
 
-// --- optionally include members (try a few common table names) ---
+// --- optionally include members (try a few common table/column names) ---
 if (includeMembers) {
+  const debug = String(req.query.debug || '') === '1';
+  const tried = [];
+
   const candidates = [
-    { table: 'group_members',      col: 'group_id' },
-    { table: 'groups_submissions', col: 'group_id' },
-    { table: 'group_submissions',  col: 'group_id' },
-    { table: 'groups_members',     col: 'group_id' },
+    { table: 'group_members',      fk: 'group_id' },
+    { table: 'groups_submissions', fk: 'group_id' },
+    { table: 'group_submissions',  fk: 'group_id' },
+    { table: 'groups_members',     fk: 'group_id' },
   ];
+
+  const submissionFields = ['submission_id', 'submissionId', 'submission', 'id'];
 
   let members = [];
   for (const c of candidates) {
     try {
+      const sel = debug ? '*' : 'submission_id, position, note';
       const { data, error } = await sb()
         .from(c.table)
-        .select('submission_id, position, note')
-        .eq(c.col, groupId)
+        .select(sel)
+        .eq(c.fk, groupId)
         .order('position', { ascending: true });
 
+      tried.push({
+        table: c.table,
+        fk: c.fk,
+        ok: !error,
+        count: Array.isArray(data) ? data.length : null,
+        error: error?.message || null,
+        sample: debug && Array.isArray(data) ? data.slice(0, 2) : undefined,
+      });
+
       if (!error && Array.isArray(data) && data.length) {
-        members = data;
-        break; // found them
+        members = data.map((row, i) => {
+          let submission_id = '';
+          for (const f of submissionFields) {
+            if (row[f] != null && String(row[f]).trim() !== '') {
+              submission_id = String(row[f]).trim();
+              break;
+            }
+          }
+          return {
+            submission_id,
+            position: Number(row.position ?? i + 1),
+            note: row.note ?? '',
+          };
+        });
+        break;
       }
-    } catch {
-      // ignore and try next candidate
+    } catch (e) {
+      tried.push({
+        table: c.table,
+        fk: c.fk,
+        ok: false,
+        error: e?.message || 'query threw',
+      });
     }
   }
 
-  group.members = members; // empty array if nothing found
+  group.members = members;
+  if (debug) group._members_debug = tried;
 }
+
     // IMPORTANT: return the *group object itself* (not { ok, group })
     res.status(200).json(group);
   } catch (e) {
