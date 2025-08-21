@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     let members = [];
     if (wantMembers || wantSubmissions || wantCards) {
       const { data: gm, error: gmErr } = await sb()
-        .from('group_members') // adjust if your table has a different name
+        .from('group_submissions') // adjust if your table has a different name
         .select('submission_id, position, note')
         .eq('group_id', groupId)
         .order('position', { ascending: true });
