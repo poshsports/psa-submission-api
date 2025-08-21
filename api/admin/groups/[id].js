@@ -60,69 +60,52 @@ export default async function handler(req, res) {
       return;
     }
 
-// --- optionally include members (try a few common table/column names) ---
-if (includeMembers) {
-  const debug = String(req.query.debug || '') === '1';
-  const tried = [];
+// --- include members, submissions, and cards in one go ---
+const want = (String(req.query.include || req.query.with || '')
+  .toLowerCase()
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean));
 
-  const candidates = [
-    { table: 'group_members',      fk: 'group_id' },
-    { table: 'groups_submissions', fk: 'group_id' },
-    { table: 'group_submissions',  fk: 'group_id' },
-    { table: 'groups_members',     fk: 'group_id' },
-  ];
+if (want.includes('members') || want.includes('submissions') || want.includes('cards')) {
+  // 1) members (position + submission_id)
+  const { data: members, error: mErr } = await sb()
+    .from('group_members')
+    .select('submission_id, position, note')
+    .eq('group_id', groupId)
+    .order('position', { ascending: true });
 
-  const submissionFields = ['submission_id', 'submissionId', 'submission', 'id'];
-
-  let members = [];
-  for (const c of candidates) {
-    try {
-      const sel = debug ? '*' : 'submission_id, position, note';
-      const { data, error } = await sb()
-        .from(c.table)
-        .select(sel)
-        .eq(c.fk, groupId)
-        .order('position', { ascending: true });
-
-      tried.push({
-        table: c.table,
-        fk: c.fk,
-        ok: !error,
-        count: Array.isArray(data) ? data.length : null,
-        error: error?.message || null,
-        sample: debug && Array.isArray(data) ? data.slice(0, 2) : undefined,
-      });
-
-      if (!error && Array.isArray(data) && data.length) {
-        members = data.map((row, i) => {
-          let submission_id = '';
-          for (const f of submissionFields) {
-            if (row[f] != null && String(row[f]).trim() !== '') {
-              submission_id = String(row[f]).trim();
-              break;
-            }
-          }
-          return {
-            submission_id,
-            position: Number(row.position ?? i + 1),
-            note: row.note ?? '',
-          };
-        });
-        break;
-      }
-    } catch (e) {
-      tried.push({
-        table: c.table,
-        fk: c.fk,
-        ok: false,
-        error: e?.message || 'query threw',
-      });
-    }
+  if (mErr) {
+    // still return the base group so the UI renders
+    res.status(200).json({ ...group, members: [], _members_error: mErr.message });
+    return;
   }
 
-  group.members = members;
-  if (debug) group._members_debug = tried;
+  group.members = members || [];
+  const submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
+
+  // 2) submissions (bulk, single query) — eliminates N+1 in the browser
+  if (want.includes('submissions') && submissionIds.length) {
+    const { data: subs, error: sErr } = await sb()
+      .from('submissions')
+      .select('id, created_at, customer_email, status, cards, evaluation_bool, grand, grading_service')
+      .in('id', submissionIds);
+
+    group.submissions = sErr ? [] : (subs || []);
+  }
+
+  // 3) cards (aka submission items) — adjust table name/columns if yours differ
+  if (want.includes('cards') && submissionIds.length) {
+    const { data: items, error: iErr } = await sb()
+      .from('submission_items')          // <-- if your table is named differently, change this
+      .select('id, submission_id, created_at, year, brand, set, player, card_number, variation, notes, status, grading_service')
+      .in('submission_id', submissionIds)
+      .order('created_at', { ascending: true });
+
+    group.cards = iErr ? [] : (items || []);
+  }
 }
+
 
     // IMPORTANT: return the *group object itself* (not { ok, group })
     res.status(200).json(group);
