@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       groupId = byCode.id;
     }
 
-    // --- fetch base group (use RPC if you rely on it to shape columns) ---
+    // --- fetch base group (rpc get_group returns one row) ---
     const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', {
       p_group_id: groupId,
     });
@@ -63,50 +63,56 @@ export default async function handler(req, res) {
       return;
     }
 
-    // ---- optionally include members (support common table names) ----
+    // ---- optionally include members ----
     let members = [];
     if (wantMembers || wantSubmissions || wantCards) {
       const { data: gm, error: gmErr } = await sb()
-        .from('group_submissions') // adjust if your table has a different name
+        .from('group_submissions')
         .select('submission_id, position, note')
         .eq('group_id', groupId)
         .order('position', { ascending: true });
 
       if (gmErr) {
-        // return base group with a hint rather than hard failing
-        res.status(200).json({ ...group, members: [], _members_error: gmErr.message });
+        res.status(200).json({ ...group, members: [], _members_error: gmErr.message, _debug:{ include:[...includeSet] } });
         return;
       }
       members = gm || [];
-      group.members = members; // attach for the client
+      group.members = members;
     }
 
     // ---- submissions (single batched query) ----
     let submissions = [];
     if (wantSubmissions || wantCards) {
-      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
+      const ids = [...new Set((members || []).map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
         const { data: subs, error: sErr } = await sb()
           .from('psa_submissions')
-          .select('submission_id as id, created_at, status, grading_service, customer_email')
+          .select('submission_id, created_at, status, grading_service, customer_email')
           .in('submission_id', ids);
 
         if (sErr) {
-          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message });
+          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message, _debug:{ include:[...includeSet] } });
           return;
         }
-        submissions = subs || [];
+        // normalize shape: id = submission_id
+        submissions = (subs || []).map(r => ({
+          id: r.submission_id,
+          created_at: r.created_at,
+          status: r.status,
+          grading_service: r.grading_service,
+          customer_email: r.customer_email
+        }));
       }
       group.submissions = submissions;
     }
 
-    // ---- cards (single batched query) ----
+    // ---- cards (if you add a cards table later) ----
     if (wantCards) {
-      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
+      const ids = [...new Set((members || []).map(m => m.submission_id).filter(Boolean))];
       let cards = [];
       if (ids.length) {
         const { data: c, error: cErr } = await sb()
-          .from('cards') // <- your card table name
+          .from('cards') // if you create this table later
           .select(`
             id,
             submission_id,
@@ -124,19 +130,22 @@ export default async function handler(req, res) {
           `)
           .in('submission_id', ids)
           .order('submission_id', { ascending: true })
-          .order('card_index', { ascending: true }); // harmless if column doesn’t exist
+          .order('card_index', { ascending: true });
 
         if (cErr) {
-          res.status(200).json({ ...group, members, submissions, cards: [], _cards_error: cErr.message });
-          return;
+          // ignore cards failure; still return members/submissions
+          group.cards = [];
+          group._cards_error = cErr.message;
+        } else {
+          group.cards = c || [];
         }
-        cards = c || [];
+      } else {
+        group.cards = [];
       }
-      group.cards = cards;
     }
 
-    // IMPORTANT: return the group object itself (not { ok, group })
-    res.status(200).json(group);
+    // return the group row enriched with requested data (+ tiny debug)
+    res.status(200).json({ ...group, _debug: { include: [...includeSet] } });
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
