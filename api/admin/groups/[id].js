@@ -1,4 +1,4 @@
-// api/admin/groups/[id].js  (ESM)
+// api/admin/groups/[id].js (ESM)
 import { requireAdmin } from '../../_util/adminAuth.js';
 import { sb } from '../../_util/supabase.js';
 
@@ -23,11 +23,16 @@ export default async function handler(req, res) {
       res.status(400).json({ ok: false, error: 'Missing group id' });
       return;
     }
-    const includeMembers =
+
+    const includeSet = new Set(
       String(req.query.include || req.query.with || '')
         .split(',')
         .map(s => s.trim().toLowerCase())
-        .includes('members');
+        .filter(Boolean)
+    );
+    const wantMembers     = includeSet.has('members');
+    const wantSubmissions = includeSet.has('submissions');
+    const wantCards       = includeSet.has('cards');
 
     // --- resolve group id: accept UUID or code like "GRP-0005" ---
     let groupId = raw;
@@ -48,71 +53,92 @@ export default async function handler(req, res) {
     const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', {
       p_group_id: groupId,
     });
-
     if (rpcErr) {
       res.status(500).json({ ok: false, error: rpcErr.message || 'Database error' });
       return;
     }
-
     const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
     if (!group) {
       res.status(404).json({ ok: false, error: 'Group not found' });
       return;
     }
 
-// --- include members, submissions, and cards in one go ---
-const want = (String(req.query.include || req.query.with || '')
-  .toLowerCase()
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean));
+    // ---- optionally include members (support common table names) ----
+    let members = [];
+    if (wantMembers || wantSubmissions || wantCards) {
+      const { data: gm, error: gmErr } = await sb()
+        .from('group_members') // adjust if your table has a different name
+        .select('submission_id, position, note')
+        .eq('group_id', groupId)
+        .order('position', { ascending: true });
 
-if (want.includes('members') || want.includes('submissions') || want.includes('cards')) {
-  // 1) members (position + submission_id)
-  const { data: members, error: mErr } = await sb()
-    .from('group_members')
-    .select('submission_id, position, note')
-    .eq('group_id', groupId)
-    .order('position', { ascending: true });
+      if (gmErr) {
+        // return base group with a hint rather than hard failing
+        res.status(200).json({ ...group, members: [], _members_error: gmErr.message });
+        return;
+      }
+      members = gm || [];
+      group.members = members; // attach for the client
+    }
 
-  if (mErr) {
-    // still return the base group so the UI renders
-    res.status(200).json({ ...group, members: [], _members_error: mErr.message });
-    return;
-  }
+    // ---- submissions (single batched query) ----
+    let submissions = [];
+    if (wantSubmissions || wantCards) {
+      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
+      if (ids.length) {
+        const { data: subs, error: sErr } = await sb()
+          .from('submissions')
+          .select('id, created_at, status, grading_service, customer_email')
+          .in('id', ids);
+        if (sErr) {
+          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message });
+          return;
+        }
+        submissions = subs || [];
+      }
+      group.submissions = submissions;
+    }
 
-  group.members = members || [];
-  const submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
+    // ---- cards (single batched query) ----
+    if (wantCards) {
+      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
+      let cards = [];
+      if (ids.length) {
+        const { data: c, error: cErr } = await sb()
+          .from('cards') // <- your card table name
+          .select(`
+            id,
+            submission_id,
+            created_at,
+            status,
+            grading_service,
+            year,
+            brand,
+            set,
+            player,
+            card_number,
+            variation,
+            notes,
+            card_index
+          `)
+          .in('submission_id', ids)
+          .order('submission_id', { ascending: true })
+          .order('card_index', { ascending: true }); // harmless if column doesn’t exist
 
-  // 2) submissions (bulk, single query) — eliminates N+1 in the browser
-  if (want.includes('submissions') && submissionIds.length) {
-    const { data: subs, error: sErr } = await sb()
-      .from('submissions')
-      .select('id, created_at, customer_email, status, cards, evaluation_bool, grand, grading_service')
-      .in('id', submissionIds);
+        if (cErr) {
+          res.status(200).json({ ...group, members, submissions, cards: [], _cards_error: cErr.message });
+          return;
+        }
+        cards = c || [];
+      }
+      group.cards = cards;
+    }
 
-    group.submissions = sErr ? [] : (subs || []);
-  }
-
-  // 3) cards (aka submission items) — adjust table name/columns if yours differ
-  if (want.includes('cards') && submissionIds.length) {
-    const { data: items, error: iErr } = await sb()
-      .from('submission_items')          // <-- if your table is named differently, change this
-      .select('id, submission_id, created_at, year, brand, set, player, card_number, variation, notes, status, grading_service')
-      .in('submission_id', submissionIds)
-      .order('created_at', { ascending: true });
-
-    group.cards = iErr ? [] : (items || []);
-  }
-}
-
-
-    // IMPORTANT: return the *group object itself* (not { ok, group })
+    // IMPORTANT: return the group object itself (not { ok, group })
     res.status(200).json(group);
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
   }
 }
 
-// Force Node runtime on Vercel
 export const config = { runtime: 'nodejs' };
