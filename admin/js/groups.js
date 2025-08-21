@@ -307,28 +307,52 @@ try {
     { label: 'Notes', fmt: (c) => safe(c.notes || '') },
   ];
 
-  // Keep card list aligned to member order, then by card_index if present
+// Build rows: prefer cards; if none, fall back to members/submissions only
 const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
-cards.sort((a, b) => {
+
+const rowsData = (Array.isArray(cards) && cards.length > 0)
+  ? cards.slice()
+  : members.map(m => {
+      const sid = String(m.submission_id || '');
+      const sub = subById.get(sid) || {};
+      return {
+        // shape it like a "card" row so CARD_COLS formats it
+        created_at: sub.created_at || m.created_at || null,
+        submission_id: sid,
+        status: sub.status || '',
+        grading_service: sub.grading_service || '',
+        year: '',
+        brand: '',
+        set: '',
+        player: '',
+        card_number: '',
+        variation: '',
+        notes: m.note || '',
+        card_index: 0
+      };
+    });
+
+// Keep rows aligned to member order, then by card_index if present
+rowsData.sort((a, b) => {
   const oa = memberOrder.get(String(a.submission_id)) ?? 0;
   const ob = memberOrder.get(String(b.submission_id)) ?? 0;
   if (oa !== ob) return oa - ob;
   return (a.card_index ?? 0) - (b.card_index ?? 0);
 });
 
-  // Build the table HTML for cards
-  const table = `
-    <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-      <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
-      <tbody>
-        ${
-          cards.length
-            ? cards.map(c => `<tr>${CARD_COLS.map(col => `<td>${col.fmt(c)}</td>`).join('')}</tr>`).join('')
-            : `<tr><td colspan="${CARD_COLS.length}" class="note">No Cards.</td></tr>`
-        }
-      </tbody>
-    </table>
-  `;
+// Build the table HTML
+const table = `
+  <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+    <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${
+        rowsData.length
+          ? rowsData.map(r => `<tr>${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}</tr>`).join('')
+          : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
+      }
+    </tbody>
+  </table>
+`;
 
   // Render
   if ($box) {
