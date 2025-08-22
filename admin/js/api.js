@@ -27,6 +27,20 @@ export async function fetchSubmissions(q = '') {
   return items;
 }
 
+export async function addToGroup(groupIdOrCode, submissionIds) {
+  const r = await fetch(`/api/admin/groups/${encodeURIComponent(groupIdOrCode)}/members`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ submission_ids: submissionIds })
+  });
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { const j = await r.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return r.json(); // { ok, added_submissions, added_cards }
+}
+
 // --- Groups (read-only) ---
 export async function fetchGroups({ status=null, q=null, limit=50, offset=0 } = {}) {
   const params = new URLSearchParams();
