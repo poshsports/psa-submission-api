@@ -103,7 +103,7 @@ if (wantMembers || wantSubmissions || wantCards) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
          const { data: c, error: cErr } = await sb()
-        .from('cards')
+        .from('submission_cards')
         .select(`
            id,
            submission_id,
