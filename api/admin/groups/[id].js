@@ -102,12 +102,27 @@ if (wantMembers || wantSubmissions || wantCards) {
     if (wantCards) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
-        const { data: c, error: cErr } = await sb()
-          .from('cards')
-          .select(`
-            id, submission_id, created_at, status, grading_service,
-            year, brand, set, player, card_number, variation, notes, card_index
-          `)
+         const { data: c, error: cErr } = await sb()
+        .from('cards')
+        .select(`
+           id,
+           submission_id,
+           created_at,
+           status,
+           grading_service,
+           year,
+           brand,
+           set,
+           player,
+           card_number,
+           variation,
+           notes,
+           card_index,
+           break_date,
+           break_channel,
+           break_number,
+           card_description
+        `)
           .in('submission_id', ids)
           .order('submission_id', { ascending: true })
           .order('card_index', { ascending: true });
