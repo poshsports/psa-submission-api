@@ -8,17 +8,17 @@ const UUID_RE =
 export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
-      res.status(405).json({ ok: false, error: 'Method Not Allowed', _debug:{version:'v3'} });
+      res.status(405).json({ ok: false, error: 'Method Not Allowed', _debug: { version: 'v3' } });
       return;
     }
     if (!requireAdmin(req)) {
-      res.status(401).json({ ok: false, error: 'Unauthorized', _debug:{version:'v3'} });
+      res.status(401).json({ ok: false, error: 'Unauthorized', _debug: { version: 'v3' } });
       return;
     }
 
     const raw = String(req.query.id || '').trim();
     if (!raw) {
-      res.status(400).json({ ok: false, error: 'Missing group id', _debug:{version:'v3'} });
+      res.status(400).json({ ok: false, error: 'Missing group id', _debug: { version: 'v3' } });
       return;
     }
 
@@ -32,6 +32,7 @@ export default async function handler(req, res) {
     const wantSubmissions = includeSet.has('submissions');
     const wantCards       = includeSet.has('cards');
 
+    // Resolve UUID or code
     let groupId = raw;
     if (!UUID_RE.test(raw)) {
       const { data: byCode, error: codeErr } = await sb()
@@ -40,42 +41,42 @@ export default async function handler(req, res) {
         .eq('code', raw)
         .single();
       if (codeErr || !byCode?.id) {
-        res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
+        res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
         return;
       }
       groupId = byCode.id;
     }
 
+    // Base group via RPC
     const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', { p_group_id: groupId });
     if (rpcErr) {
-      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug:{version:'v3'} });
+      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug: { version: 'v3' } });
       return;
     }
     const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
     if (!group) {
-      res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
+      res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
       return;
     }
-    
-// ---- optionally include members ----
-let members = [];
-if (wantMembers || wantSubmissions || wantCards) {
-  const { data: gm, error: gmErr } = await sb()
-    .from('group_submissions')               // ✅ correct table
-    .select('submission_id, position, created_at') // ✅ no "note"
-    .eq('group_id', groupId)
-    .order('position', { ascending: true });
 
-  if (gmErr) {
-    res.status(200).json({ ...group, members: [], _members_error: gmErr.message });
-    return;
-  }
-  members = gm || [];
-  group.members = members;
-}
+    // ---- optionally include members ----
+    let members = [];
+    if (wantMembers || wantSubmissions || wantCards) {
+      const { data: gm, error: gmErr } = await sb()
+        .from('group_submissions')
+        .select('submission_id, position, created_at')
+        .eq('group_id', groupId)
+        .order('position', { ascending: true });
 
+      if (gmErr) {
+        res.status(200).json({ ...group, members: [], _members_error: gmErr.message });
+        return;
+      }
+      members = gm || [];
+      group.members = members;
+    }
 
-
+    // ---- submissions ----
     let submissions = [];
     if (wantSubmissions || wantCards) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
@@ -85,7 +86,13 @@ if (wantMembers || wantSubmissions || wantCards) {
           .select('submission_id, created_at, status, grading_service, customer_email')
           .in('submission_id', ids);
         if (sErr) {
-          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message, _debug:{version:'v3', include:[...includeSet]} });
+          res.status(200).json({
+            ...group,
+            members,
+            submissions: [],
+            _submissions_error: sErr.message,
+            _debug: { version: 'v3', include: [...includeSet] }
+          });
           return;
         }
         submissions = (subs || []).map(r => ({
@@ -98,35 +105,50 @@ if (wantMembers || wantSubmissions || wantCards) {
       }
     }
 
+    // Build a quick lookup for submission info (used by cards enrichment)
+    const subById = new Map(submissions.map(s => [String(s.id), s]));
+
+    // ---- cards ----
     let cards = [];
     if (wantCards) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
-         const { data: c, error: cErr } = await sb()
-        .from('submission_cards')
-        .select(`
-           id,
-           submission_id,
-           created_at,
-           status,
-           grading_service,
-           year,
-           brand,
-           set,
-           player,
-           card_number,
-           variation,
-           notes,
-           card_index,
-           break_date,
-           break_channel,
-           break_number,
-           card_description
-        `)
+        const { data: c, error: cErr } = await sb()
+          .from('submission_cards')
+          .select(`
+            id,
+            submission_id,
+            created_at,
+            status,
+            grading_service,
+            year,
+            brand,
+            set,
+            player,
+            card_number,
+            variation,
+            notes,
+            card_index,
+            break_date,
+            break_channel,
+            break_number,
+            card_description
+          `)
           .in('submission_id', ids)
           .order('submission_id', { ascending: true })
           .order('card_index', { ascending: true });
-        if (!cErr) cards = c || [];
+
+        if (!cErr) {
+          const rows = c || [];
+          // Enrich: prefer submission.created_at for "Created" display
+          cards = rows.map(row => {
+            const sub = subById.get(String(row.submission_id));
+            return {
+              ...row,
+              created_at: sub?.created_at ?? row.created_at
+            };
+          });
+        }
       }
     }
 
@@ -138,7 +160,7 @@ if (wantMembers || wantSubmissions || wantCards) {
       _debug: { version: 'v3', include: [...includeSet] }
     });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error', _debug:{version:'v3'} });
+    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error', _debug: { version: 'v3' } });
   }
 }
 
