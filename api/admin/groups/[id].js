@@ -8,17 +8,17 @@ const UUID_RE =
 export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
-      res.status(405).json({ ok: false, error: 'Method Not Allowed', _debug: { version: 'v3' } });
+      res.status(405).json({ ok: false, error: 'Method Not Allowed', _debug:{version:'v3'} });
       return;
     }
     if (!requireAdmin(req)) {
-      res.status(401).json({ ok: false, error: 'Unauthorized', _debug: { version: 'v3' } });
+      res.status(401).json({ ok: false, error: 'Unauthorized', _debug:{version:'v3'} });
       return;
     }
 
     const raw = String(req.query.id || '').trim();
     if (!raw) {
-      res.status(400).json({ ok: false, error: 'Missing group id', _debug: { version: 'v3' } });
+      res.status(400).json({ ok: false, error: 'Missing group id', _debug:{version:'v3'} });
       return;
     }
 
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
         .eq('code', raw)
         .single();
       if (codeErr || !byCode?.id) {
-        res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
+        res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
         return;
       }
       groupId = byCode.id;
@@ -50,16 +50,16 @@ export default async function handler(req, res) {
     // Base group via RPC
     const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', { p_group_id: groupId });
     if (rpcErr) {
-      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug: { version: 'v3' } });
+      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug:{version:'v3'} });
       return;
     }
     const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
     if (!group) {
-      res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
+      res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
       return;
     }
 
-    // ---- optionally include members ----
+    // ---- members ----
     let members = [];
     if (wantMembers || wantSubmissions || wantCards) {
       const { data: gm, error: gmErr } = await sb()
@@ -87,11 +87,8 @@ export default async function handler(req, res) {
           .in('submission_id', ids);
         if (sErr) {
           res.status(200).json({
-            ...group,
-            members,
-            submissions: [],
-            _submissions_error: sErr.message,
-            _debug: { version: 'v3', include: [...includeSet] }
+            ...group, members, submissions: [],
+            _submissions_error: sErr.message, _debug:{version:'v3', include:[...includeSet]}
           });
           return;
         }
@@ -104,8 +101,6 @@ export default async function handler(req, res) {
         }));
       }
     }
-
-    // Build a quick lookup for submission info (used by cards enrichment)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
     // ---- cards ----
@@ -139,13 +134,26 @@ export default async function handler(req, res) {
           .order('card_index', { ascending: true });
 
         if (!cErr) {
-          const rows = c || [];
-          // Enrich: prefer submission.created_at for "Created" display
-          cards = rows.map(row => {
+          const toYMD = (val) => {
+            try {
+              if (!val) return null;
+              const s = String(val);
+              if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;           // already Y-M-D
+              const d = new Date(s);
+              return isNaN(d) ? s.slice(0,10) : d.toISOString().slice(0,10); // UTC date
+            } catch { return null; }
+          };
+
+          cards = (c || []).map(row => {
             const sub = subById.get(String(row.submission_id));
+            const createdFrom = sub?.created_at ?? row.created_at;
             return {
               ...row,
-              created_at: sub?.created_at ?? row.created_at
+              // keep original created_at for compatibility
+              created_at: createdFrom,
+              // add helper strings for UI (no timezone shift, no time portion)
+              _created_on: toYMD(createdFrom),
+              _break_on:   toYMD(row.break_date ?? row.created_at)
             };
           });
         }
@@ -160,7 +168,7 @@ export default async function handler(req, res) {
       _debug: { version: 'v3', include: [...includeSet] }
     });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error', _debug: { version: 'v3' } });
+    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error', _debug:{version:'v3'} });
   }
 }
 
