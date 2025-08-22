@@ -791,8 +791,8 @@ function wireUI(){
   $('columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 
-  wireRowClickDelegation();
-  
+   wireRowClickDelegation();
+
   // === TEMP: Add-to-group button (dev helper) ===
   try {
     const toolbar = document.querySelector('#view-submissions .toolbar');
@@ -820,7 +820,6 @@ function wireUI(){
       toolbar.appendChild(b);
     }
   } catch {}
-}
 }
 
 // Fallback delegation
