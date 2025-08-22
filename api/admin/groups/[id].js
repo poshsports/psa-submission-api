@@ -107,57 +107,59 @@ export default async function handler(req, res) {
     let cards = [];
     if (wantCards) {
       const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
-      if (ids.length) {
-        const { data: c, error: cErr } = await sb()
-          .from('submission_cards')
-          .select(`
-            id,
-            submission_id,
-            created_at,
-            status,
-            grading_service,
-            year,
-            brand,
-            set,
-            player,
-            card_number,
-            variation,
-            notes,
-            card_index,
-            break_date,
-            break_channel,
-            break_number,
-            card_description
-          `)
-          .in('submission_id', ids)
-          .order('submission_id', { ascending: true })
-          .order('card_index', { ascending: true });
+if (ids.length) {
+  const { data: c, error: cErr } = await sb()
+    .from('submission_cards')
+    .select(`
+      id,
+      submission_id,
+      created_at,
+      status,
+      grading_service,
+      year,
+      brand,
+      set,
+      player,
+      card_number,
+      variation,
+      notes,
+      card_index,
+      break_date,
+      break_channel,
+      break_number,
+      card_description,
+      group_cards!left ( group_id, card_no )
+    `)
+    .in('submission_id', ids)
+    .eq('group_cards.group_id', groupId)           // only numbering for THIS group
+    .order('group_cards.card_no', { ascending: true, nullsFirst: false })
+    .order('submission_id', { ascending: true })
+    .order('card_index', { ascending: true });
 
-        if (!cErr) {
-          const toYMD = (val) => {
-            try {
-              if (!val) return null;
-              const s = String(val);
-              if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;           // already Y-M-D
-              const d = new Date(s);
-              return isNaN(d) ? s.slice(0,10) : d.toISOString().slice(0,10); // UTC date
-            } catch { return null; }
-          };
+  if (!cErr) {
+    const toYMD = (val) => {
+      try {
+        if (!val) return null;
+        const s = String(val);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        return isNaN(d) ? s.slice(0,10) : d.toISOString().slice(0,10);
+      } catch { return null; }
+    };
 
-          cards = (c || []).map(row => {
-            const sub = subById.get(String(row.submission_id));
-            const createdFrom = sub?.created_at ?? row.created_at;
-            return {
-              ...row,
-              // keep original created_at for compatibility
-              created_at: createdFrom,
-              // add helper strings for UI (no timezone shift, no time portion)
-              _created_on: toYMD(createdFrom),
-              _break_on:   toYMD(row.break_date ?? row.created_at)
-            };
-          });
-        }
-      }
+    cards = (c || []).map(row => {
+      const sub = subById.get(String(row.submission_id));
+      const createdFrom = sub?.created_at ?? row.created_at;
+      return {
+        ...row,
+        created_at: createdFrom,
+        _created_on: toYMD(createdFrom),
+        _break_on:   toYMD(row.break_date ?? row.created_at),
+        group_card_no: row?.group_cards?.[0]?.card_no ?? null
+      };
+    });
+  }
+}
     }
 
     res.status(200).json({
