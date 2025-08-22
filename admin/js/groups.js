@@ -254,7 +254,16 @@ try {
   if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
   const grp = payload?.group ?? payload;
 
-  const safe = (v) => escapeHtml(String(v ?? ''));
+    const safe = (v) => escapeHtml(String(v ?? ''));
+
+  // --- date-only helper for any ISO/ts value ---
+  const toYMD = (val) => {
+    if (!val) return '';
+    const s = String(val);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;  // already YYYY-MM-DD
+    try { return new Date(s).toISOString().slice(0, 10); } catch { return s.slice(0, 10); }
+  };
+  
 
   // Header fields
   const codeOut     = safe(grp?.code || codeHint || '');
@@ -273,81 +282,70 @@ try {
   // Map submissions for quick lookup (status/email/grading_service fallback)
   const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-  // Define card-level columns
-const CARD_COLS = [
-  { label: 'Created',    fmt: (c) => fmtTs(c.created_at) },
-  { label: 'Submission', fmt: (c) => safe(c.submission_id) },
-  {
-    label: 'Card',
-    fmt: (c) => {
-      // Prefer explicit description; fall back to structured bits
-      const desc = (c.card_description && String(c.card_description).trim())
-        ? safe(c.card_description)
-        : '';
-      if (desc) return desc;
-      const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
-        .filter(v => v != null && String(v).trim() !== '')
-        .map(v => safe(v));
-      return bits.join(' · ') || '—';
-    }
-  },
-  {
-    label: 'Break date',
-    fmt: (c) => {
-      const d = c.break_date || '';
-      try {
-        // handle either 'YYYY-MM-DD' or full ISO
-        const dt = new Date(String(d).length <= 10 ? `${d}T00:00:00Z` : d);
-        return isNaN(dt) ? safe(d) : dt.toLocaleDateString();
-      } catch { return safe(d); }
-    }
-  },
-  { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
-  { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
-  {
-    label: 'Status',
-    fmt: (c) => safe(
-      c.status ||
-      subById.get(String(c.submission_id))?.status ||
-      ''
-    )
-  },
-  {
-    label: 'Service',
-    fmt: (c) => safe(
-      c.grading_service ||
-      subById.get(String(c.submission_id))?.grading_service ||
-      ''
-    )
-  },
-  { label: 'Notes', fmt: (c) => safe(c.notes || '') },
-];
+  const CARD_COLS = [
+    { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
+    { label: 'Submission', fmt: (c) => safe(c.submission_id) },
+    {
+      label: 'Card',
+      fmt: (c) => {
+        const desc = (c.card_description && String(c.card_description).trim())
+          ? safe(c.card_description) : '';
+        if (desc) return desc;
+        const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
+          .filter(v => v != null && String(v).trim() !== '')
+          .map(v => safe(v));
+        return bits.join(' · ') || '—';
+      }
+    },
+    { label: 'Break date',   fmt: (c) => safe(c._break_on || '') },
+    { label: 'Break #',      fmt: (c) => safe(c.break_number   || '') },
+    { label: 'Break channel',fmt: (c) => safe(c.break_channel  || '') },
+    {
+      label: 'Status',
+      fmt: (c) => safe(
+        c.status ||
+        subById.get(String(c.submission_id))?.status ||
+        ''
+      )
+    },
+    {
+      label: 'Service',
+      fmt: (c) => safe(
+        c.grading_service ||
+        subById.get(String(c.submission_id))?.grading_service ||
+        ''
+      )
+    },
+    { label: 'Notes', fmt: (c) => safe(c.notes || '') },
+  ];
 
+  // Build rows: prefer cards; if none, fall back to members/submissions only
+  const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
 
-// Build rows: prefer cards; if none, fall back to members/submissions only
-const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
-
-const rowsData = (Array.isArray(cards) && cards.length > 0)
-  ? cards.slice()
-  : members.map(m => {
-      const sid = String(m.submission_id || '');
-      const sub = subById.get(sid) || {};
-      return {
-        // shape it like a "card" row so CARD_COLS formats it
-        created_at: sub.created_at || m.created_at || null,
-        submission_id: sid,
-        status: sub.status || '',
-        grading_service: sub.grading_service || '',
-        year: '',
-        brand: '',
-        set: '',
-        player: '',
-        card_number: '',
-        variation: '',
-        notes: m.note || '',
-        card_index: 0
-      };
-    });
+  const rowsData = (Array.isArray(cards) && cards.length > 0)
+    // cards come from API; add _created_on if missing
+    ? cards.map(r => ({ ...r, _created_on: r._created_on || toYMD(r.created_at) }))
+    : members.map(m => {
+        const sid = String(m.submission_id || '');
+        const sub = subById.get(sid) || {};
+        const createdFrom = sub.created_at || m.created_at || null;
+        return {
+          // shape it like a "card" row so CARD_COLS formats it
+          created_at: createdFrom,
+          _created_on: toYMD(createdFrom),
+          submission_id: sid,
+          status: sub.status || '',
+          grading_service: sub.grading_service || '',
+          year: '',
+          brand: '',
+          set: '',
+          player: '',
+          card_number: '',
+          variation: '',
+          notes: m.note || '',
+          card_index: 0
+        };
+      });
 
 // Keep rows aligned to member order, then by card_index if present
 rowsData.sort((a, b) => {
