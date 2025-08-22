@@ -803,14 +803,30 @@ function wireUI(){
       b.type = 'button';
       b.textContent = 'Add to group…';
       b.style.marginLeft = '8px';
-      b.addEventListener('click', async () => {
-        const groupCode = prompt('Group code (e.g., GRP-0002) or UUID:');
-        if (!groupCode) return;
-        const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
-        if (!csv) return;
-        const submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
+            b.addEventListener('click', async () => {
         try {
-          const { addToGroup } = await import('./api.js');
+          // Choose: create new OR add to existing
+          const choice = prompt('Type "new" to create a group,\nOR enter an existing group code/UUID (e.g., GRP-0002):');
+          if (!choice) return;
+
+          const { addToGroup, createGroup } = await import('./api.js');
+
+          // Determine target group
+          let groupCode = null;
+          if (choice.trim().toLowerCase() === 'new') {
+            const notes = prompt('Notes for the new group? (optional)') || null;
+            const group = await createGroup({ notes }); // status defaults to Draft
+            groupCode = group.code;
+            alert(`Created group ${groupCode}`);
+          } else {
+            groupCode = choice.trim();
+          }
+
+          // Collect submission IDs (CSV)
+          const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
+          if (!csv) return;
+          const submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
+
           const result = await addToGroup(groupCode, submissionIds);
           alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${groupCode}`);
         } catch (e) {
