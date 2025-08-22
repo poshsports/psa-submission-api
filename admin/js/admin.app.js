@@ -792,6 +792,35 @@ function wireUI(){
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 
   wireRowClickDelegation();
+  
+  // === TEMP: Add-to-group button (dev helper) ===
+  try {
+    const toolbar = document.querySelector('#view-submissions .toolbar');
+    if (toolbar && !document.getElementById('btnAddToGroup')) {
+      const b = document.createElement('button');
+      b.id = 'btnAddToGroup';
+      b.className = 'btn primary';
+      b.type = 'button';
+      b.textContent = 'Add to group…';
+      b.style.marginLeft = '8px';
+      b.addEventListener('click', async () => {
+        const groupCode = prompt('Group code (e.g., GRP-0002) or UUID:');
+        if (!groupCode) return;
+        const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
+        if (!csv) return;
+        const submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
+        try {
+          const { addToGroup } = await import('./api.js');
+          const result = await addToGroup(groupCode, submissionIds);
+          alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${groupCode}`);
+        } catch (e) {
+          alert(`Add failed: ${e.message}`);
+        }
+      });
+      toolbar.appendChild(b);
+    }
+  } catch {}
+}
 }
 
 // Fallback delegation
