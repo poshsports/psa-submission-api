@@ -27,6 +27,22 @@ export async function fetchSubmissions(q = '') {
   return items;
 }
 
+export async function createGroup({ code = null, status = 'Draft', notes = null } = {}) {
+  const r = await fetch('/api/admin/groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, status, notes })
+  });
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { const j = await r.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const j = await r.json();
+  if (j?.ok !== true || !j.group?.code) throw new Error('Create group failed');
+  return j.group; // { id, code, status, notes, created_at }
+}
+
 export async function addToGroup(groupIdOrCode, submissionIds) {
   const r = await fetch(`/api/admin/groups/${encodeURIComponent(groupIdOrCode)}/members`, {
     method: 'POST',
