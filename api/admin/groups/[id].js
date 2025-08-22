@@ -132,7 +132,7 @@ if (ids.length) {
     `)
     .in('submission_id', ids)
     .eq('group_cards.group_id', groupId)           // only numbering for THIS group
-    .order('group_cards.card_no', { ascending: true, nullsFirst: false })
+    .order('card_no', { ascending: true, foreignTable: 'group_cards' })
     .order('submission_id', { ascending: true })
     .order('card_index', { ascending: true });
 
