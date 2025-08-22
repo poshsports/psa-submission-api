@@ -56,20 +56,25 @@ export default async function handler(req, res) {
       res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
       return;
     }
+    
+// ---- optionally include members ----
+let members = [];
+if (wantMembers || wantSubmissions || wantCards) {
+  const { data: gm, error: gmErr } = await sb()
+    .from('group_submissions')               // ✅ correct table
+    .select('submission_id, position, created_at') // ✅ no "note"
+    .eq('group_id', groupId)
+    .order('position', { ascending: true });
 
-    let members = [];
-    if (wantMembers || wantSubmissions || wantCards) {
-      const { data: gm, error: gmErr } = await sb()
-        .from('group_submissions')
-        .select('submission_id, position, note')
-        .eq('group_id', groupId)
-        .order('position', { ascending: true });
-      if (gmErr) {
-        res.status(200).json({ ...group, members: [], _members_error: gmErr.message, _debug:{version:'v3', include:[...includeSet]} });
-        return;
-      }
-      members = gm || [];
-    }
+  if (gmErr) {
+    res.status(200).json({ ...group, members: [], _members_error: gmErr.message });
+    return;
+  }
+  members = gm || [];
+  group.members = members;
+}
+
+
 
     let submissions = [];
     if (wantSubmissions || wantCards) {
