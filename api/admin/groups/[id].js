@@ -7,20 +7,18 @@ const UUID_RE =
 
 export default async function handler(req, res) {
   try {
-    // --- method/auth guards ---
     if (req.method !== 'GET') {
-      res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+      res.status(405).json({ ok: false, error: 'Method Not Allowed', _debug:{version:'v3'} });
       return;
     }
     if (!requireAdmin(req)) {
-      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      res.status(401).json({ ok: false, error: 'Unauthorized', _debug:{version:'v3'} });
       return;
     }
 
-    // --- parse params ---
     const raw = String(req.query.id || '').trim();
     if (!raw) {
-      res.status(400).json({ ok: false, error: 'Missing group id' });
+      res.status(400).json({ ok: false, error: 'Missing group id', _debug:{version:'v3'} });
       return;
     }
 
@@ -34,7 +32,6 @@ export default async function handler(req, res) {
     const wantSubmissions = includeSet.has('submissions');
     const wantCards       = includeSet.has('cards');
 
-    // --- resolve group id: accept UUID or code like "GRP-0005" ---
     let groupId = raw;
     if (!UUID_RE.test(raw)) {
       const { data: byCode, error: codeErr } = await sb()
@@ -43,27 +40,23 @@ export default async function handler(req, res) {
         .eq('code', raw)
         .single();
       if (codeErr || !byCode?.id) {
-        res.status(404).json({ ok: false, error: 'Group not found' });
+        res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
         return;
       }
       groupId = byCode.id;
     }
 
-    // --- fetch base group (rpc get_group returns one row) ---
-    const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', {
-      p_group_id: groupId,
-    });
+    const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', { p_group_id: groupId });
     if (rpcErr) {
-      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error' });
+      res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug:{version:'v3'} });
       return;
     }
     const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
     if (!group) {
-      res.status(404).json({ ok: false, error: 'Group not found' });
+      res.status(404).json({ ok: false, error: 'Group not found', _debug:{version:'v3'} });
       return;
     }
 
-    // ---- optionally include members ----
     let members = [];
     if (wantMembers || wantSubmissions || wantCards) {
       const { data: gm, error: gmErr } = await sb()
@@ -71,30 +64,25 @@ export default async function handler(req, res) {
         .select('submission_id, position, note')
         .eq('group_id', groupId)
         .order('position', { ascending: true });
-
       if (gmErr) {
-        res.status(200).json({ ...group, members: [], _members_error: gmErr.message, _debug:{ include:[...includeSet] } });
+        res.status(200).json({ ...group, members: [], _members_error: gmErr.message, _debug:{version:'v3', include:[...includeSet]} });
         return;
       }
       members = gm || [];
-      group.members = members;
     }
 
-    // ---- submissions (single batched query) ----
     let submissions = [];
     if (wantSubmissions || wantCards) {
-      const ids = [...new Set((members || []).map(m => m.submission_id).filter(Boolean))];
+      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
         const { data: subs, error: sErr } = await sb()
           .from('psa_submissions')
           .select('submission_id, created_at, status, grading_service, customer_email')
           .in('submission_id', ids);
-
         if (sErr) {
-          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message, _debug:{ include:[...includeSet] } });
+          res.status(200).json({ ...group, members, submissions: [], _submissions_error: sErr.message, _debug:{version:'v3', include:[...includeSet]} });
           return;
         }
-        // normalize shape: id = submission_id
         submissions = (subs || []).map(r => ({
           id: r.submission_id,
           created_at: r.created_at,
@@ -103,51 +91,34 @@ export default async function handler(req, res) {
           customer_email: r.customer_email
         }));
       }
-      group.submissions = submissions;
     }
 
-    // ---- cards (if you add a cards table later) ----
+    let cards = [];
     if (wantCards) {
-      const ids = [...new Set((members || []).map(m => m.submission_id).filter(Boolean))];
-      let cards = [];
+      const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
       if (ids.length) {
         const { data: c, error: cErr } = await sb()
-          .from('cards') // if you create this table later
+          .from('cards')
           .select(`
-            id,
-            submission_id,
-            created_at,
-            status,
-            grading_service,
-            year,
-            brand,
-            set,
-            player,
-            card_number,
-            variation,
-            notes,
-            card_index
+            id, submission_id, created_at, status, grading_service,
+            year, brand, set, player, card_number, variation, notes, card_index
           `)
           .in('submission_id', ids)
           .order('submission_id', { ascending: true })
           .order('card_index', { ascending: true });
-
-        if (cErr) {
-          // ignore cards failure; still return members/submissions
-          group.cards = [];
-          group._cards_error = cErr.message;
-        } else {
-          group.cards = c || [];
-        }
-      } else {
-        group.cards = [];
+        if (!cErr) cards = c || [];
       }
     }
 
-    // return the group row enriched with requested data (+ tiny debug)
-    res.status(200).json({ ...group, _debug: { include: [...includeSet] } });
+    res.status(200).json({
+      ...group,
+      members,
+      submissions,
+      cards,
+      _debug: { version: 'v3', include: [...includeSet] }
+    });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error' });
+    res.status(500).json({ ok: false, error: e?.message || 'Unexpected error', _debug:{version:'v3'} });
   }
 }
 
