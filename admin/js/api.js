@@ -1,6 +1,42 @@
 // /admin/js/api.js
 
-// Fetch the admin submissions list and return the ARRAY of rows
+// ---- helpers ---------------------------------------------------------------
+function hasAddress(o) {
+  if (!o || typeof o !== 'object') return false;
+
+  // direct single-field form
+  if (typeof o.ship_to === 'string' && o.ship_to.trim()) return true;
+
+  // common nested containers
+  const nests = [
+    o.shipping_address,
+    o.shopify_shipping_address,
+    o.ship_address,
+    o.address,
+    o.shipping,
+    o.shippingAddress,
+    o.customer?.shipping_address,
+    o.customer?.default_address,
+    o.order?.shipping_address,
+    o.order?.shippingAddress
+  ];
+  for (const n of nests) {
+    if (!n || typeof n !== 'object') continue;
+    if (n.address1 || n.line1 || n.street || n.city || n.region || n.state || n.postal_code || n.zip) {
+      return true;
+    }
+  }
+
+  // last-resort sniff
+  return Object.keys(o).some(k => /ship|address/i.test(k));
+}
+
+function pickItemFromResponse(j) {
+  // normalize common shapes coming from different endpoints
+  return j?.item ?? j?.submission ?? j?.data ?? null;
+}
+
+// ---- Submissions list ------------------------------------------------------
 export async function fetchSubmissions(q = '') {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
@@ -20,13 +56,13 @@ export async function fetchSubmissions(q = '') {
     throw new Error(j.error || 'Failed to load');
   }
 
-  // Return just the array of items
   const items = Array.isArray(j.items) ? j.items : [];
-  // (optional) quick debug hook when you need it:
-  window.__lastAdminFetch = j; // contains { ok, items, page, total, ... }
+  // quick debug hook when you need it (does not log to console)
+  window.__lastAdminFetch = j; // { ok, items, page, total, ... }
   return items;
 }
 
+// ---- Groups (create / add / read) -----------------------------------------
 export async function createGroup({ code = null, status = 'Draft', notes = null } = {}) {
   const r = await fetch('/api/admin/groups', {
     method: 'POST',
@@ -83,6 +119,7 @@ export async function fetchGroup(id) {
   return r.json();
 }
 
+// ---- Single submission (summary) -------------------------------------------
 export async function fetchSubmission(id) {
   const url = `/api/admin/submission?id=${encodeURIComponent(id)}`;
   const res = await fetch(url, {
@@ -95,7 +132,41 @@ export async function fetchSubmission(id) {
   return j.item;
 }
 
-// POST logout; ignore result
+// ---- Single submission (details with shipping) -----------------------------
+export async function fetchSubmissionDetails(id) {
+  const urls = [
+    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`, // preferred: full admin payload
+    `/api/admin/submissions/${encodeURIComponent(id)}`,          // REST-style admin
+    `/api/submissions/${encodeURIComponent(id)}`,                // legacy non-admin
+    `/api/submission?id=${encodeURIComponent(id)}`               // legacy query
+  ];
+
+  let lastSeen = null;
+  let lastErr;
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) continue;
+
+      const item = pickItemFromResponse(j);
+      if (item && typeof item === 'object') {
+        // annotate for diagnostics in the UI
+        try { Object.defineProperty(item, '__details_source', { value: url, enumerable: false }); } catch {}
+        if (hasAddress(item)) return item; // ✅ only accept when we see address fields
+        if (!lastSeen) lastSeen = item;    // remember a valid object as fallback
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  if (lastSeen) return lastSeen;
+  throw new Error(lastErr?.message || 'Failed to load submission details');
+}
+
+// ---- POST logout; ignore result --------------------------------------------
 export async function logout() {
   try {
     await fetch('/api/admin-logout', {
@@ -103,28 +174,4 @@ export async function logout() {
       credentials: 'same-origin'
     });
   } catch {}
-}
-
-// Fetch a FULL submission record suitable for the details sheet (includes shipping)
-export async function fetchSubmissionDetails(id) {
-  const urls = [
-    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,      // admin details (preferred)
-    `/api/admin/submissions/${encodeURIComponent(id)}`,               // REST-style admin details
-    `/api/submissions/${encodeURIComponent(id)}`,                     // non-admin details (legacy)
-    `/api/submission?id=${encodeURIComponent(id)}`                    // non-admin query (legacy)
-  ];
-
-  let lastErr;
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) continue;
-
-      // normalize common shapes
-      const item = j.item ?? j.submission ?? j.data ?? (j.ok === true ? j : null);
-      if (item && typeof item === 'object') return item;
-    } catch (e) { lastErr = e; }
-  }
-  throw new Error(lastErr?.message || 'Failed to load submission details');
 }
