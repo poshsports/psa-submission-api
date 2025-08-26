@@ -20,6 +20,38 @@ const pick = (...vals) => {
   return null;
 };
 
+// build an address object from flat columns if present
+function flatToAddress(src) {
+  if (!src || typeof src !== 'object') return null;
+
+  const name =
+    src.ship_name || src.shipping_name || src.recipient || src.full_name || null;
+
+  const address1 =
+    src.ship_addr1 || src.shipping_addr1 || src.address1 || src.line1 || src.street1 || src.street || null;
+
+  const address2 =
+    src.ship_addr2 || src.shipping_addr2 || src.address2 || src.line2 || src.street2 || src.unit || src.apt || src.apartment || src.suite || null;
+
+  const city =
+    src.ship_city || src.shipping_city || src.city || src.town || src.locality || null;
+
+  const state =
+    src.ship_state || src.shipping_state || src.state || src.region || src.province || src.state_code || src.province_code || null;
+
+  const postal_code =
+    src.ship_zip || src.shipping_zip || src.postal || src.postal_code || src.postalCode || src.zip || null;
+
+  const country =
+    src.ship_country || src.shipping_country || src.country || src.country_code || src.countryCode || null;
+
+  // if we have at least one meaningful field, return an object
+  if (name || address1 || address2 || city || state || postal_code || country) {
+    return { name, address1, address2, city, state, postal_code, country };
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -76,16 +108,10 @@ export default async function handler(req, res) {
 
     // 2) Enrich with shipping when requested
     if (wantFull) {
-      // 2a) Pull raw submission row (has most chances to include shipping)
+      // 2a) Pull the full submissions row so we don't miss any flat columns
       let subRow = null;
       {
-        let sq = supabase
-          .from('submissions')
-          .select(`
-            id, submission_id, customer_email, shopify_order_name,
-            ship_to, shipping_address, ship_address, address, meta
-          `)
-          .limit(1);
+        let sq = supabase.from('submissions').select('*').limit(1);
         sq = isUuid(idParam)
           ? sq.or(`id.eq.${idParam},submission_id.eq.${idParam}`)
           : sq.eq('submission_id', idParam);
@@ -93,23 +119,29 @@ export default async function handler(req, res) {
         subRow = sData?.[0] || null;
       }
 
-      // 2b) Compute an "effective" shipping from any known fields
+      // 2b) Compute an "effective" shipping from known fields
       let effective = pick(
         subRow?.ship_to,
         subRow?.shipping_address,
+        subRow?.shopify_shipping_address,
         subRow?.ship_address,
         subRow?.address,
         subRow?.meta?.ship_to,
         subRow?.meta?.shipping_address
       );
 
-      // 2c) If still empty, try related places (best-effort; won't fail if tables missing)
+      // 2c) If still empty, build from flat columns
+      if (!effective) {
+        effective = flatToAddress(subRow);
+      }
+
+      // 2d) If still empty, try related places (best-effort; won't fail if tables missing)
       if (!effective && (subRow?.id || item.shopify_order_name)) {
         // orders table
         const { data: ord } = await safeSelect(
           supabase
             .from('orders')
-            .select('shipping_address, ship_to, address, submission_id, shopify_order_name')
+            .select('*')
             .or(
               [
                 subRow?.id ? `submission_id.eq.${subRow.id}` : null,
@@ -119,7 +151,13 @@ export default async function handler(req, res) {
             .limit(1)
         );
         const o = ord?.[0];
-        effective = pick(effective, o?.ship_to, o?.shipping_address, o?.address);
+        effective = pick(
+          effective,
+          o?.ship_to,
+          o?.shipping_address,
+          o?.address,
+          flatToAddress(o)
+        );
       }
 
       if (!effective && item.customer_email) {
@@ -127,16 +165,21 @@ export default async function handler(req, res) {
         const { data: cust } = await safeSelect(
           supabase
             .from('customers')
-            .select('shipping_address, default_address')
+            .select('*')
             .eq('email', item.customer_email)
             .limit(1)
         );
         const c = cust?.[0];
-        effective = pick(effective, c?.shipping_address, c?.default_address);
+        effective = pick(
+          effective,
+          c?.shipping_address,
+          c?.default_address,
+          flatToAddress(c)
+        );
       }
 
       if (!effective && subRow?.id) {
-        // submissions_addresses table (if you use a separate table)
+        // submissions_addresses table (if present)
         const { data: sa } = await safeSelect(
           supabase
             .from('submissions_addresses')
@@ -147,7 +190,7 @@ export default async function handler(req, res) {
         effective = pick(effective, sa?.[0]?.address);
       }
 
-      // 2d) Write back in canonical fields your UI expects
+      // 2e) Write back in canonical fields your UI expects
       if (effective) {
         if (typeof effective === 'string') item.ship_to = effective;
         else item.shipping_address = effective;
