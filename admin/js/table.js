@@ -50,6 +50,16 @@ function parseMs(v){
   return Number.isNaN(ms2) ? null : ms2;
 }
 
+// Extract a "GRP-xxxx" style code from common shapes
+const GROUP_RE = /^GRP-[A-Za-z0-9_-]+$/;
+function extractGroupCode(o){
+  if (!o) return null;
+  if (typeof o.group_code === 'string' && GROUP_RE.test(o.group_code)) return o.group_code;
+  if (typeof o.group === 'string' && GROUP_RE.test(o.group)) return o.group;
+  if (o.group && typeof o.group.code === 'string' && GROUP_RE.test(o.group.code)) return o.group.code;
+  return null;
+}
+
 // ===== row normalization (stable shape for table) =====
 export function normalizeRow(r){
   const evalAmtNum = Number(
@@ -65,6 +75,12 @@ export function normalizeRow(r){
     r.submitted_at_iso ||
     r.submitted_at ||
     '';
+  
+  const group_code =
+    src.group_code ??
+    extractGroupCode(src) ??
+    null;
+
 
   const grading_service = String(
     r.grading_service ?? r.grading_services ?? r.grading_servi ?? r.service ?? r.grading ?? ''
