@@ -510,7 +510,6 @@ function updateAddGroupPanelUI(){
   const btnCreate = $('gp-create-btn') || $('gpCreateBtn') || $('gm-create');
   const btnAdd    = $('gp-add-selected') || $('gpAddSelectedBtn') || $('gp-add-btn') || $('gm-add-existing');
   if (btnCreate) btnCreate.disabled = eligible.length === 0;
-  if (btnAdd)    btnAdd.disabled    = eligible.length === 0;
   if (btnAdd) btnAdd.disabled = (eligible.length === 0) || !($('gm-manual')?.value?.trim());
 
   return { eligible, inGroup, total };
