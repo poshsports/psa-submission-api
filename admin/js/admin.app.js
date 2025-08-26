@@ -794,62 +794,6 @@ function updateCountPill(){
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
-// Try to find a "GRP-xxxx" style code anywhere in the detail payload.
-function findGroupCodeDeep(obj) {
-  const seen = new Set();
-  const stack = [obj];
-  const re = /^GRP-[A-Za-z0-9_-]+$/; // adjust if your codes look different
-
-  while (stack.length) {
-    const cur = stack.pop();
-    if (!cur || typeof cur !== 'object') continue;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
-
-    // explicit/common shapes first
-    if (typeof cur.group_code === 'string' && re.test(cur.group_code)) return cur.group_code;
-    if (cur.group && typeof cur.group === 'string' && re.test(cur.group)) return cur.group;
-    if (cur.group && typeof cur.group.code === 'string' && re.test(cur.group.code)) return cur.group.code;
-
-    // generic deep scan
-    for (const k of Object.keys(cur)) {
-      const v = cur[k];
-      if (typeof v === 'string' && re.test(v)) return v;
-      if (v && typeof v === 'object') stack.push(v);
-    }
-  }
-  return null;
-}
-
-async function hydrateGroupCodes(items){
-  const out = [];
-  for (const s of items) {
-    // If the list item already has a group, keep it.
-    if (s.group_code || (s.group && (s.group.code || typeof s.group === 'string'))) {
-      out.push(s);
-      continue;
-    }
-    try {
-      const id = s.submission_id || s.id;
-      const full = await fetchSubmission(id);
-
-      // Try explicit fields, then fallback to deep scan
-      const gc =
-        full.group_code ??
-        full.group?.code ??
-        (typeof full.group === 'string' ? full.group : null) ??
-        findGroupCodeDeep(full) ??
-        null;
-
-      if (gc) s.group_code = gc;     // attach so normalizeRow can show it
-    } catch (_) {
-      // ignore; will show ---
-    }
-    out.push(s);
-  }
-  return out;
-}
-
 async function loadReal(){
   const err = $('subsErr');
   if (err) { err.classList.add('hide'); err.textContent = ''; }
@@ -868,7 +812,6 @@ if (Array.isArray(items) && items.length) {
   }));
   console.table(probe);
 }
-    items = await hydrateGroupCodes(items);
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
