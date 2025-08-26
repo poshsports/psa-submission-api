@@ -467,7 +467,24 @@ function eligibleIdsFromList(ids){
   return { eligibleIds, skipped };
 }
 
-function extractAddCounts(result, fallbackSubs = 0){
+function estimateCardsFromRows(ids){
+  let total = 0;
+  (ids || []).forEach(id => {
+    const r = findRowForSubmissionId(id);
+    let c = Number(
+      r?.cards ??
+      r?.card_count ??
+      r?.cards_count ??
+      (Array.isArray(r?.items) ? r.items.length : 0) ??
+      (Array.isArray(r?.card_info) ? r.card_info.length : 0)
+    );
+    if (!Number.isFinite(c)) c = 0;
+    total += c;
+  });
+  return total;
+}
+
+function extractAddCounts(result, fallbackSubs = 0, idsForFallback = []){
   const addedSubs = Number(
     result?.added_submissions ??
     result?.added?.submissions ??
@@ -477,17 +494,32 @@ function extractAddCounts(result, fallbackSubs = 0){
     fallbackSubs ?? 0
   );
 
-  const addedCards = Number(
+  let addedCards = Number(
     result?.added_cards ??
     result?.added?.cards ??
     result?.cards_added ??
     result?.cards ??
     result?.data?.added_cards ??
-    0
+    NaN
   );
 
+  const rc = result || {};
+  const explicitCardsProvided =
+    ('added_cards' in rc) || ('cards_added' in rc) || ('cards' in rc) ||
+    (rc.added && 'cards' in rc.added) ||
+    (rc.data && 'added_cards' in rc.data);
+
+  if (!explicitCardsProvided) {
+    const est = estimateCardsFromRows(idsForFallback);
+    if (Number.isNaN(addedCards) || addedCards === 0) {
+      addedCards = est;
+    }
+  }
+
+  if (!Number.isFinite(addedCards)) addedCards = 0;
   return { addedSubs, addedCards };
 }
+
 
 // Update the drawer UI counts & enable/disable buttons.
 // Returns the same object as splitSelectionByEligibility().
@@ -740,7 +772,7 @@ function renderGroupModalHome(preselectedIds){
     try {
       const group = await createGroup({ notes }); // server assigns code, Draft by default
       const result = await addToGroup(group.code, eligibleIds);
-      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length);
+      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
       alert(`Created ${group.code}\nAdded ${addedSubs} submissions and ${addedCards} cards.`);
       closeGroupModal();
       loadReal?.();
@@ -776,7 +808,7 @@ function renderGroupModalHome(preselectedIds){
 
     try {
       const result = await addToGroup(chosenCode, eligibleIds);
-      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length);
+      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
       alert(`Added ${addedSubs} submissions and ${addedCards} cards to ${chosenCode}.`);
       closeGroupModal();
       loadReal?.();
