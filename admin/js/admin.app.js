@@ -824,39 +824,50 @@ function renderGroupModalHome(preselectedIds){
     if (btnAdd) btnAdd.disabled = !chosenCode;
   });
 
-  const renderRows = (items=[]) => {
-    const tb = $('gm-tbody');
-    if (!tb) return;
-    if (!items.length) {
-      tb.innerHTML = `<tr><td colspan="4" class="note">No results.</td></tr>`;
-      return;
-    }
-    tb.innerHTML = items.map(r => {
-      const code = escapeHtml(String(r.code || ''));
-      const status = escapeHtml(String(r.status || ''));
-      const notes = escapeHtml(String(r.notes || ''));
-      const cnt = Number(r.submission_count ?? r.members ?? r.count ?? 0);
-      return `
-        <tr class="gm-row" data-code="${code}" title="Use ${code}">
-          <td><strong>${code}</strong></td>
-          <td>${status}</td>
-          <td>${cnt}</td>
-          <td>${notes}</td>
-        </tr>
-      `;
-    }).join('');
+  $('gm-manual')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && chosenCode) {
+    e.preventDefault();
+    applyChosen();
+  }
+});
 
-    tb.querySelectorAll('tr.gm-row').forEach(tr => {
-      tr.addEventListener('click', () => {
-        tb.querySelectorAll('tr.gm-row.selected').forEach(x => x.classList.remove('selected'));
-        tr.classList.add('selected');
-        chosenCode = tr.getAttribute('data-code') || '';
-        if ($('gm-manual')) $('gm-manual').value = chosenCode;
-        if (btnAdd) btnAdd.disabled = !chosenCode;
-      });
-      tr.addEventListener('dblclick', applyChosen);
+const renderRows = (items = [], { heading = null } = {}) => {
+  const tb = $('gm-tbody'); if (!tb) return;
+
+  if (!items.length) {
+    tb.innerHTML = `<tr><td colspan="4" class="note">${heading || 'No results.'}</td></tr>`;
+    return;
+  }
+
+  const rowsHtml = items.map(r => {
+    const code = escapeHtml(String(r.code || ''));
+    const status = escapeHtml(String(r.status || ''));
+    const notes = escapeHtml(String(r.notes || ''));
+    const cnt = Number(r.submission_count ?? r.members ?? r.count ?? 0);
+    return `
+      <tr class="gm-row" data-code="${code}" title="Use ${code}">
+        <td><strong>${code}</strong></td>
+        <td>${status}</td>
+        <td>${cnt}</td>
+        <td>${notes}</td>
+      </tr>
+    `;
+  }).join('');
+
+  tb.innerHTML = (heading ? `<tr><td colspan="4" class="note">${escapeHtml(heading)}</td></tr>` : '') + rowsHtml;
+
+  tb.querySelectorAll('tr.gm-row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      tb.querySelectorAll('tr.gm-row.selected').forEach(x => x.classList.remove('selected'));
+      tr.classList.add('selected');
+      chosenCode = tr.getAttribute('data-code') || '';
+      if ($('gm-manual')) $('gm-manual').value = chosenCode;
+      if (btnAdd) btnAdd.disabled = !chosenCode;
     });
-  };
+    tr.addEventListener('dblclick', applyChosen);
+  });
+};
+
 
   const doSearch = async (term) => {
     const tb = $('gm-tbody');
@@ -870,16 +881,42 @@ function renderGroupModalHome(preselectedIds){
     }
   };
 
+  // <<< MOVED HERE — needs access to renderRows >>>
+  const loadRecent = async () => {
+    const tb = $('gm-tbody');
+    if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Loading recent…</td></tr>`;
+
+    // tiny helpers for sorting by recency with fallbacks
+    const toMs = v => { const t = Date.parse(v || ''); return Number.isNaN(t) ? null : t; };
+    const codeNum = v => { const n = Number(String(v||'').replace(/\D/g,'')); return Number.isNaN(n) ? -Infinity : n; };
+
+    try {
+      const resp = await fetchGroups({ limit: 200, offset: 0 });
+      let items = Array.isArray(resp?.items) ? resp.items : [];
+
+      // newest first; fallback to numeric part of code
+      items = items.sort((a,b) => {
+        const ba = toMs(b.created_at || b.inserted_at || b.updated_at);
+        const aa = toMs(a.created_at || a.inserted_at || a.updated_at);
+        if (ba !== aa) return (ba || -Infinity) - (aa || -Infinity);
+        return codeNum(b.code) - codeNum(a.code);
+      }).slice(0,5);
+
+      renderRows(items, { heading: 'Recent (last 5)' });
+    } catch {
+      if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Failed to load recent.</td></tr>`;
+    }
+  };
+  // <<< END moved block >>>
+
   const debSearch = debounce(() => {
     const term = $('gm-search')?.value?.trim() || '';
-    if (!term) {
-      const tb = $('gm-tbody'); if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Type to search…</td></tr>`;
-      return;
-    }
+    if (!term) { loadRecent(); return; }
     doSearch(term);
   }, 250);
 
   $('gm-search')?.addEventListener('input', debSearch);
+  loadRecent(); // show last 5 groups by default
 }
 
 // --- helpers for rendering ---
