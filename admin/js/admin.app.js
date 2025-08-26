@@ -519,7 +519,8 @@ function extractAddCounts(result, fallbackSubs = 0, idsForFallback = []){
   if (!Number.isFinite(addedCards)) addedCards = 0;
   return { addedSubs, addedCards };
 }
-
+// ---- tiny helper for alert grammar ----
+function plural(n, one, many){ return Number(n) === 1 ? one : many; }
 
 // Update the drawer UI counts & enable/disable buttons.
 // Returns the same object as splitSelectionByEligibility().
@@ -773,7 +774,7 @@ function renderGroupModalHome(preselectedIds){
       const group = await createGroup({ notes }); // server assigns code, Draft by default
       const result = await addToGroup(group.code, eligibleIds);
       const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
-      alert(`Created ${group.code}\nAdded ${addedSubs} submissions and ${addedCards} cards.`);
+      alert(`Created ${group.code}\nAdded ${addedSubs} ${plural(addedSubs,'submission','submissions')} and ${addedCards} ${plural(addedCards,'card','cards')}.`);
       closeGroupModal();
       loadReal?.();
     } catch (e) {
@@ -809,7 +810,7 @@ function renderGroupModalHome(preselectedIds){
     try {
       const result = await addToGroup(chosenCode, eligibleIds);
       const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
-      alert(`Added ${addedSubs} submissions and ${addedCards} cards to ${chosenCode}.`);
+      alert(`Added ${addedSubs} ${plural(addedSubs,'submission','submissions')} and ${addedCards} ${plural(addedCards,'card','cards')} to ${chosenCode}.`);
       closeGroupModal();
       loadReal?.();
     } catch (e) {
