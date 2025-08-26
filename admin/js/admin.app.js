@@ -965,6 +965,11 @@ document.addEventListener('click', (e) => {
   if (t) doLogout(e);
 });
 
+// After any table re-render, re-insert the selection column
+window.addEventListener('psa:table-rendered', () => {
+  setTimeout(ensureSelectionColumn, 0);
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
 
