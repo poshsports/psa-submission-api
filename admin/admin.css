@@ -375,3 +375,9 @@ button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; pad
 /* Optional: keep pager visible while table scrolls */
 .pagination { position: sticky; bottom: 0; z-index: 2; }
 
+/* Groups table container behavior */
+#view-groups .table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 220px); /* JS will override with exact height */
+}
+#view-groups .data-table { min-width: 1000px; } /* allow horizontal scroll */
