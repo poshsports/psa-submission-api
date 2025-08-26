@@ -375,6 +375,8 @@ function ensureSelectionColumn() {
         cb.checked = selAll.checked;
         if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
       });
+      // notify anything listening (e.g., group modal)
+      document.dispatchEvent(new CustomEvent('psa:selection-changed'));
     });
   }
 
@@ -399,6 +401,7 @@ function ensureSelectionColumn() {
       cb.addEventListener('click', (e) => e.stopPropagation());
       cb.addEventListener('change', () => {
         if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+        document.dispatchEvent(new CustomEvent('psa:selection-changed'));
       });
     } else {
       // keep in sync if table re-rendered
@@ -409,6 +412,7 @@ function ensureSelectionColumn() {
         if (!cb.__wiredSel) {
           cb.addEventListener('change', () => {
             if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+            document.dispatchEvent(new CustomEvent('psa:selection-changed'));
           });
           cb.__wiredSel = true;
         }
@@ -419,6 +423,74 @@ function ensureSelectionColumn() {
 
 function getSelectedSubmissionIds() {
   return Array.from(__selectedSubs);
+}
+
+// --- selection helpers for Add-to-group ------------------------------------
+function findRowForSubmissionId(sid){
+  const key = String(sid || '').toLowerCase();
+  // normalize by both "submission_id" and "id" just in case
+  for (const r of (tbl.allRows || [])) {
+    const k1 = String(r.submission_id || '').toLowerCase();
+    const k2 = String(r.id || '').toLowerCase();
+    if (k1 === key || k2 === key) return r;
+  }
+  return null;
+}
+
+// Split current selection into "eligible" (not in a group) and "inGroup"
+function splitSelectionByEligibility(){
+  const ids = getSelectedSubmissionIds();
+  const eligible = [];
+  const inGroup  = [];
+
+  ids.forEach(id => {
+    const row = findRowForSubmissionId(id);
+    const grp = (row?.group_code || row?.group || row?.group_id || '').toString().trim();
+    if (grp && grp !== '---') inGroup.push({ id, group_code: grp });
+    else eligible.push({ id });
+  });
+
+  return { eligible, inGroup, total: ids.length };
+}
+
+// Given an explicit list of IDs (e.g., pasted), split by eligibility using current table rows.
+// Any id not found in the table is treated as eligible.
+function eligibleIdsFromList(ids){
+  const eligibleIds = [];
+  const skipped = [];
+  (ids || []).forEach(id => {
+    const row = findRowForSubmissionId(id);
+    const grp = (row?.group_code || row?.group || row?.group_id || '').toString().trim();
+    if (row && grp && grp !== '---') skipped.push({ id, group_code: grp });
+    else eligibleIds.push(id);
+  });
+  return { eligibleIds, skipped };
+}
+
+// Update the drawer UI counts & enable/disable buttons.
+// Returns the same object as splitSelectionByEligibility().
+function updateAddGroupPanelUI(){
+  const { eligible, inGroup, total } = splitSelectionByEligibility();
+
+  // Count label (top-right of the drawer)
+  const lbl = $('agSelCount') || $('agpSelCount') || $('agp-count');
+  if (lbl) lbl.textContent = `${total} selected • ${eligible.length} eligible • ${inGroup.length} already in a group`;
+
+  // Optional skipped list (if you added one)
+  const skippedList = $('agp-skipped-list');
+  if (skippedList) {
+    skippedList.innerHTML = inGroup.length
+      ? inGroup.map(x => `<li>${escapeHtml(x.id)} → ${escapeHtml(x.group_code)}</li>`).join('')
+      : '<li>None</li>';
+  }
+
+  // Buttons: disable when no eligible items
+  const btnCreate = $('gp-create-btn') || $('gpCreateBtn') || $('gm-create');
+  const btnAdd    = $('gp-add-selected') || $('gpAddSelectedBtn') || $('gp-add-btn') || $('gm-add-existing');
+  if (btnCreate) btnCreate.disabled = eligible.length === 0;
+  if (btnAdd)    btnAdd.disabled    = eligible.length === 0;
+
+  return { eligible, inGroup, total };
 }
 
 function showSubmissionsView(){
@@ -523,7 +595,8 @@ function ensureGroupModalHost(){
     if (panel && !panel.contains(e.target)) closeGroupModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (!back.classList.contains('show')) return;
+    const b = $('group-backdrop');
+    if (!b || !b.classList.contains('show')) return;
     if (e.key === 'Escape') closeGroupModal();
   });
 }
@@ -537,11 +610,21 @@ function openGroupModal(preselectedIds = []){
   document.body.style.overflow = 'hidden';
 
   renderGroupModalHome(preselectedIds);
+
+  // initial & live counts based on current selection
+  const refeshCounts = () => updateAddGroupPanelUI();
+  refeshCounts();
+  document.addEventListener('psa:selection-changed', refeshCounts);
+  back.__onSelChange = refeshCounts;
 }
 
 function closeGroupModal(){
   const back = $('group-backdrop');
   if (!back) return;
+  if (back.__onSelChange) {
+    document.removeEventListener('psa:selection-changed', back.__onSelChange);
+    back.__onSelChange = null;
+  }
   back.classList.remove('show');
   back.setAttribute('aria-hidden','true');
   document.body.style.overflow = '';
@@ -556,15 +639,11 @@ function renderGroupModalHome(preselectedIds){
   const body = $('group-body');
   if (!body) return;
 
-  const selectedNote = preselectedIds.length
-    ? `<span class="note">${preselectedIds.length} submission${preselectedIds.length>1?'s':''} selected</span>`
-    : `<span class="note">No rows selected — you can paste IDs below</span>`;
-
   body.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <h3 style="margin:0">Choose an action</h3>
       <div style="flex:1"></div>
-      ${selectedNote}
+      <span id="agp-count" class="note"></span>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
@@ -607,39 +686,76 @@ function renderGroupModalHome(preselectedIds){
     }
   `;
 
-  // Create new group
+  // ===== Create new group (guard against empty/invalid selection) =====
   $('gm-create')?.addEventListener('click', async () => {
     const notes = $('gm-notes')?.value?.trim() || null;
+
     let ids = preselectedIds.slice();
-    if (!ids.length) {
+    let eligibleIds = [];
+
+    if (ids.length) {
+      // Use only eligible from current selection
+      const { eligible } = splitSelectionByEligibility();
+      eligibleIds = eligible.map(x => x.id);
+    } else {
+      // No selection: use pasted list, then compute eligibility from current table rows
       ids = parseIdsFromInput($('gm-ids')?.value || '');
       if (!ids.length) return alert('Please select rows or paste submission IDs.');
+      const r = eligibleIdsFromList(ids);
+      eligibleIds = r.eligibleIds;
+      if (r.skipped.length) {
+        // purely informational, still proceed with any eligible
+        console.warn('Skipped already-in-group:', r.skipped);
+      }
     }
+
+    if (!eligibleIds.length) {
+      alert('All chosen submissions are already attached to a group. No group was created.');
+      return; // ❌ never create empty groups
+    }
+
     try {
       const group = await createGroup({ notes }); // server assigns code, Draft by default
-      const result = await addToGroup(group.code, ids);
-      alert(`Created ${group.code}\nAdded ${result.added_submissions} submissions and ${result.added_cards} cards.`);
+      const result = await addToGroup(group.code, eligibleIds);
+      const msg = `Created ${group.code}\nAdded ${result.added_submissions} submissions and ${result.added_cards} cards.`;
+      alert(msg);
       closeGroupModal();
+      loadReal?.();
     } catch (e) {
       alert(`Create/Add failed: ${e.message}`);
     }
   });
 
-  // Add to existing
+  // ===== Add to existing (guard; add only eligible) =====
   const btnAdd = $('gm-add-existing');
   let chosenCode = '';
 
   const applyChosen = async () => {
     if (!chosenCode) return;
+
     let ids = preselectedIds.slice();
-    if (!ids.length) {
+    let eligibleIds = [];
+
+    if (ids.length) {
+      const { eligible } = splitSelectionByEligibility();
+      eligibleIds = eligible.map(x => x.id);
+    } else {
       ids = parseIdsFromInput($('gm-ids')?.value || '');
       if (!ids.length) return alert('Please select rows or paste submission IDs.');
+      const r = eligibleIdsFromList(ids);
+      eligibleIds = r.eligibleIds;
     }
+
+    if (!eligibleIds.length) {
+      alert('All chosen submissions are already attached to a group.');
+      return; // ❌ nothing to add
+    }
+
     try {
-      const result = await addToGroup(chosenCode, ids);
+      const result = await addToGroup(chosenCode, eligibleIds);
       alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${chosenCode}.`);
       closeGroupModal();
+      loadReal?.();
     } catch (e) {
       alert(`Add failed: ${e.message}`);
     }
@@ -932,34 +1048,34 @@ function wireRowClickDelegation(){
   tb.__wiredRowClick = true;
 
   tb.addEventListener('click', (e) => {
-  // Ignore clicks that originate in the selection column or on checkboxes
-  if (e.target?.closest?.('td.__selcol')) return;
-  if (e.target?.matches?.('input.__selrow, #__selAll')) return;
+    // Ignore clicks that originate in the selection column or on checkboxes
+    if (e.target?.closest?.('td.__selcol')) return;
+    if (e.target?.matches?.('input.__selrow, #__selAll')) return;
 
-  const tr = e.target?.closest?.('tr[data-id]');
-  if (!tr) return;
-  const id = tr.dataset.id;
-  if (!id) return;
+    const tr = e.target?.closest?.('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    if (!id) return;
 
-  // ignore plain link clicks (they’re non-nav here anyway)
-  const a = e.target.closest?.('a');
-  if (a) { e.preventDefault(); e.stopPropagation(); }
+    // ignore plain link clicks (they’re non-nav here anyway)
+    const a = e.target.closest?.('a');
+    if (a) { e.preventDefault(); e.stopPropagation(); }
 
-  openSubmissionDetails(id);
-}); // <-- bubble phase (no ", true")
+    openSubmissionDetails(id);
+  }); // bubble phase
 
-tb.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter') return;
-  // If focus is in the selection column, don't open details
-  if (e.target?.closest?.('td.__selcol')) return;
+  tb.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    // If focus is in the selection column, don't open details
+    if (e.target?.closest?.('td.__selcol')) return;
 
-  const tr = e.target?.closest?.('tr[data-id]');
-  if (!tr) return;
-  const id = tr.dataset.id;
-  if (!id) return;
-  e.preventDefault();
-  openSubmissionDetails(id);
-});
+    const tr = e.target?.closest?.('tr[data-id]');
+    if (!tr) return;
+    const id = tr.dataset.id;
+    if (!id) return;
+    e.preventDefault();
+    openSubmissionDetails(id);
+  });
 }
 
 window.addEventListener('psa:open-details', (e) => {
@@ -1029,7 +1145,7 @@ async function loadReal(){
 
   try {
     let items = await fetchSubmissions(); // fetch all; filter client-side
-   
+
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
@@ -1049,7 +1165,6 @@ function wireUI(){
   // Sidebar nav -> use real page navigation
   $('nav-active')?.addEventListener('click', (e) => {
     e.preventDefault();
-    // You are already on the Submissions app, but keep this explicit & future-proof:
     window.location.assign('/admin/index.html');
   });
 
@@ -1110,26 +1225,25 @@ function wireUI(){
   $('columns-cancel')?.addEventListener('click', views.closeColumnsPanel);
   $('columns-save')?.addEventListener('click', views.saveColumnsPanel);
 
-   wireRowClickDelegation();
+  wireRowClickDelegation();
 
-// Add-to-group button -> open modal
-try {
-  const toolbar = document.querySelector('#view-submissions .toolbar');
-  if (toolbar && !document.getElementById('btnAddToGroup')) {
-    const b = document.createElement('button');
-    b.id = 'btnAddToGroup';
-    b.className = 'btn primary';
-    b.type = 'button';
-    b.textContent = 'Add to group…';
-    b.style.marginLeft = '8px';
-    b.addEventListener('click', () => {
-      const selected = getSelectedSubmissionIds();
-      openGroupModal(selected);
-    });
-    toolbar.appendChild(b);
-  }
-} catch {}
-
+  // Add-to-group button -> open modal
+  try {
+    const toolbar = document.querySelector('#view-submissions .toolbar');
+    if (toolbar && !document.getElementById('btnAddToGroup')) {
+      const b = document.createElement('button');
+      b.id = 'btnAddToGroup';
+      b.className = 'btn primary';
+      b.type = 'button';
+      b.textContent = 'Add to group…';
+      b.style.marginLeft = '8px';
+      b.addEventListener('click', () => {
+        const selected = getSelectedSubmissionIds();
+        openGroupModal(selected);
+      });
+      toolbar.appendChild(b);
+    }
+  } catch {}
 }
 
 // Fallback delegation
