@@ -15,7 +15,7 @@ const pick = (...vals) => {
   for (const v of vals) {
     if (v == null) continue;
     if (typeof v === 'string' && v.trim()) return v.trim();
-    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) return v; // JSON addr
+    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) return v; // JSON-ish
   }
   return null;
 };
@@ -67,10 +67,17 @@ function normalizeCardRow(r = {}) {
   const break_no = r.break_no || r.break_number || r.break || '';
   const description = r.description || r.card_description || r.title || r.card || '';
 
-  // keep any grading_service if present
   const grading_service = r.grading_service || '';
 
-  return { date, channel, break_no, break_number: break_no, description, card_description: description, grading_service };
+  return {
+    date,
+    channel,
+    break_no,
+    break_number: break_no,
+    description,
+    card_description: description,
+    grading_service
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -82,8 +89,10 @@ export default async function handler(req, res) {
 
   // cookie gate (set by /api/admin-login)
   const cookie = req.headers.cookie || '';
-  const authed = cookie.split(';').some(v => v.trim().startsWith('psa_admin=1'));
-  if (!authed) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  theAuthed: {
+    const authed = cookie.split(';').some(v => v.trim().startsWith('psa_admin=1'));
+    if (!authed) return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
 
   try {
     const supabase = sb();
@@ -130,29 +139,41 @@ export default async function handler(req, res) {
 
     // 2) Enrich with shipping + cards when requested
     if (wantFull) {
-      // 2a) Pull the full submissions row so we don't miss any flat columns (and card_info/raw)
+      // 2a) Pull the full submissions row from the real table (psa_submissions / psa-submissions)
+      const TABLES = ['psa_submissions', 'psa-submissions', 'submissions'];
       let subRow = null;
-      {
-        let sq = supabase.from('submissions').select('*').limit(1);
+
+      for (const t of TABLES) {
+        let sq = supabase.from(t).select('*').limit(1);
         sq = isUuid(idParam)
           ? sq.or(`id.eq.${idParam},submission_id.eq.${idParam}`)
           : sq.eq('submission_id', idParam);
-        const { data: sData } = await sq;
-        subRow = sData?.[0] || null;
+        const { data: sData } = await safeSelect(sq);
+        if (sData?.[0]) { subRow = sData[0]; break; }
       }
 
-      // 2b) Compute an "effective" shipping from known fields
+      // 2b) Compute an "effective" shipping from known fields (+ JSON in address/raw)
       let effective = pick(
         subRow?.ship_to,
         subRow?.shipping_address,
         subRow?.shopify_shipping_address,
         subRow?.ship_address,
-        subRow?.address,
+        parseJson(subRow?.address) || subRow?.address, // handle JSON text
         subRow?.meta?.ship_to,
         subRow?.meta?.shipping_address
       );
 
       if (!effective) effective = flatToAddress(subRow);
+
+      if (!effective && subRow?.raw) {
+        const raw = parseJson(subRow.raw);
+        effective = pick(
+          raw?.ship_to,
+          raw?.shipping_address,
+          parseJson(raw?.address) || raw?.address,
+          flatToAddress(raw)
+        );
+      }
 
       if (!effective && (subRow?.id || item.shopify_order_name)) {
         // orders table
@@ -169,7 +190,7 @@ export default async function handler(req, res) {
             .limit(1)
         );
         const o = ord?.[0];
-        effective = pick(effective, o?.ship_to, o?.shipping_address, o?.address, flatToAddress(o));
+        effective = pick(effective, o?.ship_to, o?.shipping_address, parseJson(o?.address) || o?.address, flatToAddress(o));
       }
 
       if (!effective && item.customer_email) {
@@ -181,7 +202,7 @@ export default async function handler(req, res) {
             .limit(1)
         );
         const c = cust?.[0];
-        effective = pick(effective, c?.shipping_address, c?.default_address, flatToAddress(c));
+        effective = pick(effective, c?.shipping_address, c?.default_address, parseJson(c?.address) || c?.address, flatToAddress(c));
       }
 
       if (!effective && subRow?.id) {
@@ -192,7 +213,7 @@ export default async function handler(req, res) {
             .eq('submission_id', subRow.id)
             .limit(1)
         );
-        effective = pick(effective, sa?.[0]?.address);
+        effective = pick(effective, parseJson(sa?.[0]?.address) || sa?.[0]?.address);
       }
 
       if (effective) {
@@ -209,7 +230,7 @@ export default async function handler(req, res) {
         cardsOut = directCardInfo;
       }
 
-      // (ii) try raw JSON blob (common in your dataset)
+      // (ii) try raw JSON blob
       if (!cardsOut.length && subRow?.raw) {
         const raw = parseJson(subRow.raw);
         const rawCards = parseJson(raw?.card_info);
@@ -218,21 +239,24 @@ export default async function handler(req, res) {
         }
       }
 
-      // (iii) as a fallback, query a `cards` table if present
+      // (iii) as a fallback, query a cards table if present
       if (!cardsOut.length && subRow?.id) {
-        const { data: cardRows } = await safeSelect(
-          supabase
-            .from('cards')
-            .select('created_at, date, date_of_break, break_date, channel, break_channel, break_number, break_no, description, card_description, title, grading_service, submission_id')
-            .eq('submission_id', subRow.id)
-            .order('created_at', { ascending: true })
-        );
-        if (Array.isArray(cardRows) && cardRows.length) {
-          cardsOut = cardRows.map(normalizeCardRow);
+        const CARD_TABLES = ['psa_cards', 'cards'];
+        for (const ct of CARD_TABLES) {
+          const { data: cardRows } = await safeSelect(
+            supabase
+              .from(ct)
+              .select('created_at, date, date_of_break, break_date, channel, break_channel, break_number, break_no, description, card_description, title, grading_service, submission_id')
+              .eq('submission_id', subRow.id)
+              .order('created_at', { ascending: true })
+          );
+          if (Array.isArray(cardRows) && cardRows.length) {
+            cardsOut = cardRows.map(normalizeCardRow);
+            break;
+          }
         }
       }
 
-      // surface in a name the UI already reads
       if (cardsOut.length) {
         item.card_info = cardsOut;
       }
