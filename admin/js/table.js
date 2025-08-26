@@ -368,4 +368,6 @@ export function renderTable(visibleKeys){
   // update count pill
   const pill = $('countPill');
   if (pill) pill.textContent = String(total);
+
+  try { window.dispatchEvent(new Event('psa:table-rendered')); } catch {}
 }
