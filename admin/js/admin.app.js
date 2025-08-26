@@ -800,6 +800,18 @@ async function loadReal(){
 
   try {
     const items = await fetchSubmissions(); // fetch all; filter client-side
+    // DEBUG: peek at group fields coming from the API
+if (Array.isArray(items) && items.length) {
+  const probe = items.slice(0, 5).map(s => ({
+    id: s.submission_id || s.id,
+    // what the backend might call it:
+    group_code: s.group_code ?? s.group?.code ?? s.group ?? null,
+    // keep raw keys to eyeball quickly
+    has_group_code_key: Object.prototype.hasOwnProperty.call(s, 'group_code'),
+    has_group_key: Object.prototype.hasOwnProperty.call(s, 'group'),
+  }));
+  console.table(probe);
+}
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
