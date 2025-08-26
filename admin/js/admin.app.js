@@ -493,20 +493,21 @@ function closeSubmissionDetails() {
 
 // --- helpers for rendering ---
 function renderAddress(r) {
-  // If backend gives a single formatted string, use it.
-  if (typeof r.ship_to === 'string' && r.ship_to.trim()) {
-    return `<address class="shipto">${escapeHtml(r.ship_to)}</address>`;
+  // 1) If backend gives a single formatted string (or array of lines), use it.
+  const directVal = [r.ship_to, r.shipping_address, r.shopify_shipping_address, r.ship_address, r.address]
+    .find(v => typeof v === 'string' && v.trim());
+  if (directVal) return `<address class="shipto">${escapeHtml(directVal)}</address>`;
+
+  const directArr = [r.ship_to, r.shipping_address, r.shopify_shipping_address, r.ship_address, r.address]
+    .find(v => Array.isArray(v) && v.length && v.some(s => String(s).trim()));
+  if (directArr) {
+    return `<address class="shipto">${directArr.map(s => escapeHtml(String(s))).join('<br>')}</address>`;
   }
 
-  // Common nested containers we see in different sources
-  const nested =
-    r.shipping_address ||
-    r.shopify_shipping_address ||
-    r.ship_address ||
-    r.address ||
-    r.shipping ||
-    r.shippingAddress ||
-    null;
+  // 2) Common nested objects we see in different sources
+  const nested = ['shipping_address','shopify_shipping_address','ship_address','address','shipping','shippingAddress']
+    .map(k => r?.[k])
+    .find(v => v && typeof v === 'object' && !Array.isArray(v)) || null;
 
   const pick = (...vals) => {
     for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
@@ -525,23 +526,22 @@ function renderAddress(r) {
   // ---- ADDRESS LINES ----
   const a1 = pick(
     r.ship_addr1, r.ship_address1, r.address1,
-    nested?.address1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
+    nested?.address1, nested?.address_line1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
     nested?.street
   );
 
   const a2Raw = pick(
     r.ship_addr2, r.ship_address2, r.address2,
-    nested?.address2, nested?.line2,
-    nested?.street2, nested?.address_line2, nested?.address_line_2,
-    nested?.unit, nested?.apt, nested?.apartment, nested?.suite
+    nested?.address2, nested?.address_line2, nested?.line2,
+    nested?.street2, nested?.unit, nested?.apt, nested?.apartment, nested?.suite
   );
   const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
     ? `Suite ${a2Raw}` : a2Raw;
 
-  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
-  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
-  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.postal_code, nested?.postal);
-  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code);
+  const city  = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
+  const state = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
+  const zip   = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.zip_code, nested?.postal, nested?.postal_code, nested?.postalCode);
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code, nested?.countryCode);
 
   const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
   if (!parts.length) return '';
