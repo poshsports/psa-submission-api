@@ -1,7 +1,8 @@
+// /admin/js/columns.js
 import { fmtDate, fmtCode, fmtNum, fmtMoney } from './util.js';
 
 export const COLUMNS = [
-    {
+  {
     key: 'group_code',
     label: 'Group #',
     sortable: true,
@@ -16,7 +17,7 @@ export const COLUMNS = [
   { key:'customer_email',      label:'Email',            sortable:true,  align:'left' },
   { key:'status',              label:'Status',           sortable:true,  align:'left' },
   { key:'cards',               label:'Cards',            sortable:true,  align:'right', format: fmtNum },
-  { key:'evaluation',          label:'Evaluation',       sortable:true,  align:'left'  }, // Yes/No
+  { key:'evaluation',          label:'Evaluation',       sortable:true,  align:'left'  },
   { key:'grand',               label:'Grand',            sortable:true,  align:'right', format: fmtMoney },
   { key:'grading_service',     label:'Grading Service',  sortable:true,  align:'left' },
   { key:'paid_at_iso',         label:'Paid',             sortable:true,  align:'left',  format: fmtDate },
