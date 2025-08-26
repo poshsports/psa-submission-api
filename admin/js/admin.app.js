@@ -1,6 +1,6 @@
 // /admin/js/admin.app.js
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchSubmissions, logout, fetchSubmissionDetails } from './api.js';
+import { fetchSubmissions, logout, fetchSubmissionDetails, fetchGroups, createGroup, addToGroup } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
 
@@ -491,7 +491,224 @@ function closeSubmissionDetails() {
   document.body.style.overflow = '';
 }
 
-// --- helpers for rendering ---
+// ===================================================================
+// Add-to-Group Modal (Create new OR Add to existing)
+// ===================================================================
+function ensureGroupModalHost(){
+  if ($('group-backdrop')) return;
+
+  const back = document.createElement('div');
+  back.id = 'group-backdrop';
+  back.className = 'details-backdrop';
+  back.setAttribute('aria-hidden','true');
+  back.innerHTML = `
+    <div class="details-panel" role="dialog" aria-modal="true" aria-labelledby="group-title">
+      <div class="details-head">
+        <div id="group-title" class="sheet-title">Add to group</div>
+        <button id="group-close" class="btn" type="button">Close</button>
+      </div>
+      <div id="group-body" class="details-body"></div>
+      <div class="details-foot">
+        <div></div>
+        <button id="group-cancel" class="btn" type="button">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(back);
+
+  $('group-close')?.addEventListener('click', closeGroupModal);
+  $('group-cancel')?.addEventListener('click', closeGroupModal);
+  back.addEventListener('mousedown', (e) => {
+    const panel = back.querySelector('.details-panel');
+    if (panel && !panel.contains(e.target)) closeGroupModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!back.classList.contains('show')) return;
+    if (e.key === 'Escape') closeGroupModal();
+  });
+}
+
+function openGroupModal(preselectedIds = []){
+  ensureGroupModalHost();
+  const back = $('group-backdrop');
+  if (!back) return;
+  back.classList.add('show');
+  back.setAttribute('aria-hidden','false');
+  document.body.style.overflow = 'hidden';
+
+  renderGroupModalHome(preselectedIds);
+}
+
+function closeGroupModal(){
+  const back = $('group-backdrop');
+  if (!back) return;
+  back.classList.remove('show');
+  back.setAttribute('aria-hidden','true');
+  document.body.style.overflow = '';
+}
+
+function parseIdsFromInput(s){
+  if (!s) return [];
+  return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+}
+
+function renderGroupModalHome(preselectedIds){
+  const body = $('group-body');
+  if (!body) return;
+
+  const selectedNote = preselectedIds.length
+    ? `<span class="note">${preselectedIds.length} submission${preselectedIds.length>1?'s':''} selected</span>`
+    : `<span class="note">No rows selected — you can paste IDs below</span>`;
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <h3 style="margin:0">Choose an action</h3>
+      <div style="flex:1"></div>
+      ${selectedNote}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+      <div class="card" style="padding:16px">
+        <h4 style="margin:0 0 6px">Create new group</h4>
+        <p class="note" style="margin:0 0 12px">Creates a new group (code auto-assigned), then adds submissions.</p>
+        <label class="note" for="gm-notes">Notes (optional)</label>
+        <input id="gm-notes" type="text" placeholder="Notes" />
+        <div style="margin-top:12px">
+          <button id="gm-create" class="btn primary">Create & add</button>
+        </div>
+      </div>
+
+      <div class="card" style="padding:16px">
+        <h4 style="margin:0 0 6px">Add to existing</h4>
+        <p class="note" style="margin:0 8px 8px 0">Search by code or notes, then pick a group.</p>
+        <input id="gm-search" type="text" placeholder="Search groups…" />
+        <div id="gm-results" class="table-wrap" style="max-height:240px;overflow:auto;margin-top:8px">
+          <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+            <thead><tr><th style="width:140px">Code</th><th style="width:120px">Status</th><th style="width:100px">Members</th><th>Notes</th></tr></thead>
+            <tbody id="gm-tbody"><tr><td colspan="4" class="note">Type to search…</td></tr></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <input id="gm-manual" type="text" placeholder="Or enter code (e.g., GRP-0002)" style="flex:1">
+          <button id="gm-add-existing" class="btn" disabled>Add to selected</button>
+        </div>
+      </div>
+    </div>
+
+    ${
+      preselectedIds.length
+        ? ''
+        : `
+          <div class="card" style="padding:12px;margin-top:12px">
+            <div class="note" style="margin-bottom:6px">No rows selected — paste submission IDs (comma/space/newline separated):</div>
+            <textarea id="gm-ids" rows="2" placeholder="psa-111, psa-161 …" style="width:100%"></textarea>
+          </div>
+        `
+    }
+  `;
+
+  // Create new group
+  $('gm-create')?.addEventListener('click', async () => {
+    const notes = $('gm-notes')?.value?.trim() || null;
+    let ids = preselectedIds.slice();
+    if (!ids.length) {
+      ids = parseIdsFromInput($('gm-ids')?.value || '');
+      if (!ids.length) return alert('Please select rows or paste submission IDs.');
+    }
+    try {
+      const group = await createGroup({ notes }); // server assigns code, Draft by default
+      const result = await addToGroup(group.code, ids);
+      alert(`Created ${group.code}\nAdded ${result.added_submissions} submissions and ${result.added_cards} cards.`);
+      closeGroupModal();
+    } catch (e) {
+      alert(`Create/Add failed: ${e.message}`);
+    }
+  });
+
+  // Add to existing
+  const btnAdd = $('gm-add-existing');
+  let chosenCode = '';
+
+  const applyChosen = async () => {
+    if (!chosenCode) return;
+    let ids = preselectedIds.slice();
+    if (!ids.length) {
+      ids = parseIdsFromInput($('gm-ids')?.value || '');
+      if (!ids.length) return alert('Please select rows or paste submission IDs.');
+    }
+    try {
+      const result = await addToGroup(chosenCode, ids);
+      alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${chosenCode}.`);
+      closeGroupModal();
+    } catch (e) {
+      alert(`Add failed: ${e.message}`);
+    }
+  };
+
+  $('gm-add-existing')?.addEventListener('click', applyChosen);
+  $('gm-manual')?.addEventListener('input', (e) => {
+    chosenCode = e.target.value.trim().toUpperCase();
+    if (btnAdd) btnAdd.disabled = !chosenCode;
+  });
+
+  const renderRows = (items=[]) => {
+    const tb = $('gm-tbody');
+    if (!tb) return;
+    if (!items.length) {
+      tb.innerHTML = `<tr><td colspan="4" class="note">No results.</td></tr>`;
+      return;
+    }
+    tb.innerHTML = items.map(r => {
+      const code = escapeHtml(String(r.code || ''));
+      const status = escapeHtml(String(r.status || ''));
+      const notes = escapeHtml(String(r.notes || ''));
+      const cnt = Number(r.submission_count ?? r.members ?? r.count ?? 0);
+      return `
+        <tr class="gm-row" data-code="${code}" title="Use ${code}">
+          <td><strong>${code}</strong></td>
+          <td>${status}</td>
+          <td>${cnt}</td>
+          <td>${notes}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tb.querySelectorAll('tr.gm-row').forEach(tr => {
+      tr.addEventListener('click', () => {
+        tb.querySelectorAll('tr.gm-row.selected').forEach(x => x.classList.remove('selected'));
+        tr.classList.add('selected');
+        chosenCode = tr.getAttribute('data-code') || '';
+        if ($('gm-manual')) $('gm-manual').value = chosenCode;
+        if (btnAdd) btnAdd.disabled = !chosenCode;
+      });
+      tr.addEventListener('dblclick', applyChosen);
+    });
+  };
+
+  const doSearch = async (term) => {
+    const tb = $('gm-tbody');
+    if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Searching…</td></tr>`;
+    try {
+      const resp = await fetchGroups({ q: term, limit: 50, offset: 0 });
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      renderRows(items);
+    } catch {
+      if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Search failed.</td></tr>`;
+    }
+  };
+
+  const debSearch = debounce(() => {
+    const term = $('gm-search')?.value?.trim() || '';
+    if (!term) {
+      const tb = $('gm-tbody'); if (tb) tb.innerHTML = `<tr><td colspan="4" class="note">Type to search…</td></tr>`;
+      return;
+    }
+    doSearch(term);
+  }, 250);
+
+  $('gm-search')?.addEventListener('input', debSearch);
+}
+
 // --- helpers for rendering ---
 function renderAddress(r) {
   // 1) Direct string or array (use immediately)
@@ -895,55 +1112,24 @@ function wireUI(){
 
    wireRowClickDelegation();
 
-  // === TEMP: Add-to-group button (dev helper) ===
-  try {
-    const toolbar = document.querySelector('#view-submissions .toolbar');
-    if (toolbar && !document.getElementById('btnAddToGroup')) {
-      const b = document.createElement('button');
-      b.id = 'btnAddToGroup';
-      b.className = 'btn primary';
-      b.type = 'button';
-      b.textContent = 'Add to group…';
-      b.style.marginLeft = '8px';
-b.addEventListener('click', async () => {
-  try {
-    const preselected = getSelectedSubmissionIds();
-    const choice = prompt(
-      preselected.length
-        ? `Type "new" to create a group,\nOR enter an existing group code/UUID (selected: ${preselected.join(', ')})`
-        : 'Type "new" to create a group,\nOR enter an existing group code/UUID (e.g., GRP-0002):'
-    );
-    if (!choice) return;
-
-    const { addToGroup, createGroup } = await import('./api.js');
-
-    let groupCode = null;
-    if (choice.trim().toLowerCase() === 'new') {
-      const notes = prompt('Notes for the new group? (optional)') || null;
-      const group = await createGroup({ notes }); // status defaults to Draft
-      groupCode = group.code;
-      alert(`Created group ${groupCode}`);
-    } else {
-      groupCode = choice.trim();
-    }
-
-    // Use selected submissions if any; else prompt for CSV
-    let submissionIds = preselected;
-    if (!submissionIds.length) {
-      const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
-      if (!csv) return;
-      submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
-    }
-
-    const result = await addToGroup(groupCode, submissionIds);
-    alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${groupCode}`);
-  } catch (e) {
-    alert(`Add failed: ${e.message}`);
+// Add-to-group button -> open modal
+try {
+  const toolbar = document.querySelector('#view-submissions .toolbar');
+  if (toolbar && !document.getElementById('btnAddToGroup')) {
+    const b = document.createElement('button');
+    b.id = 'btnAddToGroup';
+    b.className = 'btn primary';
+    b.type = 'button';
+    b.textContent = 'Add to group…';
+    b.style.marginLeft = '8px';
+    b.addEventListener('click', () => {
+      const selected = getSelectedSubmissionIds();
+      openGroupModal(selected);
+    });
+    toolbar.appendChild(b);
   }
-});
-      toolbar.appendChild(b);
-    }
-  } catch {}
+} catch {}
+
 }
 
 // Fallback delegation
