@@ -20,6 +20,16 @@ const pick = (...vals) => {
   return null;
 };
 
+// NEW: parse JSON-looking strings safely
+function parseMaybeJSON(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') return v;
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  if (!s || (s[0] !== '{' && s[0] !== '[')) return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
+
 // build an address object from flat columns if present
 function flatToAddress(src) {
   if (!src || typeof src !== 'object') return null;
@@ -45,7 +55,6 @@ function flatToAddress(src) {
   const country =
     src.ship_country || src.shipping_country || src.country || src.country_code || src.countryCode || null;
 
-  // if we have at least one meaningful field, return an object
   if (name || address1 || address2 || city || state || postal_code || country) {
     return { name, address1, address2, city, state, postal_code, country };
   }
@@ -108,27 +117,35 @@ export default async function handler(req, res) {
 
     // 2) Enrich with shipping when requested
     if (wantFull) {
-      // 2a) Pull the full submissions row so we don't miss any flat columns
+      // 2a) Pull the row from psa_submissions FIRST (where address is), then fall back to submissions
       let subRow = null;
-      {
-        let sq = supabase.from('submissions').select('*').limit(1);
+      for (const table of ['psa_submissions', 'submissions']) {
+        let sq = supabase.from(table).select('*').limit(1);
         sq = isUuid(idParam)
           ? sq.or(`id.eq.${idParam},submission_id.eq.${idParam}`)
           : sq.eq('submission_id', idParam);
         const { data: sData } = await sq;
-        subRow = sData?.[0] || null;
+        if (sData?.[0]) { subRow = sData[0]; break; }
       }
 
-      // 2b) Compute an "effective" shipping from known fields
-      let effective = pick(
-        subRow?.ship_to,
-        subRow?.shipping_address,
-        subRow?.shopify_shipping_address,
-        subRow?.ship_address,
-        subRow?.address,
-        subRow?.meta?.ship_to,
-        subRow?.meta?.shipping_address
-      );
+      // 2b) Prefer a structured address object from JSON-looking fields; fallback to string
+      let effective =
+        parseMaybeJSON(subRow?.shipping_address) ||
+        parseMaybeJSON(subRow?.address) ||
+        parseMaybeJSON(subRow?.meta?.shipping_address) ||
+        parseMaybeJSON(subRow?.raw?.address) ||
+        null;
+
+      if (!effective) {
+        // if address is a plain string (not JSON), treat it as freeform
+        if (typeof subRow?.address === 'string' && subRow.address.trim() && !parseMaybeJSON(subRow.address)) {
+          effective = subRow.address.trim();
+        } else if (typeof subRow?.ship_to === 'string' && subRow.ship_to.trim()) {
+          effective = subRow.ship_to.trim();
+        } else if (typeof subRow?.shipping_address === 'string' && subRow.shipping_address.trim() && !parseMaybeJSON(subRow.shipping_address)) {
+          effective = subRow.shipping_address.trim();
+        }
+      }
 
       // 2c) If still empty, build from flat columns
       if (!effective) {
@@ -137,7 +154,6 @@ export default async function handler(req, res) {
 
       // 2d) If still empty, try related places (best-effort; won't fail if tables missing)
       if (!effective && (subRow?.id || item.shopify_order_name)) {
-        // orders table
         const { data: ord } = await safeSelect(
           supabase
             .from('orders')
@@ -161,7 +177,6 @@ export default async function handler(req, res) {
       }
 
       if (!effective && item.customer_email) {
-        // customers table
         const { data: cust } = await safeSelect(
           supabase
             .from('customers')
@@ -179,7 +194,6 @@ export default async function handler(req, res) {
       }
 
       if (!effective && subRow?.id) {
-        // submissions_addresses table (if present)
         const { data: sa } = await safeSelect(
           supabase
             .from('submissions_addresses')
