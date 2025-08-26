@@ -82,7 +82,12 @@ export function normalizeRow(r){
     created_at,
     paid_at_iso: r.paid_at_iso || '',
     paid_amount: Number(r.paid_amount || 0) || 0,
-    shopify_order_name: r.shopify_order_name || ''
+        shopify_order_name: r.shopify_order_name || '',
+    group_code:
+      r.group_code ||            // preferred if backend sends it directly
+      r.group?.code ||           // if backend nests it
+      r.group ||                 // if backend already sends "GRP-0001" as "group"
+      null,
   };
 
   // cache parsed timestamp for filtering/sorting
