@@ -1,6 +1,6 @@
 // /admin/js/admin.app.js
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchSubmissions, logout, fetchSubmission } from './api.js';
+import { fetchSubmissions, logout, fetchSubmissionDetails } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
 
@@ -615,7 +615,7 @@ async function openSubmissionDetails(id) {
   if (bodyEl) bodyEl.innerHTML = `<div class="loading">Loading…</div>`;
 
   try {
-    const r = await fetchSubmission(id);
+    const r = await fetchSubmissionDetails(id);
     if (titleEl) {
       const titleId = String(r?.submission_id || r?.id || id).toUpperCase();
       titleEl.innerHTML = `Submission <strong>${escapeHtml(titleId)}</strong>`;
