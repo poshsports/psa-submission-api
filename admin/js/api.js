@@ -22,7 +22,12 @@ function hasAddress(o) {
   ];
   for (const n of nests) {
     if (!n || typeof n !== 'object') continue;
-    if (n.address1 || n.line1 || n.street || n.city || n.region || n.state || n.postal_code || n.zip) {
+    if (
+      n.address1 || n.address_line1 || n.line1 || n.street || n.street1 ||
+      n.city || n.town || n.locality ||
+      n.region || n.state || n.province ||
+      n.postal || n.postal_code || n.zip || n.zip_code
+    ) {
       return true;
     }
   }
@@ -33,7 +38,7 @@ function hasAddress(o) {
 
 function pickItemFromResponse(j) {
   // normalize common shapes coming from different endpoints
-  return j?.item ?? j?.submission ?? j?.data ?? null;
+  return j?.item ?? j?.submission ?? j?.data ?? (j?.ok === true ? j?.item ?? j : null);
 }
 
 // ---- Submissions list ------------------------------------------------------
@@ -57,8 +62,8 @@ export async function fetchSubmissions(q = '') {
   }
 
   const items = Array.isArray(j.items) ? j.items : [];
-  // quick debug hook when you need it (does not log to console)
-  window.__lastAdminFetch = j; // { ok, items, page, total, ... }
+  // quick debug hook when you need it (does not log to console unless you inspect it)
+  try { window.__lastAdminFetch = j; } catch {}
   return items;
 }
 
@@ -134,11 +139,17 @@ export async function fetchSubmission(id) {
 
 // ---- Single submission (details with shipping) -----------------------------
 export async function fetchSubmissionDetails(id) {
+  const enc = encodeURIComponent(id);
+
+  // Try both param shapes on the admin details endpoint first (with full=1),
+  // then REST-ish admin, then legacy non-admin fallbacks.
   const urls = [
-    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`, // preferred: full admin payload
-    `/api/admin/submissions/${encodeURIComponent(id)}`,          // REST-style admin
-    `/api/submissions/${encodeURIComponent(id)}`,                // legacy non-admin
-    `/api/submission?id=${encodeURIComponent(id)}`               // legacy query
+    `/api/admin/submission?submission_id=${enc}&full=1`,
+    `/api/admin/submission?id=${enc}&full=1`,
+    `/api/admin/submissions/${enc}`,
+    `/api/submissions/${enc}`,
+    `/api/submission?submission_id=${enc}`,
+    `/api/submission?id=${enc}`
   ];
 
   let lastSeen = null;
@@ -152,10 +163,15 @@ export async function fetchSubmissionDetails(id) {
 
       const item = pickItemFromResponse(j);
       if (item && typeof item === 'object') {
-        // annotate for diagnostics in the UI
-        try { Object.defineProperty(item, '__details_source', { value: url, enumerable: false }); } catch {}
-        if (hasAddress(item)) return item; // ✅ only accept when we see address fields
-        if (!lastSeen) lastSeen = item;    // remember a valid object as fallback
+        // annotate for diagnostics (non-enumerable so it won’t leak into UI)
+        try {
+          Object.defineProperty(item, '__details_source', { value: url, enumerable: false });
+          window.__lastSubDetailsURL = url;
+          window.__lastSubDetails = item;
+        } catch {}
+
+        if (hasAddress(item)) return item; // ✅ prefer a payload that contains shipping
+        if (!lastSeen) lastSeen = item;    // remember first good object as fallback
       }
     } catch (e) {
       lastErr = e;
