@@ -381,3 +381,9 @@ button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; pad
   max-height: calc(100vh - 220px); /* JS will override with exact height */
 }
 #view-groups .data-table { min-width: 1000px; } /* allow horizontal scroll */
+
+/* Add-to-Group modal: make rows clickable and show selection */
+#group-body .gm-row{cursor:pointer;}
+#group-body .gm-row:hover{background:rgba(0,0,0,.045);}
+#group-body .gm-row.selected{background:#e6f0ff;}
+
