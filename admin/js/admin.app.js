@@ -363,7 +363,7 @@ function ensureSelectionColumn() {
 
     const selAll = th0.querySelector('#__selAll');
 
-    // 👍 prevent row click handler from firing
+    // prevent row click handler from firing
     selAll?.addEventListener('click', (e) => e.stopPropagation());
 
     selAll?.addEventListener('change', () => {
@@ -396,9 +396,7 @@ function ensureSelectionColumn() {
       const cb = td0.querySelector('input.__selrow');
       cb.checked = __selectedSubs.has(id);
 
-      // 👍 prevent row click handler from firing
       cb.addEventListener('click', (e) => e.stopPropagation());
-
       cb.addEventListener('change', () => {
         if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
       });
@@ -407,13 +405,17 @@ function ensureSelectionColumn() {
       const cb = td0.querySelector('input.__selrow');
       if (cb) {
         cb.checked = __selectedSubs.has(id);
-        // 👍 ensure existing boxes also stop bubbling
         cb.addEventListener('click', (e) => e.stopPropagation());
+        if (!cb.__wiredSel) {
+          cb.addEventListener('change', () => {
+            if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+          });
+          cb.__wiredSel = true;
+        }
       }
     }
   });
 }
-
 
 function getSelectedSubmissionIds() {
   return Array.from(__selectedSubs);
@@ -422,8 +424,6 @@ function getSelectedSubmissionIds() {
 function showSubmissionsView(){
   setTopbarTitle('Active submissions'); // purely cosmetic on this page
   tbl.renderTable(currentVisibleKeys());
-  // after each render, ensure selection column exists
-  setTimeout(ensureSelectionColumn, 0);
 }
 
 // ===== Submission details drawer =====
@@ -817,7 +817,6 @@ if (Array.isArray(items) && items.length) {
 
     views.applyView?.(views.currentView);
     runFilter();
-    setTimeout(ensureSelectionColumn, 0);
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
@@ -881,13 +880,11 @@ function wireUI(){
     tbl.prevPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
-    setTimeout(ensureSelectionColumn, 0);
   });
   $('next-page')?.addEventListener('click', () => {
     tbl.nextPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
-    setTimeout(ensureSelectionColumn, 0);
   });
 
   $('btnColumns')?.addEventListener('click', views.openColumnsPanel);
@@ -965,10 +962,7 @@ document.addEventListener('click', (e) => {
   if (t) doLogout(e);
 });
 
-// After any table re-render, re-insert the selection column
-window.addEventListener('psa:table-rendered', () => {
-  setTimeout(ensureSelectionColumn, 0);
-});
+window.addEventListener('psa:table-rendered', ensureSelectionColumn);
 
 document.addEventListener('DOMContentLoaded', () => {
   const authed = /(?:^|;\s*)psa_admin=/.test(document.cookie);
