@@ -362,6 +362,10 @@ function ensureSelectionColumn() {
     else thead.appendChild(th0);
 
     const selAll = th0.querySelector('#__selAll');
+
+    // 👍 prevent row click handler from firing
+    selAll?.addEventListener('click', (e) => e.stopPropagation());
+
     selAll?.addEventListener('change', () => {
       const rows = tbody.querySelectorAll('tr[data-id]');
       rows.forEach(tr => {
@@ -391,16 +395,25 @@ function ensureSelectionColumn() {
 
       const cb = td0.querySelector('input.__selrow');
       cb.checked = __selectedSubs.has(id);
+
+      // 👍 prevent row click handler from firing
+      cb.addEventListener('click', (e) => e.stopPropagation());
+
       cb.addEventListener('change', () => {
         if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
       });
     } else {
       // keep in sync if table re-rendered
       const cb = td0.querySelector('input.__selrow');
-      if (cb) cb.checked = __selectedSubs.has(id);
+      if (cb) {
+        cb.checked = __selectedSubs.has(id);
+        // 👍 ensure existing boxes also stop bubbling
+        cb.addEventListener('click', (e) => e.stopPropagation());
+      }
     }
   });
 }
+
 
 function getSelectedSubmissionIds() {
   return Array.from(__selectedSubs);
@@ -690,26 +703,34 @@ function wireRowClickDelegation(){
   tb.__wiredRowClick = true;
 
   tb.addEventListener('click', (e) => {
-    const tr = e.target?.closest?.('tr[data-id]');
-    if (!tr) return;
-    const id = tr.dataset.id;
-    if (!id) return;
+  // Ignore clicks that originate in the selection column or on checkboxes
+  if (e.target?.closest?.('td.__selcol')) return;
+  if (e.target?.matches?.('input.__selrow, #__selAll')) return;
 
-    const a = e.target.closest('a');
-    if (a) { e.preventDefault(); e.stopPropagation(); }
+  const tr = e.target?.closest?.('tr[data-id]');
+  if (!tr) return;
+  const id = tr.dataset.id;
+  if (!id) return;
 
-    openSubmissionDetails(id);
-  }, true);
+  // ignore plain link clicks (they’re non-nav here anyway)
+  const a = e.target.closest?.('a');
+  if (a) { e.preventDefault(); e.stopPropagation(); }
 
-  tb.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    const tr = e.target?.closest?.('tr[data-id]');
-    if (!tr) return;
-    const id = tr.dataset.id;
-    if (!id) return;
-    e.preventDefault();
-    openSubmissionDetails(id);
-  });
+  openSubmissionDetails(id);
+}); // <-- bubble phase (no ", true")
+
+tb.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  // If focus is in the selection column, don't open details
+  if (e.target?.closest?.('td.__selcol')) return;
+
+  const tr = e.target?.closest?.('tr[data-id]');
+  if (!tr) return;
+  const id = tr.dataset.id;
+  if (!id) return;
+  e.preventDefault();
+  openSubmissionDetails(id);
+});
 }
 
 window.addEventListener('psa:open-details', (e) => {
