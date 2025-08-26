@@ -26,20 +26,23 @@ export default async function handler(req, res) {
 
       // Compute next GRP-#### when code is not provided
       async function computeNextCode() {
-        const { data: latest } = await client
+        // Pull a batch of recent codes and pick the highest *numeric* GRP-#### ourselves
+        const { data: rows } = await client
           .from('groups')
           .select('code')
-          .like('code', 'GRP-%')
+          .like('code', 'GRP-%')          // starts with GRP-
           .order('code', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(100);                    // scan a healthy window
 
-        let nextNum = 1;
-        if (latest?.code) {
-          const m = String(latest.code).match(/^GRP-(\d{4,})$/i);
-          if (m) nextNum = parseInt(m[1], 10) + 1;
+        let maxNum = 0;
+        for (const r of rows || []) {
+          const m = String(r?.code || '').match(/^GRP-(\d{4,})$/i);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n) && n > maxNum) maxNum = n;
+          }
         }
-        return `GRP-${String(nextNum).padStart(4, '0')}`;
+        return `GRP-${String(maxNum + 1).padStart(4, '0')}`;
       }
 
       let code = codeIn || await computeNextCode();
