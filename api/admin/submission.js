@@ -1,10 +1,10 @@
 // /api/admin/submission.js  (ESM)
 // Returns one submission (by submission_id or id) with group fields for the admin drawer.
-// When ?full=1 (or true) it also enriches with shipping info from several sources.
+// When ?full=1 (or true) it also enriches with shipping info AND returns card_info.
 
 import { sb } from '../_util/supabase.js';
 
-// tiny helper: never throw if a table/column is missing
+// --- helpers ---------------------------------------------------------------
 async function safeSelect(promise) {
   try { return await promise; } catch { return { data: null, error: null }; }
 }
@@ -20,17 +20,13 @@ const pick = (...vals) => {
   return null;
 };
 
-// NEW: parse JSON-looking strings safely
-function parseMaybeJSON(v) {
-  if (v == null) return null;
-  if (typeof v === 'object') return v;
-  if (typeof v !== 'string') return null;
-  const s = v.trim();
-  if (!s || (s[0] !== '{' && s[0] !== '[')) return null;
-  try { return JSON.parse(s); } catch { return null; }
-}
+const parseJson = (v) => {
+  if (!v) return null;
+  if (Array.isArray(v) || (typeof v === 'object' && v !== null)) return v;
+  try { return JSON.parse(String(v)); } catch { return null; }
+};
 
-// build an address object from flat columns if present
+// Build an address object from flat columns if present
 function flatToAddress(src) {
   if (!src || typeof src !== 'object') return null;
 
@@ -61,6 +57,23 @@ function flatToAddress(src) {
   return null;
 }
 
+// Normalize card rows coming from a `cards` table into what the UI expects
+function normalizeCardRow(r = {}) {
+  const date =
+    r.date || r.date_of_break || r.break_date ||
+    (r.created_at ? new Date(r.created_at).toISOString().slice(0,10) : '');
+
+  const channel = r.channel || r.break_channel || '';
+  const break_no = r.break_no || r.break_number || r.break || '';
+  const description = r.description || r.card_description || r.title || r.card || '';
+
+  // keep any grading_service if present
+  const grading_service = r.grading_service || '';
+
+  return { date, channel, break_no, break_number: break_no, description, card_description: description, grading_service };
+}
+
+// ---------------------------------------------------------------------------
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -115,45 +128,34 @@ export default async function handler(req, res) {
 
     const item = { ...data[0] };
 
-    // 2) Enrich with shipping when requested
+    // 2) Enrich with shipping + cards when requested
     if (wantFull) {
-      // 2a) Pull the row from psa_submissions FIRST (where address is), then fall back to submissions
+      // 2a) Pull the full submissions row so we don't miss any flat columns (and card_info/raw)
       let subRow = null;
-      for (const table of ['psa_submissions', 'submissions']) {
-        let sq = supabase.from(table).select('*').limit(1);
+      {
+        let sq = supabase.from('submissions').select('*').limit(1);
         sq = isUuid(idParam)
           ? sq.or(`id.eq.${idParam},submission_id.eq.${idParam}`)
           : sq.eq('submission_id', idParam);
         const { data: sData } = await sq;
-        if (sData?.[0]) { subRow = sData[0]; break; }
+        subRow = sData?.[0] || null;
       }
 
-      // 2b) Prefer a structured address object from JSON-looking fields; fallback to string
-      let effective =
-        parseMaybeJSON(subRow?.shipping_address) ||
-        parseMaybeJSON(subRow?.address) ||
-        parseMaybeJSON(subRow?.meta?.shipping_address) ||
-        parseMaybeJSON(subRow?.raw?.address) ||
-        null;
+      // 2b) Compute an "effective" shipping from known fields
+      let effective = pick(
+        subRow?.ship_to,
+        subRow?.shipping_address,
+        subRow?.shopify_shipping_address,
+        subRow?.ship_address,
+        subRow?.address,
+        subRow?.meta?.ship_to,
+        subRow?.meta?.shipping_address
+      );
 
-      if (!effective) {
-        // if address is a plain string (not JSON), treat it as freeform
-        if (typeof subRow?.address === 'string' && subRow.address.trim() && !parseMaybeJSON(subRow.address)) {
-          effective = subRow.address.trim();
-        } else if (typeof subRow?.ship_to === 'string' && subRow.ship_to.trim()) {
-          effective = subRow.ship_to.trim();
-        } else if (typeof subRow?.shipping_address === 'string' && subRow.shipping_address.trim() && !parseMaybeJSON(subRow.shipping_address)) {
-          effective = subRow.shipping_address.trim();
-        }
-      }
+      if (!effective) effective = flatToAddress(subRow);
 
-      // 2c) If still empty, build from flat columns
-      if (!effective) {
-        effective = flatToAddress(subRow);
-      }
-
-      // 2d) If still empty, try related places (best-effort; won't fail if tables missing)
       if (!effective && (subRow?.id || item.shopify_order_name)) {
+        // orders table
         const { data: ord } = await safeSelect(
           supabase
             .from('orders')
@@ -167,13 +169,7 @@ export default async function handler(req, res) {
             .limit(1)
         );
         const o = ord?.[0];
-        effective = pick(
-          effective,
-          o?.ship_to,
-          o?.shipping_address,
-          o?.address,
-          flatToAddress(o)
-        );
+        effective = pick(effective, o?.ship_to, o?.shipping_address, o?.address, flatToAddress(o));
       }
 
       if (!effective && item.customer_email) {
@@ -185,12 +181,7 @@ export default async function handler(req, res) {
             .limit(1)
         );
         const c = cust?.[0];
-        effective = pick(
-          effective,
-          c?.shipping_address,
-          c?.default_address,
-          flatToAddress(c)
-        );
+        effective = pick(effective, c?.shipping_address, c?.default_address, flatToAddress(c));
       }
 
       if (!effective && subRow?.id) {
@@ -204,10 +195,46 @@ export default async function handler(req, res) {
         effective = pick(effective, sa?.[0]?.address);
       }
 
-      // 2e) Write back in canonical fields your UI expects
       if (effective) {
         if (typeof effective === 'string') item.ship_to = effective;
         else item.shipping_address = effective;
+      }
+
+      // 2c) ----- Cards: prefer card_info on submissions; else from raw; else cards table -----
+      let cardsOut = [];
+
+      // (i) direct column on submissions
+      const directCardInfo = parseJson(subRow?.card_info);
+      if (Array.isArray(directCardInfo) && directCardInfo.length) {
+        cardsOut = directCardInfo;
+      }
+
+      // (ii) try raw JSON blob (common in your dataset)
+      if (!cardsOut.length && subRow?.raw) {
+        const raw = parseJson(subRow.raw);
+        const rawCards = parseJson(raw?.card_info);
+        if (Array.isArray(rawCards) && rawCards.length) {
+          cardsOut = rawCards;
+        }
+      }
+
+      // (iii) as a fallback, query a `cards` table if present
+      if (!cardsOut.length && subRow?.id) {
+        const { data: cardRows } = await safeSelect(
+          supabase
+            .from('cards')
+            .select('created_at, date, date_of_break, break_date, channel, break_channel, break_number, break_no, description, card_description, title, grading_service, submission_id')
+            .eq('submission_id', subRow.id)
+            .order('created_at', { ascending: true })
+        );
+        if (Array.isArray(cardRows) && cardRows.length) {
+          cardsOut = cardRows.map(normalizeCardRow);
+        }
+      }
+
+      // surface in a name the UI already reads
+      if (cardsOut.length) {
+        item.card_info = cardsOut;
       }
     }
 
