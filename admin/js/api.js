@@ -141,44 +141,35 @@ export async function fetchSubmission(id) {
 export async function fetchSubmissionDetails(id) {
   const enc = encodeURIComponent(id);
 
-  // Try both param shapes on the admin details endpoint first (with full=1),
-  // then REST-ish admin, then legacy non-admin fallbacks.
+  // Only hit the admin details endpoint; avoid noisy legacy routes.
   const urls = [
     `/api/admin/submission?submission_id=${enc}&full=1`,
     `/api/admin/submission?id=${enc}&full=1`,
-    `/api/admin/submissions/${enc}`,
-    `/api/submissions/${enc}`,
-    `/api/submission?submission_id=${enc}`,
-    `/api/submission?id=${enc}`
+    `/api/admin/submission?submission_id=${enc}`,
+    `/api/admin/submission?id=${enc}`
   ];
 
-  let lastSeen = null;
   let lastErr;
-
   for (const url of urls) {
     try {
       const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) continue;
 
-      const item = pickItemFromResponse(j);
+      const item = j?.item ?? j?.submission ?? j?.data ?? null;
       if (item && typeof item === 'object') {
-        // annotate for diagnostics (non-enumerable so it won’t leak into UI)
         try {
           Object.defineProperty(item, '__details_source', { value: url, enumerable: false });
           window.__lastSubDetailsURL = url;
           window.__lastSubDetails = item;
         } catch {}
-
-        if (hasAddress(item)) return item; // ✅ prefer a payload that contains shipping
-        if (!lastSeen) lastSeen = item;    // remember first good object as fallback
+        return item; // return even if it doesn't contain address fields
       }
     } catch (e) {
       lastErr = e;
     }
   }
 
-  if (lastSeen) return lastSeen;
   throw new Error(lastErr?.message || 'Failed to load submission details');
 }
 
