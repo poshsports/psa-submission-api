@@ -104,3 +104,27 @@ export async function logout() {
     });
   } catch {}
 }
+
+// Fetch a FULL submission record suitable for the details sheet (includes shipping)
+export async function fetchSubmissionDetails(id) {
+  const urls = [
+    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,      // admin details (preferred)
+    `/api/admin/submissions/${encodeURIComponent(id)}`,               // REST-style admin details
+    `/api/submissions/${encodeURIComponent(id)}`,                     // non-admin details (legacy)
+    `/api/submission?id=${encodeURIComponent(id)}`                    // non-admin query (legacy)
+  ];
+
+  let lastErr;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) continue;
+
+      // normalize common shapes
+      const item = j.item ?? j.submission ?? j.data ?? (j.ok === true ? j : null);
+      if (item && typeof item === 'object') return item;
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error(lastErr?.message || 'Failed to load submission details');
+}
