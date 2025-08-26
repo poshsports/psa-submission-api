@@ -1,6 +1,8 @@
 // GET /api/admin/submissions
-// Reads from Supabase table `psa_submissions` (or SUBMISSIONS_TABLE if set)
-// Supports ?q=search&status=pending_payment&page=1&limit=25
+// Reads from Supabase view `admin_submissions_v` (joined with latest group)
+// Supports ?q=search&status=pending_payment,page=1,limit=50
+
+import { sb } from '../_util/supabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -13,108 +15,92 @@ export default async function handler(req, res) {
   const authed = cookie.split(';').some(v => v.trim().startsWith('psa_admin=1'));
   if (!authed) return res.status(401).json({ ok: false, error: 'unauthorized' });
 
-  const URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  if (!URL || !KEY) {
-    return res.status(500).json({ ok: false, error: 'missing_supabase_env' });
-  }
-
-  const TABLE = process.env.SUBMISSIONS_TABLE || 'psa_submissions';
-
-  // --- filters / paging
-  const q = String(req.query.q || '').trim().toLowerCase();
-  const status = String(req.query.status || '').trim(); // e.g. pending_payment | submitted | submitted_paid
-  const page = Math.max(1, parseInt(req.query.page || '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '25', 10)));
-  const offset = (page - 1) * limit;
-
-  // columns we actually display in admin
-  const selectCols = [
-    'submission_id',
-    'created_at',
-    'customer_email',
-    'cards',
-    'evaluation',
-    'status',
-    'grading_service',
-    'paid_at_iso',
-    'paid_amount',
-    'eval_line_subtotal',
-    'shopify_order_id',
-    'shopify_order_number',
-    'shopify_order_name',
-    'shop_domain',
-    'totals'
-  ].join(',');
-
-  // base query
-  let qs = `select=${encodeURIComponent(selectCols)}&order=created_at.desc&limit=${limit}&offset=${offset}`;
-
-  // status filter
-  if (status) {
-    qs += `&status=eq.${encodeURIComponent(status)}`;
-  }
-
-  // search on submission_id or customer_email
-  if (q) {
-    const orExpr = `or=(submission_id.ilike.*${q}*,customer_email.ilike.*${q}*)`;
-    qs += `&${orExpr}`;
-  }
-
-  const endpoint = `${URL.replace(/\/+$/, '')}/rest/v1/${encodeURIComponent(TABLE)}?${qs}`;
-
   try {
-    const r = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        apikey: KEY,
-        Authorization: `Bearer ${KEY}`,
-        Prefer: 'count=exact',
-        Accept: 'application/json'
-      }
-    });
+    const supabase = sb();
 
-    const txt = await r.text();
-    let rows = [];
-    try { rows = JSON.parse(txt); } catch {}
+    // Query params
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const q = (url.searchParams.get('q') || '').trim();
+    const statusParam = (url.searchParams.get('status') || '').trim();
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get('limit') || '50', 10)));
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    if (!r.ok) {
-      return res.status(r.status).json({ ok: false, error: 'supabase_error', detail: txt });
+    // Base select from the view
+    let query = supabase
+      .from('admin_submissions_v')
+      .select(
+        `
+        submission_id,
+        customer_email,
+        status,
+        cards,
+        evaluation,
+        totals,
+        grading_service,
+        created_at,
+        submitted_at_iso,
+        paid_at_iso,
+        paid_amount,
+        shopify_order_name,
+        shop_domain,
+        last_updated_at,
+        group_id,
+        group_code
+      `,
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    // Search: submission_id or customer_email
+    if (q) {
+      const like = `%${q}%`;
+      query = query.or(`submission_id.ilike.${like},customer_email.ilike.${like}`);
     }
 
-    // parse total from Content-Range: "0-24/123"
-    const contentRange = r.headers.get('content-range') || '';
-    const totalStr = contentRange.split('/')[1] || '0';
-    const total = Math.max(0, parseInt(totalStr, 10) || 0);
+    // Status filter: comma-separated
+    if (statusParam) {
+      const statuses = statusParam.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length) query = query.in('status', statuses);
+    }
 
-    // map rows to the shape the admin UI expects
-    const items = (Array.isArray(rows) ? rows : []).map(row => ({
-      submission_id: row.submission_id || null,
-      customer_email: row.customer_email || null,
-      cards: row.cards ?? (Array.isArray(row.card_info) ? row.card_info.length : null),
+    const { data, error, count } = await query;
+    if (error) {
+      console.error('[admin/submissions] db_error:', error);
+      return res.status(500).json({ ok: false, error: 'db_error' });
+    }
+
+    // Normalize minimally; keep existing keys; add group fields
+    const items = (data || []).map(row => ({
+      submission_id: row.submission_id ?? null,
+      customer_email: row.customer_email ?? null,
+      status: row.status ?? null,
+      cards: row.cards ?? 0,
       evaluation: row.evaluation ?? 0,
       totals: row.totals ?? null,
-      status: row.status ?? null,
       grading_service: row.grading_service ?? null,
       created_at: row.created_at ?? null,
-      // NOTE: we intentionally removed last_updated_at; use created_at/paid_at_iso instead.
+      submitted_at_iso: row.submitted_at_iso ?? null,
       paid_at_iso: row.paid_at_iso ?? null,
       paid_amount: row.paid_amount ?? null,
-      eval_line_subtotal: row.eval_line_subtotal ?? null,
-      shopify_order_id: row.shopify_order_id ?? null,
-      shopify_order_number: row.shopify_order_number ?? null,
       shopify_order_name: row.shopify_order_name ?? null,
-      shop_domain: row.shop_domain ?? null
+      shop_domain: row.shop_domain ?? null,
+      last_updated_at: row.last_updated_at ?? null,
+      group_id: row.group_id ?? null,
+      group_code: row.group_code ?? null
     }));
 
     return res.status(200).json({
       ok: true,
       page,
       limit,
-      total,
+      total: typeof count === 'number' ? count : items.length,
       items
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: 'fetch_failed', detail: String(e) });
+    console.error('[admin/submissions] server_error:', e);
+    return res.status(500).json({ ok: false, error: 'server_error' });
   }
 }
