@@ -3,8 +3,8 @@ import { $ } from './util.js';
 import { COLUMNS, defaultOrder, defaultHidden } from './columns.js';
 import * as tbl from './table.js';
 
-const LS_VIEWS = 'psa_admin_table_views_v1';
-const LS_CUR   = 'psa_admin_current_view';
+const LS_VIEWS = 'psa_admin_table_views_v2';
+const LS_CUR   = 'psa_admin_current_view_v2';
 // ----- per-user scoping (forward-compatible) -----
 function getUserId(){
   const m1 = document.cookie.match(/(?:^|;\s*)psa_admin_uid=([^;]+)/);
