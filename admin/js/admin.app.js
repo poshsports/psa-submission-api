@@ -492,11 +492,12 @@ function closeSubmissionDetails() {
 }
 
 // --- helpers for rendering ---
+// --- helpers for rendering ---
 function renderAddress(r) {
-  // 1) If backend gives a single formatted string (or array of lines), use it.
-  const directVal = [r.ship_to, r.shipping_address, r.shopify_shipping_address, r.ship_address, r.address]
+  // 1) Direct string or array (use immediately)
+  const direct = [r.ship_to, r.shipping_address, r.shopify_shipping_address, r.ship_address, r.address]
     .find(v => typeof v === 'string' && v.trim());
-  if (directVal) return `<address class="shipto">${escapeHtml(directVal)}</address>`;
+  if (direct) return `<address class="shipto">${escapeHtml(direct)}</address>`;
 
   const directArr = [r.ship_to, r.shipping_address, r.shopify_shipping_address, r.ship_address, r.address]
     .find(v => Array.isArray(v) && v.length && v.some(s => String(s).trim()));
@@ -504,44 +505,55 @@ function renderAddress(r) {
     return `<address class="shipto">${directArr.map(s => escapeHtml(String(s))).join('<br>')}</address>`;
   }
 
-  // 2) Common nested objects we see in different sources
-  const nested = ['shipping_address','shopify_shipping_address','ship_address','address','shipping','shippingAddress']
-    .map(k => r?.[k])
-    .find(v => v && typeof v === 'object' && !Array.isArray(v)) || null;
+  // 2) Look for a nested object in common places
+  const nested =
+    ['shipping_address','shopify_shipping_address','ship_address','address','shipping','shippingAddress']
+      .map(k => r?.[k])
+      .find(v => v && typeof v === 'object' && !Array.isArray(v)) || null;
 
   const pick = (...vals) => {
     for (const v of vals) if (v != null && String(v).trim() !== '') return String(v).trim();
     return '';
   };
 
-  // ---- NAME ----
+  // generic key finder as a last-resort (handles weird key names)
+  const findKey = (obj, rx) => {
+    if (!obj) return '';
+    for (const [k, v] of Object.entries(obj)) {
+      if (rx.test(k) && v != null && String(v).trim() !== '') return String(v).trim();
+    }
+    return '';
+  };
+
   const name = pick(
     r.ship_name, r.shipping_name, r.ship_to_name,
     r.customer_name, r.name,
     nested?.name,
     (nested?.first_name && nested?.last_name) ? `${nested.first_name} ${nested.last_name}` : '',
-    nested?.recipient, nested?.full_name, nested?.contact_name
+    nested?.recipient, nested?.full_name, nested?.contact_name,
+    findKey(nested, /name|recipient|contact/i)
   );
 
-  // ---- ADDRESS LINES ----
   const a1 = pick(
     r.ship_addr1, r.ship_address1, r.address1,
-    nested?.address1, nested?.address_line1, nested?.line1, nested?.addr1, nested?.street1, nested?.street_address1,
-    nested?.street
+    nested?.address1, nested?.address_line1, nested?.line1, nested?.addr1,
+    nested?.street1, nested?.street_address1, nested?.street,
+    findKey(nested, /address.?1|line.?1|addr1|street(_address)?1?|address_1/i)
   );
 
   const a2Raw = pick(
     r.ship_addr2, r.ship_address2, r.address2,
     nested?.address2, nested?.address_line2, nested?.line2,
-    nested?.street2, nested?.unit, nested?.apt, nested?.apartment, nested?.suite
+    nested?.street2, nested?.unit, nested?.apt, nested?.apartment, nested?.suite,
+    findKey(nested, /address.?2|line.?2|addr2|street2|suite|unit|apt|apartment|address_2/i)
   );
   const a2 = a2Raw && /^[0-9A-Za-z\-]+$/.test(a2Raw) && (nested?.suite || /suite|unit|apt|apartment/i.test(a2Raw) === false)
     ? `Suite ${a2Raw}` : a2Raw;
 
-  const city  = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality);
-  const state = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code);
-  const zip   = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.zip_code, nested?.postal, nested?.postal_code, nested?.postalCode);
-  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code, nested?.countryCode);
+  const city    = pick(r.ship_city,  r.city,  nested?.city,  nested?.town, nested?.locality, findKey(nested, /city|town|locality/i));
+  const state   = pick(r.ship_state, r.state, nested?.state, nested?.region, nested?.province, nested?.state_code, nested?.province_code, findKey(nested, /state|region|prov/i));
+  const zip     = pick(r.ship_zip,   r.zip,   nested?.zip,   nested?.zip_code, nested?.postal, nested?.postal_code, nested?.postalCode, findKey(nested, /(postal|zip)/i));
+  const country = pick(r.ship_country, r.country, nested?.country, nested?.country_code, nested?.countryCode, findKey(nested, /country/i));
 
   const parts = [name, a1, a2, [city, state, zip].filter(Boolean).join(', '), country].filter(Boolean);
   if (!parts.length) return '';
@@ -800,18 +812,7 @@ async function loadReal(){
 
   try {
     let items = await fetchSubmissions(); // fetch all; filter client-side
-    // DEBUG: peek at group fields coming from the API
-if (Array.isArray(items) && items.length) {
-  const probe = items.slice(0, 5).map(s => ({
-    id: s.submission_id || s.id,
-    // what the backend might call it:
-    group_code: s.group_code ?? s.group?.code ?? s.group ?? null,
-    // keep raw keys to eyeball quickly
-    has_group_code_key: Object.prototype.hasOwnProperty.call(s, 'group_code'),
-    has_group_key: Object.prototype.hasOwnProperty.call(s, 'group'),
-  }));
-  console.table(probe);
-}
+   
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
