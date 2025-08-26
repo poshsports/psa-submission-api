@@ -22,12 +22,7 @@ function hasAddress(o) {
   ];
   for (const n of nests) {
     if (!n || typeof n !== 'object') continue;
-    if (
-      n.address1 || n.address_line1 || n.line1 || n.street || n.street1 ||
-      n.city || n.town || n.locality ||
-      n.region || n.state || n.province ||
-      n.postal || n.postal_code || n.zip || n.zip_code
-    ) {
+    if (n.address1 || n.line1 || n.street || n.city || n.region || n.state || n.postal_code || n.zip) {
       return true;
     }
   }
@@ -38,19 +33,34 @@ function hasAddress(o) {
 
 function pickItemFromResponse(j) {
   // normalize common shapes coming from different endpoints
-  return j?.item ?? j?.submission ?? j?.data ?? (j?.ok === true ? j?.item ?? j : null);
+  return j?.item ?? j?.submission ?? j?.data ?? null;
 }
 
 // ---- Submissions list ------------------------------------------------------
-// ---- Single submission (details with shipping) -----------------------------
-export async function fetchSubmissionDetails(id) {
-  const url = `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`;
-  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to load submission details');
-  return j.item; // { ...plus ship_to or shipping_address when the server provides it }
-}
+export async function fetchSubmissions(q = '') {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
 
+  const url = params.toString()
+    ? `/api/admin/submissions?${params.toString()}`
+    : `/api/admin/submissions`;
+
+  const res = await fetch(url, {
+    cache: 'no-store',
+    credentials: 'same-origin'
+  });
+
+  const j = await res.json().catch(() => ({}));
+
+  if (!res.ok || j.ok !== true) {
+    throw new Error(j.error || 'Failed to load');
+  }
+
+  const items = Array.isArray(j.items) ? j.items : [];
+  // quick debug hook when you need it (does not log to console)
+  window.__lastAdminFetch = j; // { ok, items, page, total, ... }
+  return items;
+}
 
 // ---- Groups (create / add / read) -----------------------------------------
 export async function createGroup({ code = null, status = 'Draft', notes = null } = {}) {
@@ -124,37 +134,34 @@ export async function fetchSubmission(id) {
 
 // ---- Single submission (details with shipping) -----------------------------
 export async function fetchSubmissionDetails(id) {
-  const enc = encodeURIComponent(id);
-
-  // Only hit the admin details endpoint; avoid noisy legacy routes.
   const urls = [
-    `/api/admin/submission?submission_id=${enc}&full=1`,
-    `/api/admin/submission?id=${enc}&full=1`,
-    `/api/admin/submission?submission_id=${enc}`,
-    `/api/admin/submission?id=${enc}`
+    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`, // preferred: full admin payload
+    `/api/admin/submissions/${encodeURIComponent(id)}`,          // REST-style admin
+    `/api/submissions/${encodeURIComponent(id)}`,                // legacy non-admin
+    `/api/submission?id=${encodeURIComponent(id)}`               // legacy query
   ];
 
+  let lastSeen = null;
   let lastErr;
+
   for (const url of urls) {
     try {
       const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) continue;
 
-      const item = j?.item ?? j?.submission ?? j?.data ?? null;
+      const item = pickItemFromResponse(j);
       if (item && typeof item === 'object') {
-        try {
-          Object.defineProperty(item, '__details_source', { value: url, enumerable: false });
-          window.__lastSubDetailsURL = url;
-          window.__lastSubDetails = item;
-        } catch {}
-        return item; // return even if it doesn't contain address fields
+        try { Object.defineProperty(item, '__details_source', { value: url, enumerable: false }); } catch {}
+        if (hasAddress(item)) return item; // only accept when we see address fields
+        if (!lastSeen) lastSeen = item;    // keep a valid fallback
       }
     } catch (e) {
       lastErr = e;
     }
   }
 
+  if (lastSeen) return lastSeen;
   throw new Error(lastErr?.message || 'Failed to load submission details');
 }
 
