@@ -42,30 +42,15 @@ function pickItemFromResponse(j) {
 }
 
 // ---- Submissions list ------------------------------------------------------
-export async function fetchSubmissions(q = '') {
-  const params = new URLSearchParams();
-  if (q) params.set('q', q);
-
-  const url = params.toString()
-    ? `/api/admin/submissions?${params.toString()}`
-    : `/api/admin/submissions`;
-
-  const res = await fetch(url, {
-    cache: 'no-store',
-    credentials: 'same-origin'
-  });
-
+// ---- Single submission (details with shipping) -----------------------------
+export async function fetchSubmissionDetails(id) {
+  const url = `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`;
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
   const j = await res.json().catch(() => ({}));
-
-  if (!res.ok || j.ok !== true) {
-    throw new Error(j.error || 'Failed to load');
-  }
-
-  const items = Array.isArray(j.items) ? j.items : [];
-  // quick debug hook when you need it (does not log to console unless you inspect it)
-  try { window.__lastAdminFetch = j; } catch {}
-  return items;
+  if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to load submission details');
+  return j.item; // { ...plus ship_to or shipping_address when the server provides it }
 }
+
 
 // ---- Groups (create / add / read) -----------------------------------------
 export async function createGroup({ code = null, status = 'Draft', notes = null } = {}) {
