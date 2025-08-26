@@ -824,7 +824,7 @@ async function loadReal(){
   if (err) { err.classList.add('hide'); err.textContent = ''; }
 
   try {
-    const items = await fetchSubmissions(); // fetch all; filter client-side
+    let items = await fetchSubmissions(); // fetch all; filter client-side
     // DEBUG: peek at group fields coming from the API
 if (Array.isArray(items) && items.length) {
   const probe = items.slice(0, 5).map(s => ({
