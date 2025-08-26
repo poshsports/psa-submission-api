@@ -1,6 +1,16 @@
 import { fmtDate, fmtCode, fmtNum, fmtMoney } from './util.js';
 
 export const COLUMNS = [
+    {
+    key: 'group_code',
+    label: 'Group #',
+    sortable: true,
+    align: 'left',
+    format: (val) => {
+      const v = (val == null || String(val).trim() === '') ? '---' : String(val).trim();
+      return v; // table.js will escape
+    }
+  },
   { key:'created_at',          label:'Created',          sortable:true,  align:'left',  format: fmtDate },
   { key:'submission_id',       label:'Submission',       sortable:true,  align:'left',  format: fmtCode },
   { key:'customer_email',      label:'Email',            sortable:true,  align:'left' },
