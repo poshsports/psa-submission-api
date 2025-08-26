@@ -165,6 +165,17 @@ export async function fetchSubmissionDetails(id) {
   throw new Error(lastErr?.message || 'Failed to load submission details');
 }
 
+export async function deleteGroup(code) {
+  const res = await fetch(`/api/groups/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin'
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.ok !== true) throw new Error(j.message || j.error || 'Delete failed');
+  return j; // { ok:true, code, unlinked_submissions, unlinked_cards }
+}
+
+
 // ---- POST logout; ignore result --------------------------------------------
 export async function logout() {
   try {
