@@ -467,6 +467,28 @@ function eligibleIdsFromList(ids){
   return { eligibleIds, skipped };
 }
 
+function extractAddCounts(result, fallbackSubs = 0){
+  const addedSubs = Number(
+    result?.added_submissions ??
+    result?.added?.submissions ??
+    result?.submissions_added ??
+    result?.submissions ??
+    result?.data?.added_submissions ??
+    fallbackSubs ?? 0
+  );
+
+  const addedCards = Number(
+    result?.added_cards ??
+    result?.added?.cards ??
+    result?.cards_added ??
+    result?.cards ??
+    result?.data?.added_cards ??
+    0
+  );
+
+  return { addedSubs, addedCards };
+}
+
 // Update the drawer UI counts & enable/disable buttons.
 // Returns the same object as splitSelectionByEligibility().
 function updateAddGroupPanelUI(){
@@ -717,8 +739,8 @@ function renderGroupModalHome(preselectedIds){
     try {
       const group = await createGroup({ notes }); // server assigns code, Draft by default
       const result = await addToGroup(group.code, eligibleIds);
-      const msg = `Created ${group.code}\nAdded ${result.added_submissions} submissions and ${result.added_cards} cards.`;
-      alert(msg);
+      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length);
+      alert(`Created ${group.code}\nAdded ${addedSubs} submissions and ${addedCards} cards.`);
       closeGroupModal();
       loadReal?.();
     } catch (e) {
@@ -753,7 +775,8 @@ function renderGroupModalHome(preselectedIds){
 
     try {
       const result = await addToGroup(chosenCode, eligibleIds);
-      alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${chosenCode}.`);
+      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length);
+      alert(`Added ${addedSubs} submissions and ${addedCards} cards to ${chosenCode}.`);
       closeGroupModal();
       loadReal?.();
     } catch (e) {
