@@ -75,12 +75,12 @@ export function normalizeRow(r){
     r.submitted_at_iso ||
     r.submitted_at ||
     '';
-  
-  const group_code =
-    src.group_code ??
-    extractGroupCode(src) ??
-    null;
 
+  // ✅ FIX: use r (not src) and compute once
+  const group_code =
+    r.group_code ??
+    extractGroupCode(r) ??
+    null;
 
   const grading_service = String(
     r.grading_service ?? r.grading_services ?? r.grading_servi ?? r.service ?? r.grading ?? ''
@@ -98,12 +98,9 @@ export function normalizeRow(r){
     created_at,
     paid_at_iso: r.paid_at_iso || '',
     paid_amount: Number(r.paid_amount || 0) || 0,
-        shopify_order_name: r.shopify_order_name || '',
-    group_code:
-      r.group_code ||            // preferred if backend sends it directly
-      r.group?.code ||           // if backend nests it
-      r.group ||                 // if backend already sends "GRP-0001" as "group"
-      null,
+    shopify_order_name: r.shopify_order_name || '',
+    // ✅ use the computed value
+    group_code
   };
 
   // cache parsed timestamp for filtering/sorting
@@ -195,7 +192,8 @@ export function applyFilters() {
     if (q) {
       const matchText =
         (r.customer_email && r.customer_email.toLowerCase().includes(q)) ||
-        (r.submission_id && String(r.submission_id).toLowerCase().includes(q));
+        (r.submission_id && String(r.submission_id).toLowerCase().includes(q)) ||
+        (r.group_code && String(r.group_code).toLowerCase().includes(q)); // ✅ allow searching by group
       if (!matchText) return false;
     }
 
