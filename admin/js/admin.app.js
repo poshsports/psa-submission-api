@@ -794,6 +794,31 @@ function updateCountPill(){
   if (pill) pill.textContent = String(tbl.viewRows.length);
 }
 
+async function hydrateGroupCodes(items){
+  const out = [];
+  for (const s of items) {
+    // if the list item already has a group, keep it
+    if (s.group_code || (s.group && (s.group.code || typeof s.group === 'string'))) {
+      out.push(s);
+      continue;
+    }
+    try {
+      const id = s.submission_id || s.id;
+      const full = await fetchSubmission(id);
+      const gc =
+        full.group_code ??
+        full.group?.code ??
+        (typeof full.group === 'string' ? full.group : null) ??
+        null;
+      if (gc) s.group_code = gc; // attach for normalizeRow
+    } catch (_) {
+      // ignore failures; row will just show ---
+    }
+    out.push(s);
+  }
+  return out;
+}
+
 async function loadReal(){
   const err = $('subsErr');
   if (err) { err.classList.add('hide'); err.textContent = ''; }
@@ -812,6 +837,7 @@ if (Array.isArray(items) && items.length) {
   }));
   console.table(probe);
 }
+    items = await hydrateGroupCodes(items);
     tbl.setRows(items.map(tbl.normalizeRow));
     buildServiceOptions();
 
