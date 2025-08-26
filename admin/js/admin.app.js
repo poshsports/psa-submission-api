@@ -339,10 +339,78 @@ function currentVisibleKeys(){
   return ths.map(th => th.dataset.key);
 }
 
+// ===== simple selection (checkboxes) =====
+const __selectedSubs = new Set();
+window.__selectedSubs = __selectedSubs; // dev peek
+
+function ensureSelectionColumn() {
+  const thead = document.getElementById('subsHead');
+  const tbody = document.getElementById('subsTbody');
+  if (!thead || !tbody) return;
+
+  // Header checkbox (select all)
+  let th0 = thead.querySelector('th.__selcol');
+  if (!th0) {
+    th0 = document.createElement('th');
+    th0.className = '__selcol';
+    th0.style.width = '36px';
+    th0.style.textAlign = 'center';
+    th0.innerHTML = `<input id="__selAll" type="checkbox" aria-label="Select all">`;
+
+    const firstTh = thead.querySelector('th');
+    if (firstTh) firstTh.parentNode.insertBefore(th0, firstTh);
+    else thead.appendChild(th0);
+
+    const selAll = th0.querySelector('#__selAll');
+    selAll?.addEventListener('change', () => {
+      const rows = tbody.querySelectorAll('tr[data-id]');
+      rows.forEach(tr => {
+        const id = tr.getAttribute('data-id');
+        const cb = tr.querySelector('input.__selrow');
+        if (!id || !cb) return;
+        cb.checked = selAll.checked;
+        if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+      });
+    });
+  }
+
+  // Row checkboxes
+  const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+  rows.forEach(tr => {
+    const id = tr.getAttribute('data-id');
+    if (!id) return;
+
+    let td0 = tr.querySelector('td.__selcol');
+    if (!td0) {
+      td0 = document.createElement('td');
+      td0.className = '__selcol';
+      td0.style.textAlign = 'center';
+      td0.innerHTML = `<input type="checkbox" class="__selrow" aria-label="Select row">`;
+      const firstTd = tr.querySelector('td');
+      if (firstTd) tr.insertBefore(td0, firstTd); else tr.appendChild(td0);
+
+      const cb = td0.querySelector('input.__selrow');
+      cb.checked = __selectedSubs.has(id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+      });
+    } else {
+      // keep in sync if table re-rendered
+      const cb = td0.querySelector('input.__selrow');
+      if (cb) cb.checked = __selectedSubs.has(id);
+    }
+  });
+}
+
+function getSelectedSubmissionIds() {
+  return Array.from(__selectedSubs);
+}
+
 function showSubmissionsView(){
   setTopbarTitle('Active submissions'); // purely cosmetic on this page
-  // Render/refresh table safely (explicit call; no hidden Groups view anymore)
   tbl.renderTable(currentVisibleKeys());
+  // after each render, ensure selection column exists
+  setTimeout(ensureSelectionColumn, 0);
 }
 
 // ===== Submission details drawer =====
@@ -716,6 +784,7 @@ async function loadReal(){
 
     views.applyView?.(views.currentView);
     runFilter();
+    setTimeout(ensureSelectionColumn, 0);
   } catch (e) {
     if (err) { err.textContent = e.message || 'Load failed'; err.classList.remove('hide'); }
     console.error('[admin] loadReal error:', e);
@@ -779,11 +848,13 @@ function wireUI(){
     tbl.prevPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
+    setTimeout(ensureSelectionColumn, 0);
   });
   $('next-page')?.addEventListener('click', () => {
     tbl.nextPage();
     tbl.renderTable(currentVisibleKeys());
     updateCountPill();
+    setTimeout(ensureSelectionColumn, 0);
   });
 
   $('btnColumns')?.addEventListener('click', views.openColumnsPanel);
@@ -803,36 +874,42 @@ function wireUI(){
       b.type = 'button';
       b.textContent = 'Add to group…';
       b.style.marginLeft = '8px';
-            b.addEventListener('click', async () => {
-        try {
-          // Choose: create new OR add to existing
-          const choice = prompt('Type "new" to create a group,\nOR enter an existing group code/UUID (e.g., GRP-0002):');
-          if (!choice) return;
+b.addEventListener('click', async () => {
+  try {
+    const preselected = getSelectedSubmissionIds();
+    const choice = prompt(
+      preselected.length
+        ? `Type "new" to create a group,\nOR enter an existing group code/UUID (selected: ${preselected.join(', ')})`
+        : 'Type "new" to create a group,\nOR enter an existing group code/UUID (e.g., GRP-0002):'
+    );
+    if (!choice) return;
 
-          const { addToGroup, createGroup } = await import('./api.js');
+    const { addToGroup, createGroup } = await import('./api.js');
 
-          // Determine target group
-          let groupCode = null;
-          if (choice.trim().toLowerCase() === 'new') {
-            const notes = prompt('Notes for the new group? (optional)') || null;
-            const group = await createGroup({ notes }); // status defaults to Draft
-            groupCode = group.code;
-            alert(`Created group ${groupCode}`);
-          } else {
-            groupCode = choice.trim();
-          }
+    let groupCode = null;
+    if (choice.trim().toLowerCase() === 'new') {
+      const notes = prompt('Notes for the new group? (optional)') || null;
+      const group = await createGroup({ notes }); // status defaults to Draft
+      groupCode = group.code;
+      alert(`Created group ${groupCode}`);
+    } else {
+      groupCode = choice.trim();
+    }
 
-          // Collect submission IDs (CSV)
-          const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
-          if (!csv) return;
-          const submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
+    // Use selected submissions if any; else prompt for CSV
+    let submissionIds = preselected;
+    if (!submissionIds.length) {
+      const csv = prompt('Submission IDs (comma-separated, e.g., psa-111, psa-161):');
+      if (!csv) return;
+      submissionIds = csv.split(',').map(s => s.trim()).filter(Boolean);
+    }
 
-          const result = await addToGroup(groupCode, submissionIds);
-          alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${groupCode}`);
-        } catch (e) {
-          alert(`Add failed: ${e.message}`);
-        }
-      });
+    const result = await addToGroup(groupCode, submissionIds);
+    alert(`Added ${result.added_submissions} submissions and ${result.added_cards} cards to ${groupCode}`);
+  } catch (e) {
+    alert(`Add failed: ${e.message}`);
+  }
+});
       toolbar.appendChild(b);
     }
   } catch {}
