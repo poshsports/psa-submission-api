@@ -124,10 +124,11 @@ export function showGroupsView() {
 // ========== List View ==========
 async function renderList(root) {
   root.innerHTML = `
-    <div class="topbar">
-      <h2 style="margin:0">Groups</h2>
-      <div class="note">Read-only (create/add/remove coming later)</div>
-    </div>
+    <div class="toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+  <h2 style="margin:0">Groups</h2>
+  <span class="note">Select a row, then click “Delete group…” in the header</span>
+</div>
+
 
     <div class="filters" style="display:flex;gap:10px;align-items:center;margin:12px 0 8px">
       <input id="gq" type="text" placeholder="Search code or notes…" value="${escapeHtml(state.q)}" style="min-width:220px">
