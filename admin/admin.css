@@ -387,6 +387,11 @@ button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; pad
 #group-body .gm-row:hover{background:rgba(0,0,0,.045);}
 #group-body .gm-row.selected{background:#e6f0ff;}
 
+/* highlight selected row in Groups list */
 .data-table tbody tr.selected { background: #fff4f4; }
+
+/* danger button style used by Delete group… */
 .btn.danger { background:#ffecec; color:#a11; border-color:#f5c2c7; }
+.btn.danger:disabled { opacity:.5; cursor:not-allowed; }
+
 
