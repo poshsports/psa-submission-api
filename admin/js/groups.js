@@ -1,5 +1,5 @@
 import { $, debounce, escapeHtml } from './util.js';
-import { fetchGroups, logout } from './api.js';
+import { fetchGroups, logout, deleteGroup } from './api.js';
 
 
 // ========== Auth & sidebar wiring (standalone Groups page) ==========
@@ -34,6 +34,57 @@ let state = {
 };
 // sequence guard to avoid stale async renders clobbering the UI
 let listReqSeq = 0;
+// ===== selection & delete helpers (header Delete button) =====
+let selectedGroup = { id: null, code: '', members: 0 };
+
+const btnDelete = () => document.getElementById('btnDeleteGroup');
+
+function enableDelete(enabled){
+  const b = btnDelete(); if (b) b.disabled = !enabled;
+}
+
+function clearSelectionUI(){
+  document.querySelectorAll('#gtbody tr.selected').forEach(tr => tr.classList.remove('selected'));
+  selectedGroup = { id: null, code: '', members: 0 };
+  enableDelete(false);
+}
+
+function wireDeleteButtonOnce(){
+  const b = btnDelete();
+  if (!b || b.__wired) return;
+  b.__wired = true;
+  b.addEventListener('click', onDeleteClicked);
+}
+
+async function onDeleteClicked(){
+  const { id, code, members } = selectedGroup;
+  if (!id || !code) return;
+
+  const typed = prompt(
+    `Delete ${code}?\n\n` +
+    `This will NOT delete submissions or cards.\n` +
+    `It will unlink ${members} submission${members===1?'':'s'} and clear their group field.\n\n` +
+    `Type ${code} to confirm.`
+  );
+  if (typed !== code) return;
+
+  const b = btnDelete(); if (b) b.disabled = true;
+  try {
+    // NOTE: you must export deleteGroup from api.js and import it at top:
+    // import { fetchGroups, logout, deleteGroup } from './api.js';
+    const res = await deleteGroup({ id, code });
+    const unlinkedSubs  = Number(res.unlinked_submissions ?? res.submissions ?? members ?? 0);
+    const unlinkedCards = Number(res.unlinked_cards ?? res.cards ?? 0);
+    alert(`Deleted ${code}.\nUnlinked ${unlinkedSubs} submission${unlinkedSubs===1?'':'s'} and ${unlinkedCards} card${unlinkedCards===1?'':'s'}.`);
+
+    await refreshList();
+    clearSelectionUI();
+  } catch (e) {
+    alert(e.message || 'Delete failed.');
+    enableDelete(true);
+  }
+}
+
 
 // --- make the groups table area behave like Active submissions ---
 function ensureScroller() {
@@ -150,6 +201,8 @@ async function renderList(root) {
   });
 
   await refreshList();
+  wireDeleteButtonOnce();
+  enableDelete(!!selectedGroup.id);
 }
 
 function sel(v) { return state.status === v ? 'selected' : ''; }
@@ -214,16 +267,20 @@ async function refreshList() {
       const updated = fmtTs(row.updated_at);
       const created = fmtTs(row.created_at);
 
-      return `
-        <tr class="clickable" data-id="${escapeHtml(id)}" data-code="${code}" title="Open ${code}">
-          <td><strong>${code}</strong></td>
-          <td>${status}</td>
-          <td>${cnt}</td>
-          <td>${notes}</td>
-          <td>${updated}</td>
-          <td>${created}</td>
-        </tr>
-      `;
+       return `
+            <tr class="selectable" tabindex="0"
+                data-id="${escapeHtml(id)}"
+                data-code="${code}"
+                data-members="${cnt}"
+                title="Double-click to open ${code}">
+              <td><strong>${code}</strong></td>
+              <td>${status}</td>
+              <td data-col="members">${cnt}</td>
+              <td>${notes}</td>
+              <td>${updated}</td>
+              <td>${created}</td>
+            </tr>
+          `;
     }).join('');
 
     $body.innerHTML = rows;
@@ -248,18 +305,38 @@ async function refreshList() {
       }
     }
 
-    // Row click -> detail
-    $body.querySelectorAll('tr.clickable').forEach(tr => {
-      tr.addEventListener('click', () => {
-        const id   = tr.getAttribute('data-id');
-        const code = tr.getAttribute('data-code'); // for display only
-        if (!id) return;
-        state.view = 'detail';
-        state.currentId = id;
-        const root = $('view-groups');
-        if (root) renderDetail(root, id, code);
-      });
-    });
+   // Single-click selects (enables header Delete); double-click opens details
+const selectRow = (tr) => {
+  document.querySelectorAll('#gtbody tr.selected').forEach(x => x.classList.remove('selected'));
+  tr.classList.add('selected');
+  selectedGroup = {
+    id: tr.getAttribute('data-id'),
+    code: tr.getAttribute('data-code'),
+    members: Number(tr.getAttribute('data-members') || 0),
+  };
+  enableDelete(!!selectedGroup.id);
+  tr.focus?.();
+};
+
+const openDetailFromRow = (tr) => {
+  const id = tr.getAttribute('data-id');
+  const code = tr.getAttribute('data-code');
+  if (!id) return;
+  state.view = 'detail';
+  state.currentId = id;
+  const root = $('view-groups');
+  if (root) renderDetail(root, id, code);
+};
+
+$body.querySelectorAll('tr.selectable').forEach(tr => {
+  tr.addEventListener('click', () => selectRow(tr));
+  tr.addEventListener('dblclick', () => openDetailFromRow(tr));
+  tr.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') openDetailFromRow(tr);
+    if (e.key === 'Escape') clearSelectionUI();
+  });
+});
+
 
     ensureScroller();
   } catch (e) {
@@ -471,6 +548,8 @@ function bootGroupsPage(){
     if (loginEl) loginEl.classList.add('hide');
     if (shellEl) shellEl.classList.remove('hide');
     showGroupsView();
+    wireDeleteButtonOnce();
+    enableDelete(false);
   } else {
     window.location.replace('/admin');
   }
