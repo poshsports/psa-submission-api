@@ -166,7 +166,7 @@ export async function fetchSubmissionDetails(id) {
 }
 
 export async function deleteGroup(code) {
-  const res = await fetch(`/api/groups/${encodeURIComponent(code)}`, {
+  const res = await fetch(`/api/admin/groups/${encodeURIComponent(code)}`, {
     method: 'DELETE',
     credentials: 'same-origin'
   });
