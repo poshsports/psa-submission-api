@@ -446,3 +446,32 @@ tr.drop-below { box-shadow: 0  2px 0 0 var(--primary, #2563eb) inset; }
   color: #667085;
 }
 
+/* --- Groups: card reordering UI --- */
+#view-groups .order-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#view-groups .drag-handle {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  cursor: grab;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent 0 40%, #ccc 40% 60%, transparent 60% 100%);
+}
+
+#view-groups tr.dragging { opacity: .6; }
+
+/* drop indicators */
+#view-groups tr.drop-above { box-shadow: inset 0 3px 0 0 #a8c7ff; }
+#view-groups tr.drop-below { box-shadow: inset 0 -3px 0 0 #a8c7ff; }
+
+/* small tweak for the ▲ ▼ buttons */
+#view-groups .order-btn {
+  padding: 0 6px;
+  line-height: 1.2;
+}
+
