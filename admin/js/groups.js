@@ -432,7 +432,7 @@ root.innerHTML = `
     // Map submissions for quick lookup (status/email/grading_service fallback)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-   const CARD_COLS = [
+const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
   { label: 'Submission', fmt: (c) => safe(c.submission_id) },
   {
@@ -448,34 +448,37 @@ root.innerHTML = `
     }
   },
   {
-  label: 'Card #',
-  fmt: (c) => {
-    const n = (c.group_card_no ?? null);
-    const txt = (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
-    return `<span class="cardno-read">${txt}</span>`;
-  }
-},
+    label: 'Card #',
+    fmt: (c) => {
+      const n = (c.group_card_no ?? null);
+      const txt = (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
+      return `<span class="cardno-read">${txt}</span>`;
+    }
+  },
   { label: 'Break date',    fmt: (c) => safe(c._break_on || '') },
-  { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
-  { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
+  { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
+  { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
+
+  // ✅ Prefer submission status; fall back to card status
   {
-{
-  label: 'Status',
-  fmt: (c) => {
-    const sid = String(c.submission_id || '');
-    const subStatus = subById.get(sid)?.status;      // ← prefer submission status
-    const raw = subStatus ?? c.status ?? '';
-    return raw ? escapeHtml(prettyStatus(raw)) : '—';
-  }
-}
+    label: 'Status',
+    fmt: (c) => {
+      const sid = String(c.submission_id || '');
+      const subStatus = subById.get(sid)?.status;
+      const raw = subStatus ?? c.status ?? '';
+      return raw ? escapeHtml(prettyStatus(raw)) : '—';
+    },
+  },
+
   {
     label: 'Service',
     fmt: (c) => safe(
       c.grading_service ||
       subById.get(String(c.submission_id))?.grading_service ||
       ''
-    )
+    ),
   },
+
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
 ];
 
