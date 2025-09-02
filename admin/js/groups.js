@@ -556,7 +556,7 @@ rowsData.sort((a, b) => {
         </div>
       `;
       ensureScroller();
-      // --- Step C: Edit / Save / Cancel for Card order ---
+// --- Step C: Edit / Save / Cancel for Card order ---
 const btnEdit   = $('btnEditOrder');
 const btnSave   = $('btnSaveOrder');
 const btnCancel = $('btnCancelOrder');
@@ -566,6 +566,105 @@ const tbodyEl   = tableEl?.querySelector('tbody');
 // use uuid if present, else code (both are accepted by your API)
 const groupKey = (grp?.id || grp?.code || id);
 
+// Helpers
+const rowsSel = 'tr[data-card-id]';
+const by = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const getOrder = () =>
+  by(rowsSel, tbodyEl).map(tr => tr.getAttribute('data-card-id')).filter(Boolean);
+
+function enableSave() {
+  if (btnSave) btnSave.disabled = false;
+}
+
+function refreshVisibleNumbers() {
+  // re-number Card # column 1..N in DOM order
+  const ths = [...tableEl.querySelectorAll('thead th')].map(th => th.textContent.trim().toLowerCase());
+  let cardNoColIdx = ths.findIndex(t => t === 'card #');
+  if (cardNoColIdx < 0) cardNoColIdx = 3; // fallback if label changed
+  const tdSelector = `td:nth-child(${cardNoColIdx + 1})`;
+
+  by(rowsSel, tbodyEl).forEach((tr, i) => {
+    const td = tr.querySelector(tdSelector);
+    if (!td) return;
+    const label = td.querySelector('.ord-index');
+    if (label) label.textContent = String(i + 1);
+  });
+}
+
+function moveRow(tr, dir) {
+  if (!tr || !tbodyEl) return;
+  if (dir < 0) {
+    const prev = tr.previousElementSibling;
+    if (prev) tbodyEl.insertBefore(tr, prev);
+  } else if (dir > 0) {
+    const next = tr.nextElementSibling;
+    if (next) tbodyEl.insertBefore(next, tr);
+  }
+  refreshVisibleNumbers();
+  enableSave();
+}
+
+function wireDnD() {
+  if (!tbodyEl) return;
+
+  let dragging = null;
+
+  by('.drag-handle', tbodyEl).forEach(handle => {
+    handle.setAttribute('draggable', 'true');
+
+    handle.addEventListener('dragstart', (e) => {
+      const tr = e.target.closest('tr');
+      dragging = tr;
+      tr.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', tr.getAttribute('data-card-id') || ''); } catch {}
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    handle.addEventListener('dragend', () => {
+      if (dragging) dragging.classList.remove('dragging');
+      dragging = null;
+      by(rowsSel, tbodyEl).forEach(r => r.classList.remove('drop-above', 'drop-below'));
+    });
+  });
+
+  tbodyEl.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const overTr = e.target.closest('tr');
+    if (!overTr || overTr === dragging) return;
+
+    // decide before/after using mouse Y
+    const rect = overTr.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+
+    by(rowsSel, tbodyEl).forEach(r => r.classList.remove('drop-above', 'drop-below'));
+    overTr.classList.add(before ? 'drop-above' : 'drop-below');
+  });
+
+  tbodyEl.addEventListener('drop', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const overTr = e.target.closest('tr');
+    if (!overTr || overTr === dragging) return;
+
+    const before = overTr.classList.contains('drop-above');
+    overTr.classList.remove('drop-above', 'drop-below');
+
+    if (before) {
+      tbodyEl.insertBefore(dragging, overTr);
+    } else {
+      const next = overTr.nextElementSibling;
+      if (next) tbodyEl.insertBefore(dragging, next);
+      else tbodyEl.appendChild(dragging);
+    }
+
+    dragging.classList.remove('dragging');
+    dragging = null;
+    refreshVisibleNumbers();
+    enableSave();
+  });
+}
+
 function enterEditMode() {
   if (!tbodyEl) return;
 
@@ -574,65 +673,61 @@ function enterEditMode() {
   btnCancel.style.display = '';
   btnSave.disabled = true;
 
-  // Find the index of the "Card #" column robustly (so we avoid relying on nth-child=4)
-const ths = [...tableEl.querySelectorAll('thead th')].map(th => th.textContent.trim().toLowerCase());
-let cardNoColIdx = ths.findIndex(t => t === 'card #'); // 0-based
-if (cardNoColIdx < 0) cardNoColIdx = 3; // fallback to 4th col if label changes
-const tdSelector = `td:nth-child(${cardNoColIdx + 1})`;
+  // Find Card # column robustly
+  const ths = [...tableEl.querySelectorAll('thead th')].map(th => th.textContent.trim().toLowerCase());
+  let cardNoColIdx = ths.findIndex(t => t === 'card #');
+  if (cardNoColIdx < 0) cardNoColIdx = 3; // fallback to 4th col
+  const tdSelector = `td:nth-child(${cardNoColIdx + 1})`;
 
-  // Turn the "Card #" cell into a numeric input for each row
-  [...tbodyEl.querySelectorAll('tr')].forEach((tr, index) => {
+  // Replace Card # cells with controls: [▲] [handle] [▼] + live index
+  by(rowsSel, tbodyEl).forEach((tr, i) => {
     const td = tr.querySelector(tdSelector);
     if (!td) return;
-
-    const read = td.querySelector('.cardno-read');
-    const currentTxt = (read ? read.textContent : td.textContent || '').trim();
-    const currentVal = /^\d+$/.test(currentTxt) ? currentTxt : String(index + 1);
-
-    td.innerHTML = `<input class="order-input" type="number" min="1" value="${currentVal}" style="width:70px;text-align:center">`;
+    td.innerHTML = `
+      <div class="order-cell">
+        <button type="button" class="order-btn up" title="Move up">▲</button>
+        <span class="drag-handle" title="Drag to reorder"></span>
+        <button type="button" class="order-btn down" title="Move down">▼</button>
+        <span class="ord-index">${i + 1}</span>
+      </div>
+    `;
   });
 
-  // Any edit enables Save
-  tbodyEl.addEventListener('input', onOrderInput, { passive: true });
-}
+  // Up/Down clicks
+  tbodyEl.addEventListener('click', (e) => {
+    const up = e.target.closest('.order-btn.up');
+    const down = e.target.closest('.order-btn.down');
+    if (up || down) {
+      const tr = e.target.closest('tr');
+      moveRow(tr, up ? -1 : 1);
+    }
+  });
 
-function onOrderInput(e) {
-  if (e.target && e.target.classList.contains('order-input')) {
-    btnSave.disabled = false;
-  }
+  // Keyboard: ArrowUp/ArrowDown on handle moves row
+  tbodyEl.addEventListener('keydown', (e) => {
+    if (!e.target.closest('.drag-handle')) return;
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveRow(e.target.closest('tr'), -1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveRow(e.target.closest('tr'),  1); }
+  });
+
+  // Drag & drop
+  wireDnD();
 }
 
 async function saveOrder() {
   if (!tbodyEl) return;
 
-  // Build rows with the desired order from visible inputs
-  const rows = [...tbodyEl.querySelectorAll('tr')].map((tr, idx) => {
-    const cardId = tr.getAttribute('data-card-id'); // set in row template
-    const input  = tr.querySelector('input.order-input');
-    const n = input ? parseInt(input.value, 10) : Number.POSITIVE_INFINITY;
-    return { id: cardId, n: Number.isFinite(n) ? n : Number.POSITIVE_INFINITY, idx };
-  });
-
-  // Sort by entered number (stable by original index to break ties)
-  rows.sort((a, b) => (a.n - b.n) || (a.idx - b.idx));
-
-  // Build ordered list of card_ids (dedup + drop falsy)
   const seen = new Set();
   const order = [];
-  for (const r of rows) {
-    if (r.id && !seen.has(r.id)) {
-      seen.add(r.id);
-      order.push(r.id);
-    }
+  for (const tr of by(rowsSel, tbodyEl)) {
+    const id = tr.getAttribute('data-card-id');
+    if (id && !seen.has(id)) { seen.add(id); order.push(id); }
   }
-
-  // Guard: avoid empty PATCHs
   if (!order.length) {
     alert('No cards to reorder.');
     return;
   }
 
-  // Prevent double submits while saving
   btnSave.disabled = true;
   btnEdit.disabled = true;
   btnCancel.disabled = true;
@@ -647,16 +742,24 @@ async function saveOrder() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.ok !== true) throw new Error(j.error || 'Reorder failed');
 
-    // Re-render fresh so you see normalized 1..N
+    // Re-render fresh (server will normalize 1..N)
     renderDetail(root, id, codeOut);
   } catch (err) {
     alert(err.message || 'Reorder failed');
-    // Re-enable controls so user can try again
     btnSave.disabled = false;
     btnEdit.disabled  = false;
     btnCancel.disabled = false;
   }
 }
+
+function cancelEdit() {
+  renderDetail(root, id, codeOut); // reload read-only view
+}
+
+btnEdit?.addEventListener('click', enterEditMode);
+btnSave?.addEventListener('click', saveOrder);
+btnCancel?.addEventListener('click', cancelEdit);
+
 
 function cancelEdit() {
   // Re-render to restore read-only state
