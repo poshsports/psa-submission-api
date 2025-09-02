@@ -760,16 +760,6 @@ btnEdit?.addEventListener('click', enterEditMode);
 btnSave?.addEventListener('click', saveOrder);
 btnCancel?.addEventListener('click', cancelEdit);
 
-
-function cancelEdit() {
-  // Re-render to restore read-only state
-  renderDetail(root, id, codeOut);
-}
-
-btnEdit?.addEventListener('click', enterEditMode);
-btnSave?.addEventListener('click', saveOrder);
-btnCancel?.addEventListener('click', cancelEdit);
-
     }
   } catch (e) {
     if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
