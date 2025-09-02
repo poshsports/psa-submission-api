@@ -72,7 +72,7 @@ async function onDeleteClicked(){
   try {
     // NOTE: you must export deleteGroup from api.js and import it at top:
     // import { fetchGroups, logout, deleteGroup } from './api.js';
-    const res = await deleteGroup({ id, code });
+    conconst res = await deleteGroup(code);
     const unlinkedSubs  = Number(res.unlinked_submissions ?? res.submissions ?? members ?? 0);
     const unlinkedCards = Number(res.unlinked_cards ?? res.cards ?? 0);
     alert(`Deleted ${code}.\nUnlinked ${unlinkedSubs} submission${unlinkedSubs===1?'':'s'} and ${unlinkedCards} card${unlinkedCards===1?'':'s'}.`);
