@@ -70,9 +70,9 @@ async function onDeleteClicked(){
 
   const b = btnDelete(); if (b) b.disabled = true;
   try {
-    // NOTE: you must export deleteGroup from api.js and import it at top:
+    // const: you must export deleteGroup from api.js and import it at top:
     // import { fetchGroups, logout, deleteGroup } from './api.js';
-    conconst res = await deleteGroup(code);
+    const res = await deleteGroup(code);
     const unlinkedSubs  = Number(res.unlinked_submissions ?? res.submissions ?? members ?? 0);
     const unlinkedCards = Number(res.unlinked_cards ?? res.cards ?? 0);
     alert(`Deleted ${code}.\nUnlinked ${unlinkedSubs} submission${unlinkedSubs===1?'':'s'} and ${unlinkedCards} card${unlinkedCards===1?'':'s'}.`);
