@@ -467,7 +467,7 @@ root.innerHTML = `
     const raw = subStatus ?? c.status ?? '';
     return raw ? escapeHtml(prettyStatus(raw)) : '—';
   }
-},
+}
   {
     label: 'Service',
     fmt: (c) => safe(
