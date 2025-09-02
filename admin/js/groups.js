@@ -424,42 +424,50 @@ async function renderDetail(root, id, codeHint) {
     // Map submissions for quick lookup (status/email/grading_service fallback)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-    const CARD_COLS = [
-      { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
-      { label: 'Submission', fmt: (c) => safe(c.submission_id) },
-      {
-        label: 'Card',
-        fmt: (c) => {
-          const desc = (c.card_description && String(c.card_description).trim())
-            ? safe(c.card_description) : '';
-          if (desc) return desc;
-          const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
-            .filter(v => v != null && String(v).trim() !== '')
-            .map(v => safe(v));
-          return bits.join(' · ') || '—';
-        }
-      },
-      { label: 'Break date',   fmt: (c) => safe(c._break_on || '') },
-      { label: 'Break #',      fmt: (c) => safe(c.break_number   || '') },
-      { label: 'Break channel',fmt: (c) => safe(c.break_channel  || '') },
-      {
-        label: 'Status',
-        fmt: (c) => safe(
-          c.status ||
-          subById.get(String(c.submission_id))?.status ||
-          ''
-        )
-      },
-      {
-        label: 'Service',
-        fmt: (c) => safe(
-          c.grading_service ||
-          subById.get(String(c.submission_id))?.grading_service ||
-          ''
-        )
-      },
-      { label: 'Notes', fmt: (c) => safe(c.notes || '') },
-    ];
+   const CARD_COLS = [
+  { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
+  { label: 'Submission', fmt: (c) => safe(c.submission_id) },
+  {
+    label: 'Card',
+    fmt: (c) => {
+      const desc = (c.card_description && String(c.card_description).trim())
+        ? safe(c.card_description) : '';
+      if (desc) return desc;
+      const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
+        .filter(v => v != null && String(v).trim() !== '')
+        .map(v => safe(v));
+      return bits.join(' · ') || '—';
+    }
+  },
+  {
+    label: 'Card #',
+    fmt: (c) => {
+      const n = (c.group_card_no ?? null);
+      return (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
+    }
+  },
+  { label: 'Break date',    fmt: (c) => safe(c._break_on || '') },
+  { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
+  { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
+  {
+    label: 'Status',
+    fmt: (c) => safe(
+      c.status ||
+      subById.get(String(c.submission_id))?.status ||
+      ''
+    )
+  },
+  {
+    label: 'Service',
+    fmt: (c) => safe(
+      c.grading_service ||
+      subById.get(String(c.submission_id))?.grading_service ||
+      ''
+    )
+  },
+  { label: 'Notes', fmt: (c) => safe(c.notes || '') },
+];
+
 
     // Build rows: prefer cards; if none, fall back to members/submissions only
     const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
@@ -490,13 +498,20 @@ async function renderDetail(root, id, codeHint) {
         });
 
     // Keep rows aligned to member order, then by card_index if present
-    rowsData.sort((a, b) => {
-      const oa = memberOrder.get(String(a.submission_id)) ?? 0;
-      const ob = memberOrder.get(String(b.submission_id)) ?? 0;
-      if (oa !== ob) return oa - ob;
-      return (a.card_index ?? 0) - (b.card_index ?? 0);
-    });
+rowsData.sort((a, b) => {
+  const ag = (a.group_card_no != null) ? Number(a.group_card_no) : null;
+  const bg = (b.group_card_no != null) ? Number(b.group_card_no) : null;
 
+  // Prefer explicit group numbering when available
+  if (ag != null && bg != null && ag !== bg) return ag - bg;
+
+  // Fallback to previous stable ordering (member order, then card_index)
+  const oa = memberOrder.get(String(a.submission_id)) ?? 0;
+  const ob = memberOrder.get(String(b.submission_id)) ?? 0;
+  if (oa !== ob) return oa - ob;
+  return (a.card_index ?? 0) - (b.card_index ?? 0);
+});
+    
     // Build the table HTML
     const table = `
       <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
