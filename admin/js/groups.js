@@ -605,18 +605,37 @@ function onOrderInput(e) {
 async function saveOrder() {
   if (!tbodyEl) return;
 
-  // Build an array of rows with desired order from the visible inputs
+  // Build rows with the desired order from visible inputs
   const rows = [...tbodyEl.querySelectorAll('tr')].map((tr, idx) => {
-    const cardId = tr.getAttribute('data-card-id'); // set in Step B row template
+    const cardId = tr.getAttribute('data-card-id'); // set in row template
     const input  = tr.querySelector('input.order-input');
     const n = input ? parseInt(input.value, 10) : Number.POSITIVE_INFINITY;
     return { id: cardId, n: Number.isFinite(n) ? n : Number.POSITIVE_INFINITY, idx };
   });
 
-  // Sort by entered number, stable by original index to break ties
+  // Sort by entered number (stable by original index to break ties)
   rows.sort((a, b) => (a.n - b.n) || (a.idx - b.idx));
 
-  const order = rows.map(r => r.id).filter(Boolean);
+  // Build ordered list of card_ids (dedup + drop falsy)
+  const seen = new Set();
+  const order = [];
+  for (const r of rows) {
+    if (r.id && !seen.has(r.id)) {
+      seen.add(r.id);
+      order.push(r.id);
+    }
+  }
+
+  // Guard: avoid empty PATCHs
+  if (!order.length) {
+    alert('No cards to reorder.');
+    return;
+  }
+
+  // Prevent double submits while saving
+  btnSave.disabled = true;
+  btnEdit.disabled = true;
+  btnCancel.disabled = true;
 
   try {
     const res = await fetch(`/api/admin/groups/${encodeURIComponent(groupKey)}/cards/order`, {
@@ -628,10 +647,14 @@ async function saveOrder() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.ok !== true) throw new Error(j.error || 'Reorder failed');
 
-    // Re-render fresh so you see renumbered 1..N
+    // Re-render fresh so you see normalized 1..N
     renderDetail(root, id, codeOut);
   } catch (err) {
     alert(err.message || 'Reorder failed');
+    // Re-enable controls so user can try again
+    btnSave.disabled = false;
+    btnEdit.disabled  = false;
+    btnCancel.disabled = false;
   }
 }
 
