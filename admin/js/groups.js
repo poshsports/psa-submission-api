@@ -377,6 +377,11 @@ root.innerHTML = `
     <button id="btnEditOrder" class="ghost">Edit order</button>
     <button id="btnSaveOrder" class="primary" disabled style="display:none">Save order</button>
     <button id="btnCancelOrder" class="ghost" style="display:none">Cancel</button>
+ <div class="bulk-status" style="display:flex;align-items:center;gap:6px">
+    <label for="bulkStatus" class="note">Set submissions status:</label>
+    <select id="bulkStatus" style="min-width:220px"></select>
+    <button id="applyBulkStatus" class="ghost" disabled>Apply</button>
+ </div>
     <a id="open-subs" href="/admin/index.html">Open Active submissions</a>
   </div>
   <div id="gdetail">Loading…</div>
@@ -556,6 +561,64 @@ rowsData.sort((a, b) => {
         </div>
       `;
       ensureScroller();
+// --- Bulk status (submissions in this group) ---
+const bulkSelect = $('bulkStatus');
+const btnApply   = $('applyBulkStatus');
+
+// Human label mapping
+const STATUS_OPTIONS = [
+  ['received',             'Received (intake complete)'],
+  ['shipped_to_psa',       'Shipped to PSA'],
+  ['in_grading',           'In Grading'],
+  ['graded',               'Graded'],
+  ['shipped_back_to_us',   'Shipped Back to Us'],
+  ['balance_due',          'Balance Due'],
+  ['paid',                 'Paid (final payment received)'],
+  ['shipped_to_customer',  'Shipped to Customer'],
+  ['delivered',            'Delivered to Customer'],
+];
+
+// Populate dropdown
+if (bulkSelect) {
+  bulkSelect.innerHTML = `
+    <option value="">— Select a status —</option>
+    ${STATUS_OPTIONS.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('')}
+  `;
+}
+
+// Enable Apply only when a value is chosen
+bulkSelect?.addEventListener('change', () => {
+  btnApply.disabled = !bulkSelect.value;
+});
+
+// Apply handler
+btnApply?.addEventListener('click', async () => {
+  const value = bulkSelect.value;
+  if (!value) return;
+
+  btnApply.disabled = true;
+  btnApply.textContent = 'Applying…';
+  try {
+    const key = (grp?.id || grp?.code || id);
+    const res = await fetch(`/api/admin/groups/${encodeURIComponent(key)}/submissions/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ status: value })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+
+    // Hard refresh the detail so the Status column updates everywhere
+    await renderDetail(root, id, codeOut);
+  } catch (err) {
+    alert(err.message || 'Failed to update status');
+    btnApply.disabled = false;
+    btnApply.textContent = 'Apply';
+    return;
+  }
+});
+
 // --- Step C: Edit / Save / Cancel for Card order ---
 const btnEdit   = $('btnEditOrder');
 const btnSave   = $('btnSaveOrder');
