@@ -44,7 +44,10 @@ function enableDelete(enabled){
 }
 
 function clearSelectionUI(){
-  document.querySelectorAll('#gtbody tr.selected').forEach(tr => tr.classList.remove('selected'));
+  document.querySelectorAll('#gtbody tr.selected').forEach(tr => {
+    tr.classList.remove('selected');
+    tr.style.backgroundColor = '';
+  });
   selectedGroup = { id: null, code: '', members: 0 };
   enableDelete(false);
 }
@@ -61,18 +64,19 @@ async function onDeleteClicked(){
   if (!id || !code) return;
 
   const typed = prompt(
-    `Delete ${code}?\n\n` +
-    `This will NOT delete submissions or cards.\n` +
-    `It will unlink ${members} submission${members===1?'':'s'} and clear their group field.\n\n` +
-    `Type ${code} to confirm.`
-  );
-  if (typed !== code) return;
+  `Delete ${code}?\n\n` +
+  `This will NOT delete submissions or cards.\n` +
+  `It will unlink ${members} submission${members===1?'':'s'} and clear their group field.\n\n` +
+  `Type "delete" to confirm.`
+);
+// Require the user to type the word “delete” (case‑insensitive)
+if (!typed || typed.trim().toLowerCase() !== 'delete') return;
 
   const b = btnDelete(); if (b) b.disabled = true;
   try {
     // NOTE: you must export deleteGroup from api.js and import it at top:
     // import { fetchGroups, logout, deleteGroup } from './api.js';
-    const res = await deleteGroup({ id, code });
+    const res = await deleteGroup(code);
     const unlinkedSubs  = Number(res.unlinked_submissions ?? res.submissions ?? members ?? 0);
     const unlinkedCards = Number(res.unlinked_cards ?? res.cards ?? 0);
     alert(`Deleted ${code}.\nUnlinked ${unlinkedSubs} submission${unlinkedSubs===1?'':'s'} and ${unlinkedCards} card${unlinkedCards===1?'':'s'}.`);
@@ -308,8 +312,14 @@ async function refreshList() {
 
    // Single-click selects (enables header Delete); double-click opens details
 const selectRow = (tr) => {
-  document.querySelectorAll('#gtbody tr.selected').forEach(x => x.classList.remove('selected'));
+  // remove selection and inline highlight from any previously selected rows
+  document.querySelectorAll('#gtbody tr.selected').forEach(x => {
+    x.classList.remove('selected');
+    x.style.backgroundColor = '';
+  });
+  // mark this row as selected and apply a highlight
   tr.classList.add('selected');
+  tr.style.backgroundColor = '#e6f0ff'; // choose your preferred colour here
   selectedGroup = {
     id: tr.getAttribute('data-id'),
     code: tr.getAttribute('data-code'),
