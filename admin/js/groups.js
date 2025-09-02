@@ -746,13 +746,14 @@ function enterEditMode() {
     const td = tr.querySelector(tdSelector);
     if (!td) return;
     td.innerHTML = `
-      <div class="order-cell">
-        <button type="button" class="order-btn up" title="Move up">▲</button>
-        <span class="drag-handle" title="Drag to reorder"></span>
-        <button type="button" class="order-btn down" title="Move down">▼</button>
-        <span class="ord-index">${i + 1}</span>
-      </div>
-    `;
+  <div class="order-cell">
+    <button type="button" class="order-btn up" title="Move up">▲</button>
+    <span class="drag-handle" tabindex="0" role="button" aria-label="Drag to reorder"></span>
+    <button type="button" class="order-btn down" title="Move down">▼</button>
+    <span class="ord-index">${i + 1}</span>
+  </div>
+`;
+
   });
 
   // Up/Down clicks
