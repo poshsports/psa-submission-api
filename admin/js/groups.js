@@ -556,6 +556,94 @@ rowsData.sort((a, b) => {
         </div>
       `;
       ensureScroller();
+      // --- Step C: Edit / Save / Cancel for Card order ---
+const btnEdit   = $('btnEditOrder');
+const btnSave   = $('btnSaveOrder');
+const btnCancel = $('btnCancelOrder');
+const tableEl   = $box?.querySelector('table.data-table');
+const tbodyEl   = tableEl?.querySelector('tbody');
+
+// use uuid if present, else code (both are accepted by your API)
+const groupKey = (grp?.id || grp?.code || id);
+
+function enterEditMode() {
+  if (!tbodyEl) return;
+
+  btnEdit.style.display = 'none';
+  btnSave.style.display = '';
+  btnCancel.style.display = '';
+  btnSave.disabled = true;
+
+  // Find the index of the "Card #" column robustly (so we avoid relying on nth-child=4)
+const ths = [...tableEl.querySelectorAll('thead th')].map(th => th.textContent.trim().toLowerCase());
+let cardNoColIdx = ths.findIndex(t => t === 'card #'); // 0-based
+if (cardNoColIdx < 0) cardNoColIdx = 3; // fallback to 4th col if label changes
+const tdSelector = `td:nth-child(${cardNoColIdx + 1})`;
+
+  // Turn the "Card #" cell into a numeric input for each row
+  [...tbodyEl.querySelectorAll('tr')].forEach((tr, index) => {
+    const td = tr.querySelector(tdSelector);
+    if (!td) return;
+
+    const read = td.querySelector('.cardno-read');
+    const currentTxt = (read ? read.textContent : td.textContent || '').trim();
+    const currentVal = /^\d+$/.test(currentTxt) ? currentTxt : String(index + 1);
+
+    td.innerHTML = `<input class="order-input" type="number" min="1" value="${currentVal}" style="width:70px;text-align:center">`;
+  });
+
+  // Any edit enables Save
+  tbodyEl.addEventListener('input', onOrderInput, { passive: true });
+}
+
+function onOrderInput(e) {
+  if (e.target && e.target.classList.contains('order-input')) {
+    btnSave.disabled = false;
+  }
+}
+
+async function saveOrder() {
+  if (!tbodyEl) return;
+
+  // Build an array of rows with desired order from the visible inputs
+  const rows = [...tbodyEl.querySelectorAll('tr')].map((tr, idx) => {
+    const cardId = tr.getAttribute('data-card-id'); // set in Step B row template
+    const input  = tr.querySelector('input.order-input');
+    const n = input ? parseInt(input.value, 10) : Number.POSITIVE_INFINITY;
+    return { id: cardId, n: Number.isFinite(n) ? n : Number.POSITIVE_INFINITY, idx };
+  });
+
+  // Sort by entered number, stable by original index to break ties
+  rows.sort((a, b) => (a.n - b.n) || (a.idx - b.idx));
+
+  const order = rows.map(r => r.id).filter(Boolean);
+
+  try {
+    const res = await fetch(`/api/admin/groups/${encodeURIComponent(groupKey)}/cards/order`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ order })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok !== true) throw new Error(j.error || 'Reorder failed');
+
+    // Re-render fresh so you see renumbered 1..N
+    renderDetail(root, id, codeOut);
+  } catch (err) {
+    alert(err.message || 'Reorder failed');
+  }
+}
+
+function cancelEdit() {
+  // Re-render to restore read-only state
+  renderDetail(root, id, codeOut);
+}
+
+btnEdit?.addEventListener('click', enterEditMode);
+btnSave?.addEventListener('click', saveOrder);
+btnCancel?.addEventListener('click', cancelEdit);
+
     }
   } catch (e) {
     if ($box) $box.innerHTML = `<div class="note">Error loading group: ${escapeHtml(e.message || 'Unknown error')}</div>`;
