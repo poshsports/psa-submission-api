@@ -1,4 +1,4 @@
-// api/admin/groups/[id]/cards/order.js (ESM)
+// /api/admin/groups/[id]/cards/order.js
 import { requireAdmin } from '../../../../_util/adminAuth.js';
 import { sb } from '../../../../_util/supabase.js';
 
