@@ -1,3 +1,7 @@
+// NOTE: This file is a legacy monolithic admin script no longer used by the PSA admin portal.
+// It is retained for reference only. All current admin functionality lives in ES modules under /admin/js.
+// Please do not update this file; instead modify the corresponding module files.
+
 // ===== Helpers & State =====
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
