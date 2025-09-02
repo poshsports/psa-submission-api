@@ -368,16 +368,19 @@ function fmtTs(ts) {
 // ========== Detail View ==========
 // (unchanged except for tiny formatting nits)
 async function renderDetail(root, id, codeHint) {
-  root.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-      <button id="gback" class="ghost">← Back</button>
-      <h2 style="margin:0">Group</h2>
-      <span class="note">Read-only</span>
-      <div style="flex:1"></div>
-      <a id="open-subs" href="/admin/index.html">Open Active submissions</a>
-    </div>
-    <div id="gdetail">Loading…</div>
-  `;
+root.innerHTML = `
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <button id="gback" class="ghost">← Back</button>
+    <h2 style="margin:0">Group</h2>
+    <span class="note">Reorder cards by editing “Card #”</span>
+    <div style="flex:1"></div>
+    <button id="btnEditOrder" class="ghost">Edit order</button>
+    <button id="btnSaveOrder" class="primary" disabled style="display:none">Save order</button>
+    <button id="btnCancelOrder" class="ghost" style="display:none">Cancel</button>
+    <a id="open-subs" href="/admin/index.html">Open Active submissions</a>
+  </div>
+  <div id="gdetail">Loading…</div>
+`;
 
   $('gback')?.addEventListener('click', () => {
     state.view = 'list';
@@ -440,12 +443,13 @@ async function renderDetail(root, id, codeHint) {
     }
   },
   {
-    label: 'Card #',
-    fmt: (c) => {
-      const n = (c.group_card_no ?? null);
-      return (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
-    }
-  },
+  label: 'Card #',
+  fmt: (c) => {
+    const n = (c.group_card_no ?? null);
+    const txt = (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
+    return `<span class="cardno-read">${txt}</span>`;
+  }
+},
   { label: 'Break date',    fmt: (c) => safe(c._break_on || '') },
   { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
@@ -517,11 +521,14 @@ rowsData.sort((a, b) => {
       <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
         <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
         <tbody>
-          ${
-            rowsData.length
-              ? rowsData.map(r => `<tr>${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}</tr>`).join('')
-              : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
-          }
+          ${ rowsData.length
+  ? rowsData.map(r => `
+      <tr data-card-id="${escapeHtml(String(r.id))}">
+        ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
+      </tr>
+    `).join('')
+  : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
+}
         </tbody>
       </table>
     `;
