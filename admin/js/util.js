@@ -11,3 +11,25 @@ export function fmtDate(iso){ try { if (!iso) return ''; const d = new Date(iso)
 export function fmtMoney(n){ return `$${(Number(n)||0).toLocaleString()}`; }
 export function fmtNum(n){ return `${Number(n)||0}`; }
 export function fmtCode(s){ const str = String(s ?? ''); return str ? `<code>${escapeHtml(str)}</code>` : ''; }
+
+export const prettyStatus = (s) => {
+  const map = {
+    pending_payment: 'Pending Payment',
+    submitted: 'Submitted',
+    submitted_paid: 'Submitted (Paid)',
+    received: 'Received',
+    shipped_to_psa: 'Shipped to PSA',
+    in_grading: 'In Grading',
+    graded: 'Graded',
+    shipped_back_to_us: 'Shipped Back to Us',
+    balance_due: 'Balance Due',
+    paid: 'Paid',
+    shipped_to_customer: 'Shipped to Customer',
+    delivered: 'Delivered to Customer',
+  };
+  if (!s) return '';
+  const key = String(s).toLowerCase();
+  if (map[key]) return map[key];
+  // graceful fallback for any unexpected value
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+};
