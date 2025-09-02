@@ -459,10 +459,13 @@ root.innerHTML = `
   { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
   {
+{
   label: 'Status',
   fmt: (c) => {
-    const raw = c.status || subById.get(String(c.submission_id))?.status || '';
-    return escapeHtml(prettyStatus(raw));
+    const sid = String(c.submission_id || '');
+    const subStatus = subById.get(sid)?.status;      // ← prefer submission status
+    const raw = subStatus ?? c.status ?? '';
+    return raw ? escapeHtml(prettyStatus(raw)) : '—';
   }
 },
   {
