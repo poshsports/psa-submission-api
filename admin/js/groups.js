@@ -1,4 +1,4 @@
-import { $, debounce, escapeHtml } from './util.js';
+import { $, debounce, escapeHtml, prettyStatus } from './util.js';
 import { fetchGroups, logout, deleteGroup } from './api.js';
 
 
@@ -459,13 +459,12 @@ root.innerHTML = `
   { label: 'Break #',       fmt: (c) => safe(c.break_number   || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel  || '') },
   {
-    label: 'Status',
-    fmt: (c) => safe(
-      c.status ||
-      subById.get(String(c.submission_id))?.status ||
-      ''
-    )
-  },
+  label: 'Status',
+  fmt: (c) => {
+    const raw = c.status || subById.get(String(c.submission_id))?.status || '';
+    return escapeHtml(prettyStatus(raw));
+  }
+},
   {
     label: 'Service',
     fmt: (c) => safe(
