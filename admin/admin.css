@@ -394,8 +394,13 @@ button.ghost { background:#fff; border:1px solid #e5e7eb; border-radius:8px; pad
 .btn.danger { background:#ffecec; color:#a11; border-color:#f5c2c7; }
 .btn.danger:disabled { opacity:.5; cursor:not-allowed; }
 
-/* Make selected groups table rows stand out */
-tr.selectable.selected {
-  background-color: #e6f0ff; /* or any colour you prefer */
+/* Highlight on hover */
+tr.selectable:hover td {
+  background-color: var(--row-hover);
+}
+
+/* Highlight on selection */
+tr.selectable.selected td {
+  background-color: #e6f0ff; /* choose your preferred colour */
 }
 
