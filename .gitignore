@@ -1,0 +1,8 @@
+# never commit secrets
+.env*
+
+# node/next build artifacts
+node_modules
+.next
+out
+dist
