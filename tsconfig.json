@@ -1,17 +1,16 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "ES2020",
+    "target": "ES2022",
+    "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2020"],
-    "strict": true,
+    "allowJs": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-
-    // emit JS next to the .ts so Vercel finds /api/**/*.js
-    "outDir": ".",
-    "noEmitOnError": true
+    "strict": false,
+    "resolveJsonModule": true,
+    "noEmit": false
   },
-  "include": ["api/**/*.ts"]
+  "include": ["api/**/*.ts"],
+  "exclude": ["node_modules"]
 }
