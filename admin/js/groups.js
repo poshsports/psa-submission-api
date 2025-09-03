@@ -231,7 +231,7 @@ async function refreshList() {
     // If a newer request started while this one was in-flight, abort applying it
     if (mySeq !== listReqSeq) return;
 
-    const items = payload?.items || payload?.groups || payload?.data || [];
+    const items = payload?.items || payload?.rows || payload?.groups || payload?.data || [];
     const limit = Number(payload?.limit ?? state.limit);
     const offset = Number(payload?.offset ?? state.offset);
     const total = (payload?.total != null ? Number(payload.total) : null);
