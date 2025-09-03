@@ -13,3 +13,4 @@
   "include": ["api/**/*.ts"],
   "exclude": ["node_modules", ".vercel", ".next", "out"]
 }
+
