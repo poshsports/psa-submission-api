@@ -9,3 +9,4 @@
     { "src": "^/(?:index\\.html)?$",                  "dest": "/admin/index.html" }
   ]
 }
+
