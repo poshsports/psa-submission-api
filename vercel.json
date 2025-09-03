@@ -1,7 +1,6 @@
 {
   "version": 2,
   "routes": [
-    { "src": "^/api/admin/groups$",  "methods": ["GET"],  "dest": "/api/admin/groups.js" },
     { "src": "^/api/admin-login$",   "methods": ["POST"], "dest": "/api/proxy/admin-login.js" },
     { "src": "^/api/admin-logout$",  "methods": ["POST"], "dest": "/api/proxy/admin-logout.js" },
     { "src": "^/api/submit$",        "methods": ["POST"], "dest": "/api/submit.js" },
@@ -9,4 +8,3 @@
     { "src": "^/(?:index\\.html)?$",                  "dest": "/admin/index.html" }
   ]
 }
-
