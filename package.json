@@ -2,16 +2,11 @@
   "name": "psa-submission-api",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": { "node": "18.x" },
   "scripts": {
-    "build": "tsc -p ."
+    "build": "echo \"no build\""
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.0"
-  },
-  "devDependencies": {
-    "typescript": "5.9.2",
-    "@types/node": "20.19.12"
   }
 }
