@@ -1,5 +1,5 @@
 // api/admin/groups.js
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -7,39 +7,48 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');
-      return res.status(405).json({ error: 'Method Not Allowed' });
+      return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
     }
 
     const status =
       typeof req.query.status === 'string' && req.query.status.trim() !== ''
-        ? req.query.status
+        ? req.query.status.trim()
         : null;
 
-    const q =
+    const search =
       typeof req.query.q === 'string' && req.query.q.trim() !== ''
-        ? req.query.q
+        ? req.query.q.trim()
         : null;
 
-    const limit = Math.min(200, Number(req.query.limit ?? 50));
-    const offset = Number(req.query.offset ?? 0);
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit ?? 50)));
+    const offset = Math.max(0, Number(req.query.offset ?? 0));
 
-    const { data, error } = await supabase.rpc('get_groups_page', {
-      p_status: status,
-      p_q: q,
-      p_limit: limit,
-      p_offset: offset,
-    });
+    let query = supabase
+      .from('groups')
+      .select('id, code, status, notes, created_at, updated_at')
+      .order('updated_at', { ascending: false });
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    if (status) query = query.eq('status', status);
+    if (search) {
+      // match code or notes (case-insensitive)
+      query = query.or(`code.ilike.%${search}%,notes.ilike.%${search}%`);
     }
 
-    return res.status(200).json(data ?? []);
+    // pagination
+    query = query.range(offset, offset + limit - 1);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // add "members" field so the UI has something to show (we can improve later)
+    const rows = (data || []).map(r => ({ ...r, members: 0 }));
+
+    return res.status(200).json({ ok: true, rows });
   } catch (err) {
-    return res.status(500).json({ error: String(err?.message || err) });
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
-};
+}
