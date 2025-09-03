@@ -44,10 +44,47 @@ export default async function handler(req, res) {
     const { data, error } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    // add "members" field so the UI has something to show (we can improve later)
-    const rows = (data || []).map(r => ({ ...r, members: 0 }));
+ // helper to count distinct submission_ids for a group
+async function countDistinctSubmissions(groupId) {
+  // 1) get this group's card_ids
+  const { data: cardRows, error: cardsErr } = await supabase
+    .from('group_cards')
+    .select('card_id')
+    .eq('group_id', groupId);
 
-    return res.status(200).json({ ok: true, rows });
+  if (cardsErr) throw new Error(cardsErr.message);
+  if (!cardRows || cardRows.length === 0) return 0;
+
+  const cardIds = cardRows.map(r => r.card_id).filter(Boolean);
+  if (cardIds.length === 0) return 0;
+
+  // 2) fetch submission_ids for those cards
+  const { data: subRows, error: subsErr } = await supabase
+    .from('submission_cards')
+    .select('submission_id')
+    .in('id', cardIds);
+
+  if (subsErr) throw new Error(subsErr.message);
+  if (!subRows || subRows.length === 0) return 0;
+
+  // 3) de-dupe submission_id
+  const distinct = new Set(subRows.map(r => r.submission_id).filter(Boolean));
+  return distinct.size;
+}
+
+const rows = [];
+for (const r of data || []) {
+  let members = 0;
+  try {
+    members = await countDistinctSubmissions(r.id);
+  } catch (_) {
+    // leave members as 0 if counting fails
+  }
+  rows.push({ ...r, members });
+}
+
+return res.status(200).json({ ok: true, rows });
+
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
