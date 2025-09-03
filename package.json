@@ -4,19 +4,14 @@
   "private": true,
   "engines": { "node": ">=18" },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "build": "tsc -p ."
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.57.0",
-    "next": "14.2.32",
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "@supabase/supabase-js": "2.57.0"
   },
   "devDependencies": {
+    "typescript": "5.9.2",
     "@types/node": "20.19.12",
-    "@types/react": "19.1.12",
-    "typescript": "5.9.2"
+    "@vercel/node": "3.2.4"
   }
 }
