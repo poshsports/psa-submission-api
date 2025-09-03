@@ -2,7 +2,7 @@
   "name": "psa-submission-api",
   "version": "1.0.0",
   "private": true,
-  "engines": { "node": "18.x" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "build": "echo \"no build\""
   },
