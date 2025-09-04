@@ -595,25 +595,21 @@ const rawStatusForRow = (row) => {
   return String(subStatus ?? row.status ?? '').toLowerCase();
 };
 
-// Normalize group status and default to 'draft' when missing/empty
-const g = (() => {
-  const s = String(grp?.status ?? '').trim();
-  if (!s) return 'draft';
-  return s.toLowerCase().replace(/\s+/g, ''); // e.g. "ReadyToShip" -> "readytoship"
-})();
-const anyShippedBack = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
-const anyLegacyReceived = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
+// Normalize group status to a lowercase key without spaces/underscores
+const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
+const anyShippedBack      = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
+const anyLegacyReceived   = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
 
-// Phase-specific options
+// Phase-specific options (value = payload to API; label = what user sees)
 let PHASE_OPTIONS = [];
 if (g === 'draft') {
   PHASE_OPTIONS = [
-    ['ready_to_ship',     'Ready to Ship'],
-    ['at_psa',            'At PSA'],
+    ['ready_to_ship',     'Mark received (intake done)'], // -> server maps to "received"
+    ['at_psa',            'Ship to PSA'],                 // -> server maps to "shipped_to_psa"
   ];
 } else if (g === 'readytoship' || g === 'ready_to_ship') {
   PHASE_OPTIONS = [
-    ['at_psa',            'At PSA'],
+    ['at_psa',            'Ship to PSA'],
   ];
 } else if (g === 'atpsa') {
   PHASE_OPTIONS = [
