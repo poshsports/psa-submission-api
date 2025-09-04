@@ -365,6 +365,15 @@ function fmtTs(ts) {
   } catch { return String(ts); }
 }
 
+/* Hide bulk status controls in post-PSA phases */
+function updateBulkStatusVisibility(groupStatus) {
+  const wrap = document.getElementById('bulk-status-ctrls');
+  if (!wrap) return;
+  const s = String(groupStatus || '');
+  const shouldHide = (s === 'Returned' || s === 'Closed');
+  wrap.style.display = shouldHide ? 'none' : '';
+}
+
 // ========== Detail View ==========
 // (unchanged except for tiny formatting nits)
 async function renderDetail(root, id, codeHint) {
@@ -377,7 +386,7 @@ root.innerHTML = `
     <button id="btnEditOrder" class="ghost">Edit order</button>
     <button id="btnSaveOrder" class="primary" disabled style="display:none">Save order</button>
     <button id="btnCancelOrder" class="ghost" style="display:none">Cancel</button>
- <div class="bulk-status" style="display:flex;align-items:center;gap:6px">
+ <div id="bulk-status-ctrls" class="bulk-status" style="display:flex;align-items:center;gap:6px">
     <label for="bulkStatus" class="note">Set submissions status:</label>
     <select id="bulkStatus" style="min-width:220px"></select>
     <button id="applyBulkStatus" class="ghost" disabled>Apply</button>
@@ -566,6 +575,7 @@ rowsData.sort((a, b) => {
         </div>
       `;
       ensureScroller();
+      updateBulkStatusVisibility(grp?.status);
 // --- Bulk status (submissions in this group) ---
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
