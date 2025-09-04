@@ -603,10 +603,6 @@ const anyLegacyReceivedInReturned =
 // Can we show bulk controls?
 // - Always in AtPSA (to mark return flow)
 // - In Returned ONLY if any row still needs receiving (shipped_back_to_us or legacy received)
-const canBulk =
-  (grp?.status === 'AtPSA') ||
-  (grp?.status === 'Returned' && (anyShippedBack || anyLegacyReceivedInReturned));
-
 // Limit the dropdown options to phase-appropriate choices:
 const PHASE_OPTIONS = (grp?.status === 'AtPSA')
   ? [
