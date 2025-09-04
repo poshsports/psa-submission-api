@@ -579,9 +579,9 @@ rowsData.sort((a, b) => {
       ensureScroller();
       updateBulkStatusVisibility(grp?.status);
 // --- Bulk status (submissions in this group) ---
-// We only allow two bulk steps:
+// We only allow two bulk steps (post-PSA flow):
 // 1) shipped_back_to_us
-// 2) received  (labelled "Received Back from PSA")
+// 2) received_from_psa  (label: "Received from PSA")
 
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
@@ -593,25 +593,29 @@ const rawStatusForCard = (c) => {
   return String(subStatus ?? c.status ?? '');
 };
 
-// Determine if any row is still "Shipped Back to Us"
+// Determine conditions in Returned phase
 const anyShippedBack = rowsData.some(r => rawStatusForCard(r) === 'shipped_back_to_us');
+
+// Legacy: allow one-time conversion if rows were set to 'received' previously
+const anyLegacyReceivedInReturned =
+  (grp?.status === 'Returned') && rowsData.some(r => rawStatusForCard(r) === 'received');
 
 // Can we show bulk controls?
 // - Always in AtPSA (to mark return flow)
-// - In Returned ONLY if any row is still shipped_back_to_us (to allow marking "Received Back")
+// - In Returned ONLY if any row still needs receiving (shipped_back_to_us or legacy received)
 const canBulk =
   (grp?.status === 'AtPSA') ||
-  (grp?.status === 'Returned' && anyShippedBack);
+  (grp?.status === 'Returned' && (anyShippedBack || anyLegacyReceivedInReturned));
 
 // Limit the dropdown options to phase-appropriate choices:
 const PHASE_OPTIONS = (grp?.status === 'AtPSA')
   ? [
-      ['shipped_back_to_us', 'Shipped Back to Us'],
-      ['received',           'Received Back from PSA'],
+      ['shipped_back_to_us',  'Shipped Back to Us'],
+      ['received_from_psa',   'Received from PSA'],
     ]
-  : (grp?.status === 'Returned' && anyShippedBack)
+  : (grp?.status === 'Returned' && (anyShippedBack || anyLegacyReceivedInReturned))
     ? [
-        ['received',         'Received Back from PSA'],
+        ['received_from_psa', 'Received from PSA'],
       ]
     : [];
 
@@ -624,7 +628,6 @@ if (bulkSelect) {
     `;
     btnApply.disabled = true;
   } else {
-    // No phase options ⇒ keep select empty to avoid accidental use
     bulkSelect.innerHTML = `<option value="">— No bulk actions —</option>`;
     btnApply.disabled = true;
   }
@@ -640,7 +643,7 @@ bulkSelect?.addEventListener('change', () => {
 
 // Apply handler (only two values possible by construction)
 btnApply?.addEventListener('click', async () => {
-  const value = bulkSelect.value;
+  const value = bulkSelect.value; // 'shipped_back_to_us' OR 'received_from_psa'
   if (!value) return;
 
   btnApply.disabled = true;
@@ -651,7 +654,7 @@ btnApply?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify({
-        status: value,            // 'shipped_back_to_us' OR 'received'
+        status: value,
         group_id: String(grp?.id || id),
       })
     });
@@ -659,12 +662,11 @@ btnApply?.addEventListener('click', async () => {
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
-    // If we just marked everything as "Received Back from PSA", lock bulk afterwards
-    if (value === 'received') {
+    // After receiving from PSA, lock bulk in Returned
+    if (value === 'received_from_psa') {
       updateBulkStatusVisibility('Returned', false);
     }
 
-    // Refresh the detail so header/table reflect latest values
     await renderDetail(root, id, codeOut);
   } catch (err) {
     alert(err.message || 'Failed to update status');
@@ -673,6 +675,7 @@ btnApply?.addEventListener('click', async () => {
     return;
   }
 });
+
 
 // --- Step C: Edit / Save / Cancel for Card order ---
 const btnEdit   = $('btnEditOrder');
