@@ -595,7 +595,12 @@ const rawStatusForRow = (row) => {
   return String(subStatus ?? row.status ?? '').toLowerCase();
 };
 
-const g = String(grp?.status || '').toLowerCase();
+// Normalize group status and default to 'draft' when missing/empty
+const g = (() => {
+  const s = String(grp?.status ?? '').trim();
+  if (!s) return 'draft';
+  return s.toLowerCase().replace(/\s+/g, ''); // e.g. "ReadyToShip" -> "readytoship"
+})();
 const anyShippedBack = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
 const anyLegacyReceived = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
 
