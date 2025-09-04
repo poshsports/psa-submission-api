@@ -19,11 +19,12 @@ const ALLOWED = new Set([
   'pending_payment',
   'submitted',
   'submitted_paid',
-  'received',
+  'received',             // intake complete (pre-PSA)
   'shipped_to_psa',
   'in_grading',
   'graded',
   'shipped_back_to_us',
+  'received_from_psa',    // NEW: received after PSA return
   'balance_due',
   'paid',
   'shipped_to_customer',
@@ -36,9 +37,9 @@ const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 
 // Map a submission status to a target group lifecycle status (or null to leave unchanged)
 function targetGroupStatusForSubmissionStatus(subStatus) {
   if (['shipped_to_psa', 'in_grading', 'graded'].includes(subStatus)) return 'AtPSA';
-  if (['shipped_back_to_us', 'balance_due', 'paid', 'shipped_to_customer'].includes(subStatus)) return 'Returned';
+  if (['shipped_back_to_us', 'received_from_psa', 'balance_due', 'paid', 'shipped_to_customer'].includes(subStatus)) return 'Returned';
   if (subStatus === 'delivered') return 'Closed';
-  return null; // early-phase statuses don't force a group lifecycle change
+  return null;
 }
 
 async function readJson(req) {
