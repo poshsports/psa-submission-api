@@ -585,12 +585,13 @@ rowsData.sort((a, b) => {
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
 
-// Helper to read the raw status for a table row (prefer submission.status)
+// lower-case so comparisons work even if DB has mixed case
 const rawStatusForCard = (c) => {
   const sid = String(c.submission_id || '');
   const subStatus = subById.get(sid)?.status;
-  return String(subStatus ?? c.status ?? '');
+  return String(subStatus ?? c.status ?? '').toLowerCase();
 };
+
 
 // Determine conditions in Returned phase
 const anyShippedBack = rowsData.some(r => rawStatusForCard(r) === 'shipped_back_to_us');
@@ -631,6 +632,11 @@ if (bulkSelect) {
     btnApply.disabled = true;
   }
 }
+
+// Drive wrapper visibility off whether we actually have options
+const canBulk = PHASE_OPTIONS.length > 0;
+updateBulkStatusVisibility(grp?.status, canBulk);
+
 
 
 // Enable Apply only when a value is chosen
