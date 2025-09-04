@@ -600,27 +600,17 @@ const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack      = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
 const anyLegacyReceived   = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
 
-// Phase-specific options (value = payload to API; label = what user sees)
-let PHASE_OPTIONS = [];
-if (g === 'draft') {
-  PHASE_OPTIONS = [
-    ['ready_to_ship',     'Mark received (intake done)'], // -> server maps to "received"
-    ['at_psa',            'Ship to PSA'],                 // -> server maps to "shipped_to_psa"
-  ];
-} else if (g === 'readytoship' || g === 'ready_to_ship') {
-  PHASE_OPTIONS = [
-    ['at_psa',            'Ship to PSA'],
-  ];
-} else if (g === 'atpsa') {
-  PHASE_OPTIONS = [
-    ['shipped_back_to_us','Shipped Back to Us'],
-    ['received_from_psa', 'Received from PSA'],
-  ];
-} else if (g === 'returned' && (anyShippedBack || anyLegacyReceived)) {
-  PHASE_OPTIONS = [
-    ['received_from_psa', 'Received from PSA'],
-  ];
-}
+// Always show these five statuses (hide only when the group is Closed)
+const PHASE_OPTIONS = (g === 'closed')
+  ? []
+  : [
+      ['shipped_to_psa',    'Ship to PSA'],
+      ['in_grading',        'In grading'],
+      ['graded',            'Graded'],
+      ['shipped_back_to_us','Shipped Back to Us'],
+      ['received_from_psa', 'Received from PSA'],
+    ];
+
 
 // Populate dropdown
 if (bulkSelect) {
