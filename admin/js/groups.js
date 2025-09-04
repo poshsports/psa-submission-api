@@ -572,6 +572,9 @@ const btnApply   = $('applyBulkStatus');
 
 // Human label mapping
 const STATUS_OPTIONS = [
+  ['pending_payment',      'Pending payment'],
+  ['submitted',            'Submitted'],
+  ['submitted_paid',       'Submitted (paid)'],
   ['received',             'Received (intake complete)'],
   ['shipped_to_psa',       'Shipped to PSA'],
   ['in_grading',           'In Grading'],
@@ -582,6 +585,7 @@ const STATUS_OPTIONS = [
   ['shipped_to_customer',  'Shipped to Customer'],
   ['delivered',            'Delivered to Customer'],
 ];
+
 
 // Populate dropdown
 if (bulkSelect) {
