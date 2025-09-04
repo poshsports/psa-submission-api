@@ -7,7 +7,7 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-// allowed psa_submissions.status values (matches your check constraint)
+// must match the CHECK constraint in psa_submissions
 const ALLOWED = new Set([
   'pending_payment',
   'submitted',
@@ -30,15 +30,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { group_id, status } = req.body || {};
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const group_id = body.group_id;
+    const status   = body.status;
+
     if (!group_id || typeof group_id !== 'string') {
       return res.status(400).json({ ok: false, error: 'group_id is required' });
     }
+
     if (!ALLOWED.has(status)) {
-      return res.status(400).json({ ok: false, error: 'invalid status' });
+      return res.status(400).json({ ok: false, error: `invalid status "${status}"` });
     }
 
-    // call the SQL function you created earlier
+    // Call the DB function we created earlier
     const { data, error } = await supabase.rpc('set_submissions_status_for_group', {
       p_group_id: group_id,
       p_status: status
