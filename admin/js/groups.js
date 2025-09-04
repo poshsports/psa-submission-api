@@ -577,7 +577,6 @@ rowsData.sort((a, b) => {
         </div>
       `;
       ensureScroller();
-      updateBulkStatusVisibility(grp?.status);
 // --- Bulk status (submissions in this group) ---
 // We only allow two bulk steps (post-PSA flow):
 // 1) shipped_back_to_us
