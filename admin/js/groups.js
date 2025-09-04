@@ -579,51 +579,54 @@ rowsData.sort((a, b) => {
       `;
       ensureScroller();
 // --- Bulk status (submissions in this group) ---
-// We only allow two bulk steps (post-PSA flow):
-// 1) shipped_back_to_us
-// 2) received_from_psa  (label: "Received from PSA")
+// Supported bulk steps by phase:
+// Draft          -> ready_to_ship, at_psa
+// ReadyToShip    -> at_psa
+// AtPSA          -> shipped_back_to_us, received_from_psa
+// Returned       -> received_from_psa (only if some rows still shipped_back_to_us)
 
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
 
-// lower-case so comparisons work even if DB has mixed case
-const rawStatusForCard = (c) => {
-  const sid = String(c.submission_id || '');
+// Prefer submission.status; fall back to card.status — always compare lower-case
+const rawStatusForRow = (row) => {
+  const sid = String(row.submission_id || '');
   const subStatus = subById.get(sid)?.status;
-  return String(subStatus ?? c.status ?? '').toLowerCase();
+  return String(subStatus ?? row.status ?? '').toLowerCase();
 };
 
-
-// Determine conditions in Returned phase
-const anyShippedBack = rowsData.some(r => rawStatusForCard(r) === 'shipped_back_to_us');
-
-// Legacy: allow one-time conversion if rows were set to 'received' previously
-const anyLegacyReceivedInReturned =
-  (grp?.status === 'Returned') && rowsData.some(r => rawStatusForCard(r) === 'received');
 const g = String(grp?.status || '').toLowerCase();
+const anyShippedBack = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
+const anyLegacyReceived = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
 
-// Can we show bulk controls?
-// - Always in AtPSA (to mark return flow)
-// - In Returned ONLY if any row still needs receiving (shipped_back_to_us or legacy received)
-// Limit the dropdown options to phase-appropriate choices:
-const PHASE_OPTIONS = (g === 'atpsa')
-  ? [
-      ['shipped_back_to_us',  'Shipped Back to Us'],
-      ['received_from_psa',   'Received from PSA'],
-    ]
-  : (g === 'returned' && (anyShippedBack || anyLegacyReceivedInReturned))
-    ? [
-        ['received_from_psa', 'Received from PSA'],
-      ]
-    : [];
+// Phase-specific options
+let PHASE_OPTIONS = [];
+if (g === 'draft') {
+  PHASE_OPTIONS = [
+    ['ready_to_ship',     'Ready to Ship'],
+    ['at_psa',            'At PSA'],
+  ];
+} else if (g === 'readytoship' || g === 'ready_to_ship') {
+  PHASE_OPTIONS = [
+    ['at_psa',            'At PSA'],
+  ];
+} else if (g === 'atpsa') {
+  PHASE_OPTIONS = [
+    ['shipped_back_to_us','Shipped Back to Us'],
+    ['received_from_psa', 'Received from PSA'],
+  ];
+} else if (g === 'returned' && (anyShippedBack || anyLegacyReceived)) {
+  PHASE_OPTIONS = [
+    ['received_from_psa', 'Received from PSA'],
+  ];
+}
 
-// Populate dropdown (phase-limited)
+// Populate dropdown
 if (bulkSelect) {
   if (PHASE_OPTIONS.length) {
-    bulkSelect.innerHTML = `
-      <option value="">— Select a status —</option>
-      ${PHASE_OPTIONS.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('')}
-    `;
+    bulkSelect.innerHTML =
+      `<option value="">— Select a status —</option>` +
+      PHASE_OPTIONS.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
     btnApply.disabled = true;
   } else {
     bulkSelect.innerHTML = `<option value="">— No bulk actions —</option>`;
@@ -631,14 +634,14 @@ if (bulkSelect) {
   }
 }
 
-// Drive wrapper visibility off whether we actually have options
-const canBulk = PHASE_OPTIONS.length > 0;
-updateBulkStatusVisibility(g, canBulk);
+// Show/hide the wrapper based on whether there are options
+updateBulkStatusVisibility(g, PHASE_OPTIONS.length > 0);
 
 // Enable Apply only when a value is chosen
 bulkSelect?.addEventListener('change', () => {
   btnApply.disabled = !bulkSelect.value;
 });
+
 
 // Apply handler (only two values possible by construction)
 btnApply?.addEventListener('click', async () => {
