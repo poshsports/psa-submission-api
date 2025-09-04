@@ -608,13 +608,18 @@ btnApply?.addEventListener('click', async () => {
   btnApply.disabled = true;
   btnApply.textContent = 'Applying…';
   try {
-    const key = (grp?.id || grp?.code || id);
-    const res = await fetch(`/api/admin/groups/${encodeURIComponent(key)}/submissions/status`, {
-      method: 'PATCH',
+    const res = await fetch('/api/admin/groups.set-status', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ status: value })
+      body: JSON.stringify({
+        status: value,
+        // prefer UUID; if you don’t have it in scope, send group_code instead
+        group_id: String(grp?.id || id),
+        // group_code: grp?.code || codeOut, // <-- use this instead if you don’t have id
+      })
     });
+
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
