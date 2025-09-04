@@ -1,13 +1,20 @@
 // api/admin/groups.set-status.js
+// Bulk-update all submissions in a group AND sync the group's lifecycle status.
+//
+// Accepts JSON body:
+//   { group_id?: string, group_code?: string, status: string }
+//
+// Returns:
+//   { ok: true, updated: number, group: { id, status, shipped_at, returned_at } }
+
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false } }
-);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// must match the CHECK constraint in psa_submissions
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// Allowed submission statuses (must match DB / UI)
 const ALLOWED = new Set([
   'pending_payment',
   'submitted',
@@ -20,52 +27,170 @@ const ALLOWED = new Set([
   'balance_due',
   'paid',
   'shipped_to_customer',
-  'delivered'
+  'delivered',
 ]);
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+// Group status rank (only ever move forward)
+const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
+
+// Map a submission status to a target group lifecycle status (or null to leave unchanged)
+function targetGroupStatusForSubmissionStatus(subStatus) {
+  if (['shipped_to_psa', 'in_grading', 'graded'].includes(subStatus)) return 'AtPSA';
+  if (['shipped_back_to_us', 'balance_due', 'paid', 'shipped_to_customer'].includes(subStatus)) return 'Returned';
+  if (subStatus === 'delivered') return 'Closed';
+  return null; // early-phase statuses don't force a group lifecycle change
+}
+
+async function readJson(req) {
+  // Works in Vercel Node serverless without framework body parsing
+  if (req.body) {
+    if (typeof req.body === 'string') {
+      try { return JSON.parse(req.body); } catch { return {}; }
+    }
+    if (typeof req.body === 'object') return req.body;
   }
+  const chunks = [];
+  for await (const ch of req) chunks.push(ch);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
 
+function nowIso() { return new Date().toISOString(); }
+
+export default async function handler(req, res) {
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-    const status = body.status;
-
-    if (!ALLOWED.has(status)) {
-      return res.status(400).json({ ok: false, error: `invalid status "${status}"` });
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'method_not_allowed' }));
+      return;
     }
 
-    // Resolve the group id from either group_id or group_code
-    let groupId = body.group_id;
-    if (!groupId && body.group_code) {
-      const { data: g, error: gerr } = await supabase
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'server_misconfigured' }));
+      return;
+    }
+
+    const body = await readJson(req);
+    const status = String(body?.status || '').trim();
+    let groupId = String(body?.group_id || '').trim();
+    const groupCode = String(body?.group_code || '').trim();
+
+    if (!status || !ALLOWED.has(status)) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
+      return;
+    }
+    if (!groupId && !groupCode) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'missing_group_identifier' }));
+      return;
+    }
+
+    // Resolve group id + fetch current lifecycle state
+    let groupRow = null;
+    if (groupId) {
+      const { data, error } = await supabase
         .from('groups')
-        .select('id')
-        .eq('code', body.group_code)
-        .limit(1)
-        .maybeSingle();
-
-      if (gerr) return res.status(500).json({ ok: false, error: gerr.message });
-      if (!g)   return res.status(404).json({ ok: false, error: 'Group not found' });
-      groupId = g.id;
+        .select('id, status, shipped_at, returned_at')
+        .eq('id', groupId)
+        .single();
+      if (error || !data) {
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: false, error: 'group_not_found' }));
+        return;
+      }
+      groupRow = data;
+      groupId = data.id;
+    } else {
+      const { data, error } = await supabase
+        .from('groups')
+        .select('id, status, shipped_at, returned_at')
+        .eq('code', groupCode)
+        .single();
+      if (error || !data) {
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: false, error: 'group_not_found' }));
+        return;
+      }
+      groupRow = data;
+      groupId = data.id;
     }
 
-    if (!groupId) {
-      return res.status(400).json({ ok: false, error: 'group_id or group_code is required' });
+    // 1) Bulk update all submissions in this group via existing RPC
+    const { data: rpcData, error: rpcErr } = await supabase.rpc(
+      'set_submissions_status_for_group',
+      { p_group_id: groupId, p_status: status }
+    );
+    if (rpcErr) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: rpcErr.message || 'rpc_failed' }));
+      return;
+    }
+    const updated =
+      (typeof rpcData === 'number') ? rpcData :
+      (rpcData?.updated ?? rpcData?.count ?? 0);
+
+    // 2) Sync group.status forward if this status implies a lifecycle step
+    const target = targetGroupStatusForSubmissionStatus(status);
+    let finalGroup = groupRow;
+    if (target) {
+      const currRank = GROUP_RANK[String(groupRow.status)] ?? -1;
+      const nextRank = GROUP_RANK[target] ?? -1;
+
+      if (nextRank > currRank) {
+        const patch = { status: target };
+        // Set timestamps on first transition into these phases
+        if (target === 'AtPSA' && !groupRow.shipped_at) patch.shipped_at = nowIso();
+        if (target === 'Returned' && !groupRow.returned_at) patch.returned_at = nowIso();
+
+        const { data: up, error: uerr } = await supabase
+          .from('groups')
+          .update(patch)
+          .eq('id', groupId)
+          .select('id, status, shipped_at, returned_at')
+          .single();
+
+        if (!uerr && up) finalGroup = up;
+        // If the update failed, we still return success for the submission update,
+        // but surface the error message to help diagnose.
+        if (uerr) {
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            ok: true,
+            updated,
+            group: finalGroup,
+            warning: `submissions_updated_but_group_status_sync_failed: ${uerr.message || 'unknown'}`
+          }));
+          return;
+        }
+      }
     }
 
-    // Update submissions for this group
-    const { data, error } = await supabase.rpc('set_submissions_status_for_group', {
-      p_group_id: groupId,
-      p_status: status
-    });
-
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.status(200).json({ ok: true, updated: data ?? 0 });
-
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    // Done
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      ok: true,
+      updated,
+      group: {
+        id: finalGroup.id,
+        status: finalGroup.status,
+        shipped_at: finalGroup.shipped_at,
+        returned_at: finalGroup.returned_at,
+      }
+    }));
+  } catch (err) {
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: false, error: String(err?.message || err || 'unknown_error') }));
   }
 }
