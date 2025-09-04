@@ -632,8 +632,6 @@ if (bulkSelect) {
   }
 }
 
-// Show/hide the whole bulk-controls wrapper
-updateBulkStatusVisibility(grp?.status, canBulk);
 
 // Enable Apply only when a value is chosen
 bulkSelect?.addEventListener('change', () => {
