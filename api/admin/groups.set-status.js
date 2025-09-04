@@ -31,6 +31,12 @@ const ALLOWED = new Set([
   'delivered',
 ]);
 
+// Frontend "phase" keywords we accept and convert to concrete submission statuses
+const STATUS_ALIASES = {
+  ready_to_ship: 'received',
+  at_psa: 'shipped_to_psa',
+};
+
 // Group status rank (only ever move forward)
 const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
 
@@ -75,16 +81,20 @@ export default async function handler(req, res) {
     }
 
     const body = await readJson(req);
-    const status = String(body?.status || '').trim();
-    let groupId = String(body?.group_id || '').trim();
-    const groupCode = String(body?.group_code || '').trim();
+    const requested = String(body?.status || '').trim().toLowerCase();
+let groupId = String(body?.group_id || '').trim();
+const groupCode = String(body?.group_code || '').trim();
 
-    if (!status || !ALLOWED.has(status)) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
-      return;
-    }
+// Map phase keywords (ready_to_ship, at_psa) to real submission statuses
+const subStatus = STATUS_ALIASES[requested] ?? requested;
+
+if (!subStatus || !ALLOWED.has(subStatus)) {
+  res.statusCode = 400;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
+  return;
+}
+
     if (!groupId && !groupCode) {
       res.statusCode = 400;
       res.setHeader('Content-Type', 'application/json');
@@ -127,7 +137,7 @@ export default async function handler(req, res) {
     // 1) Bulk update all submissions in this group via existing RPC
     const { data: rpcData, error: rpcErr } = await supabase.rpc(
       'set_submissions_status_for_group',
-      { p_group_id: groupId, p_status: status }
+      { p_group_id: groupId, p_status: subStatus }
     );
     if (rpcErr) {
       res.statusCode = 500;
@@ -139,8 +149,10 @@ export default async function handler(req, res) {
       (typeof rpcData === 'number') ? rpcData :
       (rpcData?.updated ?? rpcData?.count ?? 0);
 
-    // 2) Sync group.status forward if this status implies a lifecycle step
-    const target = targetGroupStatusForSubmissionStatus(status);
+      // 2) Sync group.status forward if this status implies a lifecycle step
+    let target = targetGroupStatusForSubmissionStatus(subStatus);
+    // Explicitly advance group to ReadyToShip when that phase keyword is requested
+    if (requested === 'ready_to_ship') target = 'ReadyToShip';
     let finalGroup = groupRow;
     if (target) {
       const currRank = GROUP_RANK[String(groupRow.status)] ?? -1;
