@@ -369,12 +369,13 @@ function fmtTs(ts) {
 function updateBulkStatusVisibility(groupStatus, canBulk) {
   const wrap = document.getElementById('bulk-status-ctrls');
   if (!wrap) return;
-  const s = String(groupStatus || '');
+  const s = String(groupStatus || '').toLowerCase();
   const shouldHide =
-    s === 'Closed' ||                // never in Closed
-    (!canBulk && s === 'Returned');  // lock bulk after we've marked all Received Back
+    s === 'closed' ||                // never in Closed
+    (!canBulk && s === 'returned');  // lock bulk after we've marked all Received Back
   wrap.style.display = shouldHide ? 'none' : '';
 }
+
 
 // ========== Detail View ==========
 // (unchanged except for tiny formatting nits)
@@ -599,17 +600,18 @@ const anyShippedBack = rowsData.some(r => rawStatusForCard(r) === 'shipped_back_
 // Legacy: allow one-time conversion if rows were set to 'received' previously
 const anyLegacyReceivedInReturned =
   (grp?.status === 'Returned') && rowsData.some(r => rawStatusForCard(r) === 'received');
+const g = String(grp?.status || '').toLowerCase();
 
 // Can we show bulk controls?
 // - Always in AtPSA (to mark return flow)
 // - In Returned ONLY if any row still needs receiving (shipped_back_to_us or legacy received)
 // Limit the dropdown options to phase-appropriate choices:
-const PHASE_OPTIONS = (grp?.status === 'AtPSA')
+const PHASE_OPTIONS = (g === 'atpsa')
   ? [
       ['shipped_back_to_us',  'Shipped Back to Us'],
       ['received_from_psa',   'Received from PSA'],
     ]
-  : (grp?.status === 'Returned' && (anyShippedBack || anyLegacyReceivedInReturned))
+  : (g === 'returned' && (anyShippedBack || anyLegacyReceivedInReturned))
     ? [
         ['received_from_psa', 'Received from PSA'],
       ]
@@ -631,9 +633,7 @@ if (bulkSelect) {
 
 // Drive wrapper visibility off whether we actually have options
 const canBulk = PHASE_OPTIONS.length > 0;
-updateBulkStatusVisibility(grp?.status, canBulk);
-
-
+updateBulkStatusVisibility(g, canBulk);
 
 // Enable Apply only when a value is chosen
 bulkSelect?.addEventListener('change', () => {
