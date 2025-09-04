@@ -1,14 +1,17 @@
 {
   "version": 2,
+  "functions": {
+    "api/**/*.js": { "runtime": "nodejs22.x" }
+  },
   "routes": [
-    { "src": "^/api/admin/groups$",            "methods": ["GET"],  "dest": "/api/admin/groups.js" },
+    { "src": "^/api/admin/groups$",             "methods": ["GET"],  "dest": "/api/admin/groups.js" },
     { "src": "^/api/admin/groups\\.set-status$", "methods": ["POST"], "dest": "/api/admin/groups.set-status.js" },
 
     { "src": "^/api/admin-login$",   "methods": ["POST"], "dest": "/api/proxy/admin-login.js" },
     { "src": "^/api/admin-logout$",  "methods": ["POST"], "dest": "/api/proxy/admin-logout.js" },
     { "src": "^/api/submit$",        "methods": ["POST"], "dest": "/api/submit.js" },
 
-    { "src": "^/admin/?$",                            "dest": "/admin/index.html" },
-    { "src": "^/(?:index\\.html)?$",                  "dest": "/admin/index.html" }
+    { "src": "^/admin/?$",           "dest": "/admin/index.html" },
+    { "src": "^/(?:index\\.html)?$", "dest": "/admin/index.html" }
   ]
 }
