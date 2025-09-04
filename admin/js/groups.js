@@ -386,7 +386,7 @@ root.innerHTML = `
     <h2 style="margin:0">Group</h2>
     <span class="note">Reorder cards by editing “Card #”</span>
     <div style="flex:1"></div>
-    <button id="btnEditOrder" class="ghost">Edit order</button>
+    <button id="btnEditOrder" class="ghost">Edit Card #</button>
     <button id="btnSaveOrder" class="primary" disabled style="display:none">Save order</button>
     <button id="btnCancelOrder" class="ghost" style="display:none">Cancel</button>
  <div id="bulk-status-ctrls" class="bulk-status" style="display:flex;align-items:center;gap:6px">
