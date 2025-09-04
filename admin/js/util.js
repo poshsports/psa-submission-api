@@ -23,18 +23,22 @@ export function fmtCode(s){ const str = String(s ?? ''); return str ? `<code>${e
 
 // status labels
 const STATUS_LABELS = Object.freeze({
-  pending_payment: 'Pending Payment',
-  submitted: 'Submitted',
-  submitted_paid: 'Submitted (Paid)',
-  received: 'Received',
-  shipped_to_psa: 'Shipped to PSA',
-  in_grading: 'In Grading',
-  graded: 'Graded',
-  shipped_back_to_us: 'Shipped Back to Us',
-  balance_due: 'Balance Due',
-  paid: 'Paid',
-  shipped_to_customer: 'Shipped to Customer',
-  delivered: 'Delivered to Customer',
+  pending_payment:       'Pending Payment',
+  submitted:             'Submitted',
+  submitted_paid:        'Submitted (Paid)',
+  // pre-PSA intake complete
+  received:              'Received (intake complete)',
+  shipped_to_psa:        'Shipped to PSA',
+  in_grading:            'In Grading',
+  graded:                'Graded',
+  shipped_back_to_us:    'Shipped Back to Us',
+  // post-PSA check-in
+  received_from_psa:     'Received from PSA',
+  // customer-level
+  balance_due:           'Balance Due',
+  paid:                  'Paid',
+  shipped_to_customer:   'Shipped to Customer',
+  delivered:             'Delivered to Customer',
 });
 
 export const prettyStatus = (s) => {
