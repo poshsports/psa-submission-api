@@ -2,14 +2,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '../_util/adminAuth.js';
 
-const POST_PSA_ALLOWED = new Set([
+// Post-PSA statuses we allow on individual cards
+const POST_PSA_STATUSES = [
   'received_from_psa',
   'balance_due',
   'paid',
   'shipped_to_customer',
   'delivered',
-]);
+];
+const POST_PSA_SET = new Set(POST_PSA_STATUSES);
 
+// Order matters when we "bubble up" the submission status to keep the
+// Shopify User Portal (which reads `submissions.status`) in sync.
+const RANK = POST_PSA_STATUSES.reduce((m, v, i) => (m[v] = i, m), {});
+
+// Small helper to safely read JSON body in Vercel/Node
 function parseBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
@@ -23,18 +30,17 @@ function parseBody(req) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-
   try {
     if (req.method !== 'POST') {
       res.statusCode = 405;
+      res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: false, error: 'method_not_allowed' }));
       return;
     }
 
     // admin gate
     const authed = await requireAdmin(req, res);
-    if (!authed) return; // requireAdmin already wrote response if blocked
+    if (!authed) return; // requireAdmin already sent the response
 
     const { card_id, status } = await parseBody(req);
     const to = String(status || '').toLowerCase().trim();
@@ -42,66 +48,96 @@ export default async function handler(req, res) {
 
     if (!id) {
       res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: false, error: 'missing_card_id' }));
       return;
     }
-    if (!POST_PSA_ALLOWED.has(to)) {
+    if (!POST_PSA_SET.has(to)) {
       res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
       return;
     }
 
-    // -------- Robust Supabase env lookup --------
-    const SUPABASE_URL =
-      process.env.SUPABASE_URL ||
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      process.env.PUBLIC_SUPABASE_URL ||
-      process.env.VITE_SUPABASE_URL;
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE
+    );
 
-    // Prefer a server-only service key; fall back to anon only if that’s what the project uses.
-    const SUPABASE_KEY =
-      process.env.SUPABASE_SERVICE_ROLE ||     // recommended
-      process.env.SUPABASE_SERVICE_KEY ||      // common alt name
-      process.env.SUPABASE_SECRET ||           // some templates
-      process.env.SUPABASE_KEY ||              // generic
-      process.env.SUPABASE_ANON_KEY ||         // last-resort (if your RLS allows it)
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!SUPABASE_URL) {
-      res.statusCode = 500;
-      res.end(JSON.stringify({ ok: false, error: 'Missing SUPABASE_URL env' }));
-      return;
-    }
-    if (!SUPABASE_KEY) {
-      res.statusCode = 500;
-      res.end(JSON.stringify({
-        ok: false,
-        error:
-          'Missing Supabase key env. Set SUPABASE_SERVICE_ROLE (or SUPABASE_SERVICE_KEY / SUPABASE_KEY / SUPABASE_ANON_KEY).',
-      }));
-      return;
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-      auth: { persistSession: false },
-    });
-
-    // Update one card row by id
-    const { data, error } = await supabase
-      .from('submission_cards') // <-- If your table name differs, change this.
+    // 1) Update the card
+    const { data: updated, error } = await supabase
+      .from('submission_cards')
       .update({ status: to })
       .eq('id', id)
-      .select('id'); // return something to confirm the row
+      .select('id, submission_id')
+      .single();
 
     if (error) {
       res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: false, error: error.message }));
       return;
     }
 
-    res.end(JSON.stringify({ ok: true, updated: (data?.length || 0) }));
+    // 2) Auto-bubble the parent submission status forward so the User Portal
+    //    (which shows `submissions.status`) reflects the latest per-card changes.
+    //    We only ever move FORWARD within post-PSA statuses; we never roll back.
+    let bubbledTo = null;
+    try {
+      const submissionId = updated?.submission_id && String(updated.submission_id);
+
+      if (submissionId) {
+        // Get the current submission status
+        const { data: subRow, error: subErr } = await supabase
+          .from('submissions')
+          .select('id, status')
+          .eq('id', submissionId)
+          .single();
+
+        if (!subErr && subRow) {
+          const cur = String(subRow.status || '').toLowerCase();
+          const curRank = RANK[cur] ?? -1;
+
+          // Compute the "max" card status across this submission
+          const { data: cardRows, error: crErr } = await supabase
+            .from('submission_cards')
+            .select('status')
+            .eq('submission_id', submissionId);
+
+          if (!crErr && Array.isArray(cardRows)) {
+            let maxRank = -1;
+            let maxVal = null;
+            for (const r of cardRows) {
+              const v = String(r.status || '').toLowerCase();
+              const rk = RANK[v];
+              if (rk != null && rk > maxRank) {
+                maxRank = rk;
+                maxVal = v;
+              }
+            }
+
+            // Only move forward inside the post-PSA set
+            if (maxVal && maxRank != null && maxRank > curRank) {
+              const { error: upErr } = await supabase
+                .from('submissions')
+                .update({ status: maxVal })
+                .eq('id', submissionId);
+              if (!upErr) bubbledTo = maxVal;
+            }
+          }
+        }
+      }
+    } catch { /* non-fatal; we still updated the card */ }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      ok: true,
+      updated: 1,
+      bubbled_submission_to: bubbledTo,
+    }));
   } catch (err) {
     res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok: false, error: err?.message || 'server_error' }));
   }
 }
