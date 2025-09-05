@@ -493,6 +493,7 @@ const CARD_COLS = [
   {
     label: 'Status',
     fmt: (c) => {
+      const hasCard = !!c.id;
       const sid   = String(c.submission_id || '');
       const eff   = effectiveRowStatus(c) || 'received_from_psa';
       const gStat = String(grp?.status || '').toLowerCase();   // group status
@@ -885,12 +886,6 @@ tbodyEl?.addEventListener('change', (e) => {
 
   pending.set(String(cardId), { cardId, submissionId: sid, from, to });
   setStatusSaveEnabled();
-});
-
-// Temporary stub for Step 1: just log pending changes.
-// (In Step 2 we’ll implement modal + API calls.)
-btnSaveStatuses?.addEventListener('click', () => {
-  console.log('Pending status changes (Step 1):', Array.from(pending.values()));
 });
 
 // use uuid if present, else code (both are accepted by your API)
