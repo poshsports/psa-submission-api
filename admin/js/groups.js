@@ -769,6 +769,16 @@ const subLabel = (sid) => {
   return s?.code || String(sid);
 };
 
+      // Choose the correct key for the API: id when it looks like an id, else code.
+const idOrCodePayload = (sid) => {
+  const s = String(sid || '');
+  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+  const looksNumeric  = /^\d+$/.test(s);
+  return (looksLikeUuid || looksNumeric)
+    ? { submission_id: s }
+    : { submission_code: s };
+};
+
 async function saveRowStatuses(){
   if (!pending.size) return;
 
@@ -786,11 +796,15 @@ async function saveRowStatuses(){
   try {
     for (const [sid, to] of targetBySub) {
       const r = await fetch('/api/admin/submissions.set-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ submission_id: sid, status: to, cascade_cards: true })
-      });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'same-origin',
+  body: JSON.stringify({
+    ...idOrCodePayload(sid),
+    status: to,
+    cascade_cards: true
+  })
+});
       const jj = await r.json().catch(() => ({}));
       if (!r.ok || jj.ok !== true) throw new Error(jj.error || `Failed to update ${subLabel(sid)}`);
     }
