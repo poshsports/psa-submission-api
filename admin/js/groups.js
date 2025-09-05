@@ -444,6 +444,17 @@ root.innerHTML = `
     // Map submissions for quick lookup (status/email/grading_service fallback)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
+    // ---- Post-PSA helpers (per-row controls) ----
+const POST_PSA_ORDER = ['received_from_psa','balance_due','paid','shipped_to_customer','delivered'];
+const statusIdx = (s) => POST_PSA_ORDER.indexOf(String(s || '').toLowerCase());
+
+// Prefer submission.status; fall back to card.status — lowercase for logic
+const rawStatusForRow = (row) => {
+  const sid = String(row.submission_id || '');
+  const subStatus = subById.get(sid)?.status;
+  return String(subStatus ?? row.status ?? '').toLowerCase();
+};
+
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
   { label: 'Submission', fmt: (c) => safe(c.submission_id) },
@@ -471,7 +482,7 @@ const CARD_COLS = [
   { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
 
-  // ✅ Prefer submission status; fall back to card status
+  // Status column (pretty label)
   {
     label: 'Status',
     fmt: (c) => {
@@ -479,6 +490,46 @@ const CARD_COLS = [
       const subStatus = subById.get(sid)?.status;
       const raw = subStatus ?? c.status ?? '';
       return raw ? escapeHtml(prettyStatus(raw)) : '—';
+    },
+  },
+
+  // Post-PSA quick actions (checkboxes)
+  {
+    label: 'Post-PSA',
+    fmt: (c) => {
+      const sid = String(c.submission_id || '');
+      const curr = rawStatusForRow(c);
+      const currIdx = statusIdx(curr); // -1 if not yet in the post-PSA phase
+
+      // Targets we expose as checkboxes
+      const targets = [
+        ['balance_due',         'Bal. Due'],
+        ['paid',                'Paid'],
+        ['shipped_to_customer', 'Shipped'],
+        ['delivered',           'Delivered'],
+      ];
+
+      // Only enable forward moves. If not yet 'received_from_psa', all disabled.
+      const html = targets.map(([value, label]) => {
+        const tIdx = statusIdx(value);
+        const enabled = (currIdx >= 0) && (tIdx >= currIdx);   // allow current or forward
+        const checked = curr === value ? 'checked' : '';
+        const disabled = enabled ? '' : 'disabled';
+        return `
+          <label class="pps" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px">
+            <input
+              type="checkbox"
+              class="postpsa"
+              data-sid="${escapeHtml(sid)}"
+              data-target="${escapeHtml(value)}"
+              ${checked} ${disabled}
+            />
+            <span>${escapeHtml(label)}</span>
+          </label>
+        `;
+      }).join('');
+
+      return `<div class="postpsa">${html}</div>`;
     },
   },
 
@@ -493,6 +544,7 @@ const CARD_COLS = [
 
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
 ];
+
 
 
     // Build rows: prefer cards; if none, fall back to members/submissions only
@@ -588,13 +640,6 @@ rowsData.sort((a, b) => {
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
 
-// Prefer submission.status; fall back to card.status — always compare lower-case
-const rawStatusForRow = (row) => {
-  const sid = String(row.submission_id || '');
-  const subStatus = subById.get(sid)?.status;
-  return String(subStatus ?? row.status ?? '').toLowerCase();
-};
-
 // Normalize group status to a lowercase key without spaces/underscores
 const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack      = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
@@ -676,6 +721,43 @@ const btnSave   = $('btnSaveOrder');
 const btnCancel = $('btnCancelOrder');
 const tableEl   = $box?.querySelector('table.data-table');
 const tbodyEl   = tableEl?.querySelector('tbody');
+
+// -- Post-PSA per-row checkbox handler --
+tbodyEl?.addEventListener('change', async (e) => {
+  const box = e.target.closest('input.postpsa');
+  if (!box) return;
+
+  const sid = box.dataset.sid;
+  const target = box.dataset.target;
+
+  // If user unticks a box, revert UI to server truth by reloading the row
+  if (!box.checked) {
+    await renderDetail(root, id, codeOut);
+    return;
+  }
+
+  // Optimistic: freeze the little control cluster while saving
+  const cluster = box.closest('.postpsa');
+  cluster?.querySelectorAll('input').forEach(i => i.disabled = true);
+
+  try {
+    const res = await fetch('/api/admin/submissions.set-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ submission_id: sid, status: target }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok !== true) throw new Error(j.error || 'Update failed');
+
+    // Refresh so Status + checkboxes reflect new truth
+    await renderDetail(root, id, codeOut);
+  } catch (err) {
+    alert(err.message || 'Failed to update status');
+    await renderDetail(root, id, codeOut);
+  }
+});
+
 
 // use uuid if present, else code (both are accepted by your API)
 const groupKey = (grp?.id || grp?.code || id);
