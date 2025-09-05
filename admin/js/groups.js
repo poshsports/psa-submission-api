@@ -722,7 +722,6 @@ const tbodyEl   = tableEl?.querySelector('tbody');
 const pending = new Map(); // cardId -> { cardId, submissionId, from, to }
 const btnSaveStatuses = $('btnSaveStatuses');
 
-const POST_PSA_ORDER = ['received_from_psa','balance_due','paid','shipped_to_customer','delivered'];
 const idxOf = (s) => POST_PSA_ORDER.indexOf(String(s || '').toLowerCase());
 
 function setStatusSaveEnabled(){
