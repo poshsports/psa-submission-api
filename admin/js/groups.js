@@ -1,7 +1,14 @@
 import { $, debounce, escapeHtml, prettyStatus } from './util.js';
 import { fetchGroups, logout, deleteGroup } from './api.js';
 
-
+// Post-PSA progression (used in multiple places)
+const POST_PSA_ORDER = [
+  'received_from_psa',
+  'balance_due',
+  'paid',
+  'shipped_to_customer',
+  'delivered',
+];
 // ========== Auth & sidebar wiring (standalone Groups page) ==========
 // (unchanged)
 async function doLogout(e){
@@ -442,17 +449,10 @@ root.innerHTML = `
     const submissions = Array.isArray(grp?.submissions) ? grp.submissions : [];
     const cards = Array.isArray(grp?.cards) ? grp.cards : [];
 
-    // Map submissions for quick lookup (status/email/grading_service fallback)
-    const subById = new Map(submissions.map(s => [String(s.id), s]));
+// Map submissions for quick lookup by id OR by code
+const subById   = new Map(submissions.map(s => [String(s.id), s]));
+const subByCode = new Map(submissions.map(s => [String(s.code), s]));
 
-// ---- Post-PSA helpers ----
-const POST_PSA_ORDER = [
-  'received_from_psa',
-  'balance_due',
-  'paid',
-  'shipped_to_customer',
-  'delivered',
-];
 const POST_PSA_SET = new Set(POST_PSA_ORDER);
 const SUB_DOMINATES_SET = new Set([
   'balance_due',
@@ -465,20 +465,25 @@ const postPsaLabel = (v) => prettyStatus(v);
 // Which status should a row *show*?
 // • While the submission is only "received_from_psa", show the card's status if set.
 // • Once the submission moves past that, the submission status dominates.
-function effectiveRowStatus(cardRow) {
-  const sid   = String(cardRow.submission_id || '');
-  const sSub  = String(subById.get(sid)?.status ?? '').toLowerCase();
+function effectiveRowStatus(cardRow){
+  const rawSid = String(cardRow.submission_id || '');
+  const subRec = subById.get(rawSid) || subByCode.get(rawSid);
+  const sSub = String(subRec?.status ?? '').toLowerCase();
   const sCard = String(cardRow.status ?? '').toLowerCase();
 
-  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard)) return sCard; // let card win
-  if (SUB_DOMINATES_SET.has(sSub)) return sSub;                              // submission wins
+  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard)) return sCard;
+  if (SUB_DOMINATES_SET.has(sSub)) return sSub;
   return sCard || sSub || '';
 }
 
-
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
-  { label: 'Submission', fmt: (c) => safe(c.submission_id) },
+  { label: 'Submission', fmt: (c) => {
+    const raw = String(c.submission_id || '');
+    const sub = subById.get(raw) || subByCode.get(raw);
+    return safe(sub?.code || raw);
+  }
+},
   {
     label: 'Card',
     fmt: (c) => {
@@ -504,43 +509,44 @@ const CARD_COLS = [
   { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
 
   // Status column: becomes a dropdown in post-PSA phase
-  {
-    label: 'Status',
-    fmt: (c) => {
-      const hasCard = !!c.id;
-      const sid   = String(c.submission_id || '');
-      const eff   = effectiveRowStatus(c) || 'received_from_psa';
-      const gStat = String(grp?.status || '').toLowerCase();   // group status
+{
+  label: 'Status',
+  fmt: (c) => {
+    const rawSid  = String(c.submission_id || '');
+    const subRec  = subById.get(rawSid) || subByCode.get(rawSid);
+    const sid     = subRec?.id ? String(subRec.id) : rawSid; // normalized id
+    const eff     = effectiveRowStatus(c) || 'received_from_psa';
+    const gStat   = String(grp?.status || '').toLowerCase(); // group status
 
-      // Show the select once we're in the final/bulk stage
-      const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
+    // Show select once we're in the post-PSA phase
+    const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
 
-      if (!showSelect) {
-        return eff ? escapeHtml(prettyStatus(eff)) : '—';
-      }
+    if (!showSelect) {
+      return eff ? escapeHtml(prettyStatus(eff)) : '—';
+    }
 
-      const options = POST_PSA_ORDER.map(v => {
-        const sel = (v === eff) ? 'selected' : '';
-        return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
-      }).join('');
+    const options = POST_PSA_ORDER.map(v => {
+      const sel = (v === eff) ? 'selected' : '';
+      return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
+    }).join('');
 
-      return `
-        <select class="row-status"
-                data-sid="${escapeHtml(sid)}"
-                data-card-id="${escapeHtml(String(c.id || ''))}">
-          ${options}
-        </select>
-      `;
-    },
+    return `
+      <select class="row-status"
+              data-sid="${escapeHtml(sid)}"
+              data-card-id="${escapeHtml(String(c.id || ''))}">
+        ${options}
+      </select>
+    `;
   },
+},
 
   {
     label: 'Service',
-    fmt: (c) => safe(
-      c.grading_service ||
-      subById.get(String(c.submission_id))?.grading_service ||
-      ''
-    ),
+    fmt: (c) => {
+  const raw = String(c.submission_id || '');
+  const sub = subById.get(raw) || subByCode.get(raw);
+  return safe(c.grading_service || sub?.grading_service || '');
+},
   },
 
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
@@ -554,7 +560,7 @@ const CARD_COLS = [
       ? cards.map(r => ({ ...r, _created_on: r._created_on || toYMD(r.created_at) }))
       : members.map(m => {
           const sid = String(m.submission_id || '');
-          const sub = subById.get(sid) || {};
+          const sub = (subById.get(sid) || subByCode.get(sid) || {});
           const createdFrom = sub.created_at || m.created_at || null;
           return {
             // shape it like a "card" row so CARD_COLS formats it
@@ -745,7 +751,10 @@ tbodyEl?.addEventListener('change', (e) => {
   setStatusSaveEnabled();
 });
 
-const subLabel = (sid) => subById.get(String(sid))?.code || String(sid);
+const subLabel = (sid) => {
+  const s = subById.get(String(sid)) || subByCode.get(String(sid));
+  return s?.code || String(sid);
+};
 
 async function saveRowStatuses(){
   if (!pending.size) return;
