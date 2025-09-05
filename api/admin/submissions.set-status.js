@@ -1,18 +1,18 @@
 // api/admin/submissions.set-status.js
-// Advance ONE submission's status (forward-only) and cascade to its cards.
+// Update ONE submission's status (forward-only) and cascade to its cards.
+// Accepts submission id *or* code.
 
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '../_util/adminAuth.js';
 
-const SERVICE_ROLE =
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_ROLE ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY; // fallback if your env uses *_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY; // fallback if you happened to set this
 
 const ALLOWED = new Set([
-  // pre/mid PSA
   'pending_payment','submitted','submitted_paid','received',
   'shipped_to_psa','in_grading','graded','shipped_back_to_us',
-  // post PSA (user-facing)
   'received_from_psa','balance_due','paid','shipped_to_customer','delivered',
 ]);
 
@@ -24,13 +24,12 @@ const RANK = {
 
 async function readJson(req){
   if (req.body) {
-    if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch {} }
+    if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch { return {}; } }
     if (typeof req.body === 'object') return req.body;
   }
   const chunks = [];
   for await (const ch of req) chunks.push(ch);
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
-  catch { return {}; }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return {}; }
 }
 
 export default async function handler(req, res){
@@ -42,92 +41,89 @@ export default async function handler(req, res){
       return;
     }
 
-    // Admin gate
     const authed = await requireAdmin(req, res);
     if (!authed) return;
 
-    if (!process.env.SUPABASE_URL || !SERVICE_ROLE) {
+    if (!SUPABASE_URL || !SERVICE_KEY) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok:false, error:'server_misconfigured' }));
       return;
     }
 
-    const { submission_id, id, status, cascade_cards = true } = await readJson(req);
-    const target = String(submission_id ?? id ?? '').trim();
-    const to = String(status || '').trim().toLowerCase();
+    const body = await readJson(req);
+    const key = String(body?.submission_id || body?.id || '').trim(); // can be id OR code
+    const status = String(body?.status || '').trim().toLowerCase();
 
-    if (!target) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:'missing_submission_id' }));
-      return;
+    if (!key) {
+      res.statusCode = 400; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:'missing_submission_id' })); return;
     }
-    if (!ALLOWED.has(to)) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:'invalid_status' }));
-      return;
+    if (!ALLOWED.has(status)) {
+      res.statusCode = 400; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:'invalid_status' })); return;
     }
 
-    const supabase = createClient(process.env.SUPABASE_URL, SERVICE_ROLE);
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Look up submission by numeric id OR code (psa-###)
-    const isCode = /^psa-\d+$/i.test(target);
-    const { data: sub, error: readErr } = await supabase
-      .from('psa_submissions')             // <-- use your table name
-      .select('id,status')
-      .eq(isCode ? 'code' : 'id', target)
+    // Look up by id first; if not found, look up by code.
+    let sub = null, sErr = null;
+    let q = await supabase.from('psa_submissions')
+      .select('id, status')
+      .eq('id', key)
+      .single();
+    sub = q.data; sErr = q.error;
+
+    if (!sub) {
+      q = await supabase.from('psa_submissions')
+        .select('id, status')
+        .eq('code', key)
+        .single();
+      sub = q.data; sErr = q.error;
+    }
+
+    if (sErr || !sub) {
+      res.statusCode = 404; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:'submission_not_found' })); return;
+    }
+
+    const resolvedId = sub.id;
+    const curr = String(sub.status || '').toLowerCase();
+    if (RANK[status] < (RANK[curr] ?? -1)) {
+      res.statusCode = 400; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:'cannot_move_backward' })); return;
+    }
+
+    // 1) Update submission
+    const { data: upd, error: uErr } = await supabase
+      .from('psa_submissions')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', resolvedId)
+      .select('id, status')
       .single();
 
-    if (readErr || !sub) {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:'submission_not_found' }));
-      return;
+    if (uErr || !upd) {
+      res.statusCode = 500; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:uErr?.message || 'update_failed' })); return;
     }
 
-    const curr = String(sub.status || '').toLowerCase();
-    if ((RANK[to] ?? -1) < (RANK[curr] ?? -1)) {
-      res.statusCode = 400;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:'cannot_move_backward' }));
-      return;
+    // 2) Cascade to cards in that submission
+    const { error: cErr, count } = await supabase
+      .from('submission_cards')
+      .update({ status })
+      .eq('submission_id', resolvedId)
+      .select('id', { count: 'exact', head: true });
+
+    if (cErr) {
+      res.statusCode = 500; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok:false, error:cErr.message || 'card_update_failed' })); return;
     }
 
-    // Update submission
-    const { error: updErr } = await supabase
-      .from('psa_submissions')             // <-- use your table name
-      .update({ status: to, updated_at: new Date().toISOString() })
-      .eq('id', sub.id);
-
-    if (updErr) {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error: updErr.message || 'update_failed' }));
-      return;
-    }
-
-    // Cascade to all cards in this submission to keep admin + portal aligned
-    if (cascade_cards) {
-      const { error: cardsErr } = await supabase
-        .from('submission_cards')          // <-- use your cards table name
-        .update({ status: to })
-        .eq('submission_id', sub.id);
-
-      if (cardsErr) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok:false, error:`cards_update_failed: ${cardsErr.message}` }));
-        return;
-      }
-    }
-
+    res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ ok:true, submission_id: sub.id, status: to, cascaded: !!cascade_cards }));
+    res.end(JSON.stringify({ ok:true, submission_id: upd.id, status: upd.status, cards_updated: count ?? 0 }));
   } catch (err) {
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ ok:false, error:String(err?.message || 'server_error') }));
+    res.statusCode = 500; res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok:false, error:String(err?.message || err || 'unknown_error') }));
   }
 }
