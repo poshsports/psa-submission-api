@@ -41,6 +41,9 @@ let state = {
 };
 // sequence guard to avoid stale async renders clobbering the UI
 let listReqSeq = 0;
+
+let scrollerWired = false;
+
 // ===== selection & delete helpers (header Delete button) =====
 let selectedGroup = { id: null, code: '', members: 0 };
 
@@ -177,7 +180,12 @@ async function renderList(root) {
   `;
 
   ensureScroller();
+if (!scrollerWired) {
   window.addEventListener('resize', ensureScroller, { passive: true });
+  scrollerWired = true;
+}
+
+
 
   // Wire filters
   const $q = $('gq');
@@ -600,14 +608,19 @@ rowsData.sort((a, b) => {
       <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
         <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
         <tbody>
-          ${ rowsData.length
-  ? rowsData.map(r => `
-      <tr data-card-id="${escapeHtml(String(r.id))}">
-        ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
-      </tr>
-    `).join('')
+         ${ rowsData.length
+  ? rowsData.map(r => {
+      // if we have a real card id, use it; otherwise make a unique key per submission
+      const rowKey = (r.id != null && r.id !== '') ? r.id : `sub-${r.submission_id}`;
+      return `
+        <tr data-card-id="${escapeHtml(String(rowKey))}">
+          ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
+        </tr>
+      `;
+    }).join('')
   : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
 }
+
         </tbody>
       </table>
     `;
