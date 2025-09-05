@@ -445,22 +445,36 @@ root.innerHTML = `
     // Map submissions for quick lookup (status/email/grading_service fallback)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-// ---- Status dropdown helpers (UI only in Step 1) ----
-const POST_PSA_ORDER = ['received_from_psa','balance_due','paid','shipped_to_customer','delivered'];
-const POST_PSA_SET   = new Set(POST_PSA_ORDER);
-const postPsaLabel   = (v) => prettyStatus(v);
+// ---- Post-PSA helpers ----
+const POST_PSA_ORDER = [
+  'received_from_psa',
+  'balance_due',
+  'paid',
+  'shipped_to_customer',
+  'delivered',
+];
+const POST_PSA_SET = new Set(POST_PSA_ORDER);
+const SUB_DOMINATES_SET = new Set([
+  'balance_due',
+  'paid',
+  'shipped_to_customer',
+  'delivered',
+]);
+const postPsaLabel = (v) => prettyStatus(v);
 
-// Which status should a row *show*? (submission governs once it's post-PSA)
-function effectiveRowStatus(cardRow){
-  const sid  = String(cardRow.submission_id || '');
-  const sSub = String(subById.get(sid)?.status ?? '').toLowerCase();
-  const sCard= String(cardRow.status ?? '').toLowerCase();
+// Which status should a row *show*?
+// • While the submission is only "received_from_psa", show the card's status if set.
+// • Once the submission moves past that, the submission status dominates.
+function effectiveRowStatus(cardRow) {
+  const sid   = String(cardRow.submission_id || '');
+  const sSub  = String(subById.get(sid)?.status ?? '').toLowerCase();
+  const sCard = String(cardRow.status ?? '').toLowerCase();
 
-  if (POST_PSA_SET.has(sSub)) return sSub;                       // submission advanced
-  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard))   // per-card override
-    return sCard;
-  return sSub || sCard || '';
+  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard)) return sCard; // let card win
+  if (SUB_DOMINATES_SET.has(sSub)) return sSub;                              // submission wins
+  return sCard || sSub || '';
 }
+
 
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
