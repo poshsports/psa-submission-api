@@ -522,16 +522,18 @@ const CARD_COLS = [
   fmt: (c) => {
     const rawSid  = String(c.submission_id || '');
     const subRec  = subById.get(rawSid) || subByCode.get(rawSid);
-    const sid     = subRec?.id ? String(subRec.id) : rawSid; // normalized id
-    const eff     = effectiveRowStatus(c) || 'received_from_psa';
-    const gStat   = String(grp?.status || '').toLowerCase(); // group status
+    // Only allow edits when we can map to a real submission ID.
+    const sid     = subRec?.id ? String(subRec.id) : '';   // empty if we can't map
+const eff     = effectiveRowStatus(c) || 'received_from_psa';
+const gStat   = String(grp?.status || '').toLowerCase();
 
-    // Show select once we're in the post-PSA phase
-    const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
+const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
 
-    if (!showSelect) {
-      return eff ? escapeHtml(prettyStatus(eff)) : '—';
-    }
+// If we can't resolve a real submission id, show read-only text (no dropdown).
+if (!sid || !showSelect) {
+  return eff ? escapeHtml(prettyStatus(eff)) : '—';
+}
+
 
     const options = POST_PSA_ORDER.map(v => {
       const sel = (v === eff) ? 'selected' : '';
@@ -755,6 +757,7 @@ tbodyEl?.addEventListener('change', (e) => {
   const cardId = sel.dataset.cardId;
   const sid    = sel.dataset.sid;
   const to     = sel.value;
+  if (!sid) return; // safety guard: should never post without a submission_id
 
   const rowObj = rowsData.find(r => String(r.id) === String(cardId)) || {};
   const from   = effectiveRowStatus(rowObj) || 'received_from_psa';
@@ -770,7 +773,6 @@ const subLabel = (sid) => {
 };
 
       // Choose the correct key for the API: id when it looks like an id, else code.
-const idOrCodePayload = (sid) => {
   const s = String(sid || '');
   const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
   const looksNumeric  = /^\d+$/.test(s);
@@ -800,7 +802,7 @@ async function saveRowStatuses(){
   headers: { 'Content-Type': 'application/json' },
   credentials: 'same-origin',
   body: JSON.stringify({
-    ...idOrCodePayload(sid),
+    submission_id: sid,      // <-- always an id now
     status: to,
     cascade_cards: true
   })
