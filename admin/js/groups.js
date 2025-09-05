@@ -707,6 +707,162 @@ const tbodyEl   = tableEl?.querySelector('tbody');
 const pending = new Map(); // key=cardId -> { cardId, submissionId, from, to }
 const btnSaveStatuses = $('btnSaveStatuses');
 
+      // ---------- Modal (clean custom prompt) ----------
+function ensureModalStyles(){
+  if (document.getElementById('psa-modal-styles')) return;
+  const css = `
+    .psa-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center}
+    .psa-modal{background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);max-width:560px;width:92%;padding:18px}
+    .psa-modal h3{margin:0 0 8px 0;font-size:18px}
+    .psa-modal .body{font-size:14px;color:#333}
+    .psa-modal .row{padding:10px 0;border-top:1px solid #eee}
+    .psa-modal .row:first-child{border-top:none}
+    .psa-modal .subhead{font-weight:600}
+    .psa-modal .choices{margin-top:6px;display:flex;gap:16px;align-items:center}
+    .psa-modal .actions{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}
+    .psa-btn{border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:8px 12px;font:inherit;cursor:pointer}
+    .psa-btn.primary{background:#0b5cff;border-color:#0b5cff;color:#fff}
+    .psa-btn:disabled{opacity:.6;cursor:not-allowed}
+  `;
+  const style = document.createElement('style');
+  style.id = 'psa-modal-styles';
+  style.textContent = css;
+  document.head.appendChild(style);
+}
+function confirmScopes(subInfos){
+  // subInfos: [{subId, subLabel, total, changed, uniformTo, changedCardIds}]
+  ensureModalStyles();
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'psa-modal-backdrop';
+    wrap.innerHTML = `
+      <div class="psa-modal" role="dialog" aria-modal="true">
+        <h3>Apply status changes</h3>
+        <div class="body">
+          ${subInfos.map((s,i)=>`
+            <div class="row" data-sub="${s.subId}">
+              <div class="subhead">${s.subLabel} — ${s.total} card${s.total===1?'':'s'} in this group</div>
+              <div class="choices">
+                <label><input type="radio" name="scope-${i}" value="changed" checked> Only the changed card${s.changed===1?'':'s'} (${s.changed})</label>
+                <label><input type="radio" name="scope-${i}" value="all" ${s.uniformTo ? '' : 'disabled'}> All ${s.total} cards in this submission</label>
+              </div>
+              ${!s.uniformTo ? `<div class="note" style="color:#a00;margin-top:4px">Multiple different targets selected for this submission — update “All” is disabled.</div>`:''}
+            </div>
+          `).join('')}
+          <div class="actions">
+            <button class="psa-btn" id="m-cancel">Cancel</button>
+            <button class="psa-btn primary" id="m-apply">Apply</button>
+          </div>
+        </div>
+      </div>`;
+    const getChoiceMap = () => {
+      const out = new Map();
+      subInfos.forEach((s,i)=>{
+        const val = wrap.querySelector(`input[name="scope-${i}"]:checked`)?.value || 'changed';
+        out.set(s.subId, val);
+      });
+      return out;
+    };
+    wrap.querySelector('#m-cancel').onclick = ()=>{ document.body.removeChild(wrap); resolve(null); };
+    wrap.querySelector('#m-apply').onclick  = ()=>{ const m=getChoiceMap(); document.body.removeChild(wrap); resolve(m); };
+    document.body.appendChild(wrap);
+  });
+}
+// Small helper: nice label for a submission id/code
+const subLabel = (sid) => subById.get(String(sid))?.code || String(sid);
+
+// ---------- Save statuses with scope prompt ----------
+async function saveRowStatuses(){
+  if (!pending.size) return;
+
+  // Build per-submission stats
+  const changes = Array.from(pending.values()); // {cardId, submissionId, from, to}
+  const bySub = new Map();
+  for (const ch of changes) {
+    const key = String(ch.submissionId);
+    if (!bySub.has(key)) bySub.set(key, { subId: key, targets: new Set(), changedCardIds: [] });
+    const entry = bySub.get(key);
+    entry.targets.add(ch.to);
+    entry.changedCardIds.push(ch.cardId);
+  }
+  // For each submission, how many cards exist in this group?
+  const subInfos = Array.from(bySub.values()).map(e => {
+    const total = rowsData.filter(r => String(r.submission_id) === e.subId).length;
+    return {
+      subId: e.subId,
+      subLabel: subLabel(e.subId),
+      total,
+      changed: e.changedCardIds.length,
+      uniformTo: (e.targets.size === 1),     // only allow “All” when the target is the same
+      to: Array.from(e.targets)[0] || null,
+      changedCardIds: e.changedCardIds
+    };
+  });
+
+  // If any submission has more cards than we changed, show the modal
+  let scopeChoice = new Map(subInfos.map(s => [s.subId, 'changed']));
+  const needsPrompt = subInfos.some(s => s.total > s.changed);
+  if (needsPrompt) {
+    const picked = await confirmScopes(subInfos);
+    if (!picked) return; // cancelled
+    scopeChoice = picked;
+  }
+
+  // Build API jobs
+  const jobsSub = [];  // {submission_id, status}
+  const jobsCard = []; // {card_id, status}
+  for (const s of subInfos) {
+    const choice = scopeChoice.get(s.subId) || 'changed';
+    if (choice === 'all') {
+      if (!s.uniformTo || !s.to) continue; // safety
+      jobsSub.push({ submission_id: s.subId, status: s.to });
+    } else {
+      // only the explicitly edited cards in this submission
+      for (const ch of changes.filter(c => String(c.submissionId) === s.subId)) {
+        jobsCard.push({ card_id: ch.cardId, status: ch.to });
+      }
+    }
+  }
+
+  // Disable UI during save
+  btnSaveStatuses.disabled = true;
+  btnSaveStatuses.textContent = 'Saving…';
+
+  try {
+    // 1) Update whole submissions
+    for (const j of jobsSub) {
+      const r = await fetch('/api/admin/submissions.set-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ submission_id: j.submission_id, status: j.status })
+      });
+      const jj = await r.json().catch(()=>({}));
+      if (!r.ok || jj.ok !== true) throw new Error(jj.error || `Failed to update ${j.submission_id}`);
+    }
+
+    // 2) Update individual cards (if your API path differs, adjust here)
+    for (const j of jobsCard) {
+      const r = await fetch('/api/admin/cards.set-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ card_id: j.card_id, status: j.status })
+      });
+      const jj = await r.json().catch(()=>({}));
+      if (!r.ok || jj.ok !== true) throw new Error(jj.error || `Failed to update card ${j.card_id}`);
+    }
+
+    // Success → refresh detail
+    await renderDetail(root, id, codeOut);
+  } catch (err) {
+    alert(err.message || 'Failed to save status changes');
+    btnSaveStatuses.disabled = false;
+    btnSaveStatuses.textContent = 'Save status changes';
+  }
+}
+
+// Replace the temporary console stub:
+btnSaveStatuses?.removeEventListener?.('__temp', ()=>{});
+btnSaveStatuses?.addEventListener('click', saveRowStatuses);
+
+
 function setStatusSaveEnabled(){
   if (btnSaveStatuses) btnSaveStatuses.disabled = pending.size === 0;
 }
