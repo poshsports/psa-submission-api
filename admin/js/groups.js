@@ -623,6 +623,8 @@ rowsData.sort((a, b) => {
 
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
+const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
+
 
 // Always show these five statuses (hide only when the group is Closed)
 const PHASE_OPTIONS = (g === 'closed')
