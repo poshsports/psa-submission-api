@@ -772,15 +772,6 @@ const subLabel = (sid) => {
   return s?.code || String(sid);
 };
 
-      // Choose the correct key for the API: id when it looks like an id, else code.
-  const s = String(sid || '');
-  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-  const looksNumeric  = /^\d+$/.test(s);
-  return (looksLikeUuid || looksNumeric)
-    ? { submission_id: s }
-    : { submission_code: s };
-};
-
 async function saveRowStatuses(){
   if (!pending.size) return;
 
