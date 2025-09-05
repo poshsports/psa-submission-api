@@ -389,6 +389,7 @@ root.innerHTML = `
     <button id="btnEditOrder" class="ghost">Edit Card #</button>
     <button id="btnSaveOrder" class="primary" disabled style="display:none">Save order</button>
     <button id="btnCancelOrder" class="ghost" style="display:none">Cancel</button>
+    <button id="btnSaveStatuses" class="primary" disabled title="Save status changes">Save status changes</button>
  <div id="bulk-status-ctrls" class="bulk-status" style="display:flex;align-items:center;gap:6px">
     <label for="bulkStatus" class="note">Set submissions status:</label>
     <select id="bulkStatus" style="min-width:220px"></select>
@@ -444,16 +445,22 @@ root.innerHTML = `
     // Map submissions for quick lookup (status/email/grading_service fallback)
     const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-    // ---- Post-PSA helpers (per-row controls) ----
+// ---- Status dropdown helpers (UI only in Step 1) ----
 const POST_PSA_ORDER = ['received_from_psa','balance_due','paid','shipped_to_customer','delivered'];
-const statusIdx = (s) => POST_PSA_ORDER.indexOf(String(s || '').toLowerCase());
+const POST_PSA_SET   = new Set(POST_PSA_ORDER);
+const postPsaLabel   = (v) => prettyStatus(v);
 
-// Prefer submission.status; fall back to card.status — lowercase for logic
-const rawStatusForRow = (row) => {
-  const sid = String(row.submission_id || '');
-  const subStatus = subById.get(sid)?.status;
-  return String(subStatus ?? row.status ?? '').toLowerCase();
-};
+// Which status should a row *show*? (submission governs once it's post-PSA)
+function effectiveRowStatus(cardRow){
+  const sid  = String(cardRow.submission_id || '');
+  const sSub = String(subById.get(sid)?.status ?? '').toLowerCase();
+  const sCard= String(cardRow.status ?? '').toLowerCase();
+
+  if (POST_PSA_SET.has(sSub)) return sSub;                       // submission advanced
+  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard))   // per-card override
+    return sCard;
+  return sSub || sCard || '';
+}
 
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
@@ -482,54 +489,33 @@ const CARD_COLS = [
   { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
 
-  // Status column (pretty label)
+  // Status column: becomes a dropdown in post-PSA phase
   {
     label: 'Status',
     fmt: (c) => {
-      const sid = String(c.submission_id || '');
-      const subStatus = subById.get(sid)?.status;
-      const raw = subStatus ?? c.status ?? '';
-      return raw ? escapeHtml(prettyStatus(raw)) : '—';
-    },
-  },
+      const sid   = String(c.submission_id || '');
+      const eff   = effectiveRowStatus(c) || 'received_from_psa';
+      const gStat = String(grp?.status || '').toLowerCase();   // group status
 
-  // Post-PSA quick actions (checkboxes)
-  {
-    label: 'Post-PSA',
-    fmt: (c) => {
-      const sid = String(c.submission_id || '');
-      const curr = rawStatusForRow(c);
-      const currIdx = statusIdx(curr); // -1 if not yet in the post-PSA phase
+      // Show the select once we're in the final/bulk stage
+      const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
 
-      // Targets we expose as checkboxes
-      const targets = [
-        ['balance_due',         'Bal. Due'],
-        ['paid',                'Paid'],
-        ['shipped_to_customer', 'Shipped'],
-        ['delivered',           'Delivered'],
-      ];
+      if (!showSelect) {
+        return eff ? escapeHtml(prettyStatus(eff)) : '—';
+      }
 
-      // Only enable forward moves. If not yet 'received_from_psa', all disabled.
-      const html = targets.map(([value, label]) => {
-        const tIdx = statusIdx(value);
-        const enabled = (currIdx >= 0) && (tIdx >= currIdx);   // allow current or forward
-        const checked = curr === value ? 'checked' : '';
-        const disabled = enabled ? '' : 'disabled';
-        return `
-          <label class="pps" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px">
-            <input
-              type="checkbox"
-              class="postpsa"
-              data-sid="${escapeHtml(sid)}"
-              data-target="${escapeHtml(value)}"
-              ${checked} ${disabled}
-            />
-            <span>${escapeHtml(label)}</span>
-          </label>
-        `;
+      const options = POST_PSA_ORDER.map(v => {
+        const sel = (v === eff) ? 'selected' : '';
+        return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
       }).join('');
 
-      return `<div class="postpsa">${html}</div>`;
+      return `
+        <select class="row-status"
+                data-sid="${escapeHtml(sid)}"
+                data-card-id="${escapeHtml(String(c.id || ''))}">
+          ${options}
+        </select>
+      `;
     },
   },
 
@@ -544,8 +530,6 @@ const CARD_COLS = [
 
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
 ];
-
-
 
     // Build rows: prefer cards; if none, fall back to members/submissions only
     const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
@@ -640,11 +624,6 @@ rowsData.sort((a, b) => {
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
 
-// Normalize group status to a lowercase key without spaces/underscores
-const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
-const anyShippedBack      = rowsData.some(r => rawStatusForRow(r) === 'shipped_back_to_us');
-const anyLegacyReceived   = (g === 'returned') && rowsData.some(r => rawStatusForRow(r) === 'received');
-
 // Always show these five statuses (hide only when the group is Closed)
 const PHASE_OPTIONS = (g === 'closed')
   ? []
@@ -722,42 +701,39 @@ const btnCancel = $('btnCancelOrder');
 const tableEl   = $box?.querySelector('table.data-table');
 const tbodyEl   = tableEl?.querySelector('tbody');
 
-// -- Post-PSA per-row checkbox handler --
-tbodyEl?.addEventListener('change', async (e) => {
-  const box = e.target.closest('input.postpsa');
-  if (!box) return;
+// --- Row-status edit buffer (Step 1: UI only; Step 2 will save) ---
+const pending = new Map(); // key=cardId -> { cardId, submissionId, from, to }
+const btnSaveStatuses = $('btnSaveStatuses');
 
-  const sid = box.dataset.sid;
-  const target = box.dataset.target;
+function setStatusSaveEnabled(){
+  if (btnSaveStatuses) btnSaveStatuses.disabled = pending.size === 0;
+}
 
-  // If user unticks a box, revert UI to server truth by reloading the row
-  if (!box.checked) {
-    await renderDetail(root, id, codeOut);
-    return;
-  }
+// Track dropdown changes, enable Save button
+tbodyEl?.addEventListener('change', (e) => {
+  const sel = e.target?.closest?.('select.row-status');
+  if (!sel) return;
 
-  // Optimistic: freeze the little control cluster while saving
-  const cluster = box.closest('.postpsa');
-  cluster?.querySelectorAll('input').forEach(i => i.disabled = true);
+  const cardId = sel.dataset.cardId;
+  const sid    = sel.dataset.sid;
+  const to     = sel.value;
 
-  try {
-    const res = await fetch('/api/admin/submissions.set-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ submission_id: sid, status: target }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || j.ok !== true) throw new Error(j.error || 'Update failed');
+  // figure out current "from" using our effective resolver
+  const rowObj = rowsData.find(r => String(r.id) === String(cardId)) || {};
+  const from   = effectiveRowStatus(rowObj) || 'received_from_psa';
 
-    // Refresh so Status + checkboxes reflect new truth
-    await renderDetail(root, id, codeOut);
-  } catch (err) {
-    alert(err.message || 'Failed to update status');
-    await renderDetail(root, id, codeOut);
-  }
+  // mark dirty in UI
+  sel.classList.add('dirty');
+
+  pending.set(String(cardId), { cardId, submissionId: sid, from, to });
+  setStatusSaveEnabled();
 });
 
+// Temporary stub for Step 1: just log pending changes.
+// (In Step 2 we’ll implement modal + API calls.)
+btnSaveStatuses?.addEventListener('click', () => {
+  console.log('Pending status changes (Step 1):', Array.from(pending.values()));
+});
 
 // use uuid if present, else code (both are accepted by your API)
 const groupKey = (grp?.id || grp?.code || id);
