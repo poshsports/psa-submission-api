@@ -475,3 +475,5 @@ tr.drop-below { box-shadow: 0  2px 0 0 var(--primary, #2563eb) inset; }
   line-height: 1.2;
 }
 
+.row-status.dirty { outline: 2px solid #7aa7ff; border-radius: 6px; }
+
