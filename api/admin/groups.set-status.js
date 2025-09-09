@@ -1,12 +1,7 @@
 // api/admin/groups.set-status.js
-// Bulk-update all submissions in a group AND sync the group's lifecycle status.
-//
-// Accepts JSON body:
-//   { group_id?: string, group_code?: string, status: string }
-//
-// Returns:
-//   { ok: true, updated: number, group: { id, status, shipped_at, returned_at } }
+// Bulk-update all submissions in a group (and their cards), then sync the group header/lifecycle.
 
+import { requireAdmin } from '../_util/adminAuth.js';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -24,23 +19,22 @@ const ALLOWED = new Set([
   'in_grading',
   'graded',
   'shipped_back_to_us',
-  'received_from_psa',    // NEW: received after PSA return
+  'received_from_psa',    // after PSA return
   'balance_due',
   'paid',
   'shipped_to_customer',
   'delivered',
 ]);
 
-// Frontend "phase" keywords we accept and convert to concrete submission statuses
+// Frontend "phase" aliases ➜ concrete submission statuses
 const STATUS_ALIASES = {
   ready_to_ship: 'received',
   at_psa: 'shipped_to_psa',
 };
 
-// Group status rank (only ever move forward)
+// Group lifecycle rank (forward-only)
 const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
 
-// Map a submission status to a target group lifecycle status (or null to leave unchanged)
 function targetGroupStatusForSubmissionStatus(subStatus) {
   if (['shipped_to_psa', 'in_grading', 'graded'].includes(subStatus)) return 'AtPSA';
   if (['shipped_back_to_us', 'received_from_psa', 'balance_due', 'paid', 'shipped_to_customer'].includes(subStatus)) return 'Returned';
@@ -49,11 +43,8 @@ function targetGroupStatusForSubmissionStatus(subStatus) {
 }
 
 async function readJson(req) {
-  // Works in Vercel Node serverless without framework body parsing
   if (req.body) {
-    if (typeof req.body === 'string') {
-      try { return JSON.parse(req.body); } catch { return {}; }
-    }
+    if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch { return {}; } }
     if (typeof req.body === 'object') return req.body;
   }
   const chunks = [];
@@ -62,7 +53,7 @@ async function readJson(req) {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-function nowIso() { return new Date().toISOString(); }
+const nowIso = () => new Date().toISOString();
 
 export default async function handler(req, res) {
   try {
@@ -70,6 +61,13 @@ export default async function handler(req, res) {
       res.statusCode = 405;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ ok: false, error: 'method_not_allowed' }));
+      return;
+    }
+
+    if (!requireAdmin(req)) {
+      res.statusCode = 401;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
       return;
     }
 
@@ -82,18 +80,17 @@ export default async function handler(req, res) {
 
     const body = await readJson(req);
     const requested = String(body?.status || '').trim().toLowerCase();
-let groupId = String(body?.group_id || '').trim();
-const groupCode = String(body?.group_code || '').trim();
+    let groupId = String(body?.group_id || '').trim();
+    const groupCode = String(body?.group_code || '').trim();
 
-// Map phase keywords (ready_to_ship, at_psa) to real submission statuses
-const subStatus = STATUS_ALIASES[requested] ?? requested;
-
-if (!subStatus || !ALLOWED.has(subStatus)) {
-  res.statusCode = 400;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
-  return;
-}
+    // Alias ➜ real submission status
+    const subStatus = STATUS_ALIASES[requested] ?? requested;
+    if (!subStatus || !ALLOWED.has(subStatus)) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'invalid_status' }));
+      return;
+    }
 
     if (!groupId && !groupCode) {
       res.statusCode = 400;
@@ -102,7 +99,7 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
       return;
     }
 
-    // Resolve group id + fetch current lifecycle state
+    // Resolve group id + current lifecycle
     let groupRow = null;
     if (groupId) {
       const { data, error } = await supabase
@@ -116,8 +113,7 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
         res.end(JSON.stringify({ ok: false, error: 'group_not_found' }));
         return;
       }
-      groupRow = data;
-      groupId = data.id;
+      groupRow = data; groupId = data.id;
     } else {
       const { data, error } = await supabase
         .from('groups')
@@ -130,11 +126,10 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
         res.end(JSON.stringify({ ok: false, error: 'group_not_found' }));
         return;
       }
-      groupRow = data;
-      groupId = data.id;
+      groupRow = data; groupId = data.id;
     }
 
-    // 1) Bulk update all submissions in this group via existing RPC
+    // 1) Update submissions via your existing RPC
     const { data: rpcData, error: rpcErr } = await supabase.rpc(
       'set_submissions_status_for_group',
       { p_group_id: groupId, p_status: subStatus }
@@ -149,18 +144,37 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
       (typeof rpcData === 'number') ? rpcData :
       (rpcData?.updated ?? rpcData?.count ?? 0);
 
-      // 2) Sync group.status forward if this status implies a lifecycle step
+    // 1b) Guarantee card cascade (idempotent if RPC already cascades)
+    let cardCascadeWarning = null;
+    let submissionIds = [];
+    try {
+      const { data: members, error: memErr } = await supabase
+        .from('group_submissions')
+        .select('submission_id')
+        .eq('group_id', groupId);
+      if (!memErr && Array.isArray(members)) {
+        submissionIds = members.map(m => m.submission_id).filter(Boolean);
+      }
+    } catch {}
+    if (submissionIds.length) {
+      const { error: cErr } = await supabase
+        .from('submission_cards')
+        .update({ status: subStatus, updated_at: nowIso() })
+        .in('submission_id', submissionIds);
+      if (cErr) cardCascadeWarning = cErr.message || 'cards_update_failed';
+    }
+
+    // 2) Advance group lifecycle + timestamps (forward-only)
     let target = targetGroupStatusForSubmissionStatus(subStatus);
-    // Explicitly advance group to ReadyToShip when that phase keyword is requested
     if (requested === 'ready_to_ship') target = 'ReadyToShip';
+
     let finalGroup = groupRow;
     if (target) {
       const currRank = GROUP_RANK[String(groupRow.status)] ?? -1;
       const nextRank = GROUP_RANK[target] ?? -1;
 
       if (nextRank > currRank) {
-        const patch = { status: target };
-        // Set timestamps on first transition into these phases
+        const patch = { status: target, updated_at: nowIso() };
         if (target === 'AtPSA' && !groupRow.shipped_at) patch.shipped_at = nowIso();
         if (target === 'Returned' && !groupRow.returned_at) patch.returned_at = nowIso();
 
@@ -172,8 +186,6 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
           .single();
 
         if (!uerr && up) finalGroup = up;
-        // If the update failed, we still return success for the submission update,
-        // but surface the error message to help diagnose.
         if (uerr) {
           res.statusCode = 200;
           res.setHeader('Content-Type', 'application/json');
@@ -181,14 +193,13 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
             ok: true,
             updated,
             group: finalGroup,
-            warning: `submissions_updated_but_group_status_sync_failed: ${uerr.message || 'unknown'}`
+            warning: `submissions_updated_but_group_status_sync_failed: ${uerr.message || 'unknown'}${cardCascadeWarning ? `; ${cardCascadeWarning}` : ''}`
           }));
           return;
         }
       }
     }
 
-    // Done
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
@@ -199,7 +210,8 @@ if (!subStatus || !ALLOWED.has(subStatus)) {
         status: finalGroup.status,
         shipped_at: finalGroup.shipped_at,
         returned_at: finalGroup.returned_at,
-      }
+      },
+      ...(cardCascadeWarning ? { warning: cardCascadeWarning } : {})
     }));
   } catch (err) {
     res.statusCode = 500;
