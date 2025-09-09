@@ -152,44 +152,29 @@ export default async function handler(req, res) {
       (typeof rpcData === 'number') ? rpcData :
       (rpcData?.updated ?? rpcData?.count ?? 0);
 
-    // --- 1a) Forward-only fallback: bump submissions directly if RPC did nothing ---
-    // Gather submission ids in the group
-    let submissionIds = [];
-    {
-      const { data: members, error: memErr } = await supabase
-        .from('group_submissions')
-        .select('submission_id')
-        .eq('group_id', groupId);
-      if (!memErr && Array.isArray(members)) {
-        submissionIds = members.map(m => m.submission_id).filter(Boolean);
-      }
-    }
+// --- 1a) Forward-only fallback: bump psa_submissions directly if RPC did nothing ---
+let directUpdated = 0;
+if (submissionIds.length) {
+  const targetRank = RANK[subStatus] ?? 999;
 
-    let directUpdated = 0;
-    if (submissionIds.length) {
-      const targetRank = RANK[subStatus] ?? 999;
-      // Read current statuses to keep it forward-only
-      const { data: subsNow } = await supabase
-        .from('submissions')
-        .select('id, status')
-        .in('id', submissionIds);
+  const { data: subsNow } = await supabase
+    .from('psa_submissions')
+    .select('submission_id, status')
+    .in('submission_id', submissionIds);
 
-      const idsToBump = (subsNow || [])
-        .filter(r => (RANK[String(r.status || '')] ?? -1) < targetRank)
-        .map(r => r.id);
+  const idsToBump = (subsNow || [])
+    .filter(r => (RANK[String(r.status || '')] ?? -1) < targetRank)
+    .map(r => r.submission_id);
 
-      if (idsToBump.length) {
-        const { data: up2, error: upErr2 } = await supabase
-          .from('submissions')
-          .update({ status: subStatus, updated_at: nowIso() })
-          .in('id', idsToBump)
-          .select('id');
-        if (upErr2) {
-          // non-fatal; continue to cards + group
-        } else {
-          directUpdated = Array.isArray(up2) ? up2.length : 0;
-        }
-      }
+  if (idsToBump.length) {
+    const { data: up2 } = await supabase
+      .from('psa_submissions')
+      .update({ status: subStatus, updated_at: nowIso() })
+      .in('submission_id', idsToBump)
+      .select('submission_id');
+    directUpdated = Array.isArray(up2) ? up2.length : 0;
+  }
+}
     }
 
     // --- 1b) Ensure cards cascade (idempotent if the RPC already cascades) ---
