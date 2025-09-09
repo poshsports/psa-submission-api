@@ -9,6 +9,12 @@ const POST_PSA_ORDER = [
   'shipped_to_customer',
   'delivered',
 ];
+// Pre-PSA progression (submission-driven display)
+const PRE_PSA_ORDER = [
+  'pending_payment','submitted','submitted_paid','received',
+  'shipped_to_psa','in_grading','graded'
+];
+
 // ========== Auth & sidebar wiring (standalone Groups page) ==========
 // (unchanged)
 async function doLogout(e){
@@ -462,6 +468,7 @@ const subById   = new Map(submissions.map(s => [String(s.id), s]));
 const subByCode = new Map(submissions.map(s => [String(s.code), s]));
 
 const POST_PSA_SET = new Set(POST_PSA_ORDER);
+const PRE_PSA_SET  = new Set(PRE_PSA_ORDER);
 const SUB_DOMINATES_SET = new Set([
   'balance_due',
   'paid',
@@ -471,18 +478,34 @@ const SUB_DOMINATES_SET = new Set([
 const postPsaLabel = (v) => prettyStatus(v);
 
 // Which status should a row *show*?
-// • While the submission is only "received_from_psa", show the card's status if set.
-// • Once the submission moves past that, the submission status dominates.
-function effectiveRowStatus(cardRow){
+// • Pre-PSA: always show the submission status (reflects bulk updates immediately).
+// • At the handoff ("received_from_psa"): prefer a post-PSA card status if present.
+// • Post-PSA: certain submission statuses dominate; otherwise show any post-PSA card status.
+function effectiveRowStatus(cardRow) {
   const rawSid = String(cardRow.submission_id || '');
   const subRec = subById.get(rawSid) || subByCode.get(rawSid);
-  const sSub = String(subRec?.status ?? '').toLowerCase();
+
+  const sSub  = String(subRec?.status ?? '').toLowerCase();
   const sCard = String(cardRow.status ?? '').toLowerCase();
 
-  if (sSub === 'received_from_psa' && POST_PSA_SET.has(sCard)) return sCard;
+  // Before the return, the submission drives the display
+  if (PRE_PSA_SET.has(sSub)) return sSub || sCard || '';
+
+  // At the handoff, prefer a card's post-PSA value if it exists
+  if (sSub === 'received_from_psa') {
+    return POST_PSA_SET.has(sCard) ? sCard : sSub;
+  }
+
+  // After return, these submission values dominate regardless of card status
   if (SUB_DOMINATES_SET.has(sSub)) return sSub;
-  return sCard || sSub || '';
+
+  // Otherwise, prefer any post-PSA card status
+  if (POST_PSA_SET.has(sCard)) return sCard;
+
+  // Fallback
+  return sSub || sCard || '';
 }
+
 
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
