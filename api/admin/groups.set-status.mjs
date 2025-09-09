@@ -4,9 +4,7 @@
 import { requireAdmin } from '../_util/adminAuth.js';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL =
-  process.env.SUPABASE_URL;
-
+const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -21,7 +19,7 @@ const ALLOWED = new Set([
   'received_from_psa','balance_due','paid','shipped_to_customer','delivered',
 ]);
 
-// Phase aliases from the UI -> concrete submission statuses
+// UI aliases → concrete submission statuses
 const STATUS_ALIASES = { ready_to_ship: 'received', at_psa: 'shipped_to_psa' };
 
 // Forward-only rank
@@ -57,7 +55,6 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ ok:false, error:'method_not_allowed' });
     if (!requireAdmin(req))   return res.status(401).json({ ok:false, error:'Unauthorized' });
-
     if (!SUPABASE_URL || !SERVICE_KEY) {
       return res.status(500).json({ ok:false, error:'server_misconfigured' });
     }
@@ -68,25 +65,19 @@ export default async function handler(req, res) {
     const groupCode = String(body?.group_code || '').trim();
 
     const subStatus = STATUS_ALIASES[requested] ?? requested;
-    if (!subStatus || !ALLOWED.has(subStatus)) {
-      return res.status(400).json({ ok:false, error:'invalid_status' });
-    }
-    if (!groupId && !groupCode) {
-      return res.status(400).json({ ok:false, error:'missing_group_identifier' });
-    }
+    if (!subStatus || !ALLOWED.has(subStatus)) return res.status(400).json({ ok:false, error:'invalid_status' });
+    if (!groupId && !groupCode)               return res.status(400).json({ ok:false, error:'missing_group_identifier' });
 
     // Resolve group
     let groupRow = null;
     if (groupId) {
-      const { data, error } = await supabase
-        .from('groups').select('id,status,shipped_at,returned_at')
-        .eq('id', groupId).single();
+      const { data, error } = await supabase.from('groups')
+        .select('id,status,shipped_at,returned_at').eq('id', groupId).single();
       if (error || !data) return res.status(404).json({ ok:false, error:'group_not_found' });
       groupRow = data; groupId = data.id;
     } else {
-      const { data, error } = await supabase
-        .from('groups').select('id,status,shipped_at,returned_at')
-        .eq('code', groupCode).single();
+      const { data, error } = await supabase.from('groups')
+        .select('id,status,shipped_at,returned_at').eq('code', groupCode).single();
       if (error || !data) return res.status(404).json({ ok:false, error:'group_not_found' });
       groupRow = data; groupId = data.id;
     }
@@ -100,8 +91,9 @@ export default async function handler(req, res) {
     // Collect submission_ids in this group (psa-###)
     let submissionIds = [];
     {
-      const { data: members } = await supabase
+      const { data: members, error: memErr } = await supabase
         .from('group_submissions').select('submission_id').eq('group_id', groupId);
+      if (memErr) return res.status(500).json({ ok:false, error: memErr.message || 'members_query_failed' });
       submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
     }
 
@@ -148,15 +140,12 @@ export default async function handler(req, res) {
     if (target) {
       const currRank = GROUP_RANK[String(groupRow.status)] ?? -1;
       const nextRank = GROUP_RANK[target] ?? -1;
-
       if (nextRank > currRank) {
         const patch = { status: target, updated_at: nowIso() };
         if (target === 'AtPSA'   && !groupRow.shipped_at)  patch.shipped_at  = nowIso();
         if (target === 'Returned'&& !groupRow.returned_at) patch.returned_at = nowIso();
-
         const { data: up } = await supabase
-          .from('groups')
-          .update(patch).eq('id', groupId)
+          .from('groups').update(patch).eq('id', groupId)
           .select('id,status,shipped_at,returned_at').single();
         if (up) finalGroup = up;
       }
