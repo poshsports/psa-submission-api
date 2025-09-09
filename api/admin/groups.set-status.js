@@ -2,7 +2,10 @@
 import { requireAdmin } from '../_util/adminAuth.js';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -26,7 +29,7 @@ const FLOW = [
   'shipped_to_psa','in_grading','graded','shipped_back_to_us',
   'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
 ];
-const RANK = FLOW.reduce((m, v, i) => ((m[v] = i), m), {});
+const RANK = FLOW.reduce((m, v, i) => (m[v] = i, m), {});
 
 // Group lifecycle rank (forward-only)
 const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
@@ -40,24 +43,22 @@ function targetGroupStatusForSubmissionStatus(s) {
 
 async function readJson(req) {
   if (req.body) {
-    if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch { return {}; } }
+    if (typeof req.body === 'string') { try { return JSON.parse(req.body); } catch {} }
     if (typeof req.body === 'object') return req.body;
   }
-  const chunks = []; for await (const ch of req) chunks.push(ch);
-  const raw = Buffer.concat(chunks).toString('utf8');
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  const chunks = [];
+  for await (const ch of req) chunks.push(ch);
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return {}; }
 }
 
 const nowIso = () => new Date().toISOString();
-function sample(arr, n = 5) { return (arr || []).slice(0, n); }
+const sample = (arr, n = 5) => (arr || []).slice(0, n);
 
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ ok:false, error:'method_not_allowed' });
     if (!requireAdmin(req))   return res.status(401).json({ ok:false, error:'Unauthorized' });
-    if (!SUPABASE_URL || !SERVICE_KEY) {
-      return res.status(500).json({ ok:false, error:'server_misconfigured' });
-    }
+    if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ ok:false, error:'server_misconfigured' });
 
     const body = await readJson(req);
     const requested = String(body?.status || '').trim().toLowerCase();
@@ -65,8 +66,8 @@ export default async function handler(req, res) {
     const groupCode = String(body?.group_code || '').trim();
 
     const subStatus = STATUS_ALIASES[requested] ?? requested;
-    if (!subStatus || !ALLOWED.has(subStatus)) return res.status(400).json({ ok:false, error:'invalid_status' });
-    if (!groupId && !groupCode)               return res.status(400).json({ ok:false, error:'missing_group_identifier' });
+    if (!ALLOWED.has(subStatus)) return res.status(400).json({ ok:false, error:'invalid_status' });
+    if (!groupId && !groupCode)  return res.status(400).json({ ok:false, error:'missing_group_identifier' });
 
     // Resolve group
     let groupRow = null;
@@ -84,38 +85,49 @@ export default async function handler(req, res) {
       groupRow = data; groupId = data.id;
     }
 
-    // 1) Best-effort RPC (kept)
-    const { data: rpcData, error: rpcErr } = await supabase
-      .rpc('set_submissions_status_for_group', { p_group_id: groupId, p_status: subStatus });
-    if (rpcErr) return res.status(500).json({ ok:false, error: rpcErr.message || 'rpc_failed' });
-    const rpcUpdated = (typeof rpcData === 'number') ? rpcData : (rpcData?.updated ?? rpcData?.count ?? 0);
+    // 0) Who/what are we touching?
+    const { data: members, error: memErr } = await supabase
+      .from('group_submissions').select('submission_id').eq('group_id', groupId);
+    if (memErr) return res.status(500).json({ ok:false, error: memErr.message || 'members_query_failed' });
 
-    // Collect submission_ids and card_ids for this group
-    let submissionIds = [];
-    let cardIds = [];
+    const submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
+
+    const { data: links, error: linkErr } = await supabase
+      .from('group_cards').select('card_id').eq('group_id', groupId);
+    if (linkErr) return res.status(500).json({ ok:false, error: linkErr.message || 'links_query_failed' });
+
+    const cardIds = (links || []).map(r => r.card_id).filter(Boolean);
+
+    // --- 1) Keep your RPC (legacy side-effects)
+    let updated_rpc = 0;
     {
-      const { data: members, error: memErr } = await supabase
-        .from('group_submissions').select('submission_id').eq('group_id', groupId);
-      if (memErr) return res.status(500).json({ ok:false, error: memErr.message || 'members_query_failed' });
-      submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
-
-      const { data: links, error: linkErr } = await supabase
-        .from('group_cards').select('card_id').eq('group_id', groupId);
-      if (linkErr) return res.status(500).json({ ok:false, error: linkErr.message || 'links_query_failed' });
-      cardIds = (links || []).map(r => r.card_id).filter(Boolean);
+      const { data: rpcData, error: rpcErr } = await supabase
+        .rpc('set_submissions_status_for_group', { p_group_id: groupId, p_status: subStatus });
+      if (rpcErr) {
+        // Non-fatal; we still push to the two tables the UI uses
+        updated_rpc = 0;
+      } else {
+        updated_rpc = (typeof rpcData === 'number') ? rpcData : (rpcData?.updated ?? rpcData?.count ?? 0);
+      }
     }
 
-    // 1a) Forward-only fallback on psa_submissions (by submission_id)
-    let updatedSubmissions = 0;
+    // Snapshot BEFORE
+    const { data: subsBefore } = submissionIds.length
+      ? await supabase.from('psa_submissions').select('submission_id,status').in('submission_id', submissionIds)
+      : { data: [] };
+    const { data: cardsBefore } = (cardIds.length || submissionIds.length)
+      ? await supabase.from('submission_cards').select('id,submission_id,status')
+          .or([
+            cardIds.length ? `id.in.(${cardIds.join(',')})` : null,
+            submissionIds.length ? `submission_id.in.(${submissionIds.join(',')})` : null
+          ].filter(Boolean).join(','))
+      : { data: [] };
+
+    // --- 1a) Forward-only bump on psa_submissions
+    let updated_submissions = 0;
     if (submissionIds.length) {
       const targetRank = RANK[subStatus] ?? 999;
-
-      const { data: subsNow } = await supabase
-        .from('psa_submissions')
-        .select('submission_id,status')
-        .in('submission_id', submissionIds);
-
-      const idsToBump = (subsNow || [])
+      const idsToBump = (subsBefore || [])
         .filter(r => (RANK[String(r.status || '')] ?? -1) < targetRank)
         .map(r => r.submission_id);
 
@@ -125,26 +137,46 @@ export default async function handler(req, res) {
           .update({ status: subStatus, updated_at: nowIso() })
           .in('submission_id', idsToBump)
           .select('submission_id');
-        updatedSubmissions = Array.isArray(up2) ? up2.length : 0;
+        updated_submissions = Array.isArray(up2) ? up2.length : 0;
       }
     }
 
-    // 1b) Cascade to cards by card_id (safer than submission_id)
-    let updatedCards = 0;
+    // --- 1b) Cascade status to cards (robust: by card_id and by submission_id)
+    let updated_cards = 0;
     if (cardIds.length) {
-      const { data: upCards } = await supabase
+      const { data: upByCard } = await supabase
         .from('submission_cards')
         .update({ status: subStatus, updated_at: nowIso() })
         .in('id', cardIds)
         .select('id');
-      updatedCards = Array.isArray(upCards) ? upCards.length : 0;
+      updated_cards += Array.isArray(upByCard) ? upByCard.length : 0;
+    }
+    if (submissionIds.length) {
+      const { data: upBySub } = await supabase
+        .from('submission_cards')
+        .update({ status: subStatus, updated_at: nowIso() })
+        .in('submission_id', submissionIds)
+        .select('id');
+      updated_cards += Array.isArray(upBySub) ? upBySub.length : 0;
     }
 
-    // 2) Advance group lifecycle + timestamps (forward-only)
+    // Snapshot AFTER
+    const { data: subsAfter } = submissionIds.length
+      ? await supabase.from('psa_submissions').select('submission_id,status').in('submission_id', submissionIds)
+      : { data: [] };
+    const { data: cardsAfter } = (cardIds.length || submissionIds.length)
+      ? await supabase.from('submission_cards').select('id,submission_id,status')
+          .or([
+            cardIds.length ? `id.in.(${cardIds.join(',')})` : null,
+            submissionIds.length ? `submission_id.in.(${submissionIds.join(',')})` : null
+          ].filter(Boolean).join(','))
+      : { data: [] };
+
+    // --- 2) Advance group lifecycle (forward-only)
+    let finalGroup = groupRow;
     let target = targetGroupStatusForSubmissionStatus(subStatus);
     if (requested === 'ready_to_ship') target = 'ReadyToShip';
 
-    let finalGroup = groupRow;
     if (target) {
       const currRank = GROUP_RANK[String(groupRow.status)] ?? -1;
       const nextRank = GROUP_RANK[target] ?? -1;
@@ -162,9 +194,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      updated_rpc: rpcUpdated,
-      updated_submissions: updatedSubmissions,
-      updated_cards: updatedCards,
+      updated_rpc,
+      updated_submissions,
+      updated_cards,
       group: {
         id: finalGroup.id,
         status: finalGroup.status,
@@ -177,6 +209,10 @@ export default async function handler(req, res) {
         submissionIds_sample: sample(submissionIds),
         cardIds_len: cardIds.length,
         cardIds_sample: sample(cardIds),
+        subs_before: sample(subsBefore, 10),
+        subs_after: sample(subsAfter, 10),
+        cards_before: sample(cardsBefore, 10),
+        cards_after: sample(cardsAfter, 10),
       }
     });
   } catch (err) {
