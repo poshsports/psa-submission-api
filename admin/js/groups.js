@@ -427,6 +427,8 @@ root.innerHTML = `
     renderList(root);
   });
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const isUuid = (s) => UUID_RE.test(String(s || '').trim());
   const $box = $('gdetail');
   try {
     // Fetch the group (include all the data we need in one go)
@@ -545,33 +547,36 @@ const CARD_COLS = [
   fmt: (c) => {
     const rawSid  = String(c.submission_id || '');
     const subRec  = subById.get(rawSid) || subByCode.get(rawSid);
-    // Only allow edits when we can map to a real submission ID.
-    const sid     = subRec?.id ? String(subRec.id) : '';   // empty if we can't map
-const eff     = effectiveRowStatus(c) || 'received_from_psa';
-const gStat   = String(grp?.status || '').toLowerCase();
+    const sid     = subRec?.id ? String(subRec.id) : '';
+    const scode   = subRec?.code ? String(subRec.code) : rawSid;
 
-const showSelect = POST_PSA_SET.has(eff);
+    const eff = effectiveRowStatus(c) || 'received_from_psa';
+    const showSelect = POST_PSA_SET.has(eff);
 
-// If we can't resolve a real submission id, show read-only text (no dropdown).
-if (!sid || !showSelect) {
-  return eff ? escapeHtml(prettyStatus(eff)) : '—';
-}
-
+    if ((!sid && !scode) || !showSelect) {
+      return eff ? escapeHtml(prettyStatus(eff)) : '—';
+    }
 
     const options = POST_PSA_ORDER.map(v => {
       const sel = (v === eff) ? 'selected' : '';
       return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
     }).join('');
 
+    // IMPORTANT: this key must match the <tr data-card-id="..."> in the table builder
+    const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
+
     return `
       <select class="row-status"
               data-sid="${escapeHtml(sid)}"
-              data-card-id="${escapeHtml(String(c.id || ''))}">
+              data-scode="${escapeHtml(scode)}"
+              data-card-id="${escapeHtml(rowKey)}">
         ${options}
       </select>
     `;
   },
 },
+
+
 
   {
     label: 'Service',
@@ -629,26 +634,29 @@ rowsData.sort((a, b) => {
 });
     
     // Build the table HTML
-    const table = `
-      <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
-        <thead><tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
-        <tbody>
-         ${ rowsData.length
-  ? rowsData.map(r => {
-      // if we have a real card id, use it; otherwise make a unique key per submission
-      const rowKey = (r.id != null && r.id !== '') ? r.id : `sub-${r.submission_id}`;
-      return `
-        <tr data-card-id="${escapeHtml(String(rowKey))}">
-          ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
-        </tr>
-      `;
-    }).join('')
-  : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
-}
+const table = `
+  <table class="data-table" cellspacing="0" cellpadding="0" style="width:100%">
+    <thead>
+      <tr>${CARD_COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr>
+    </thead>
+    <tbody>
+      ${
+        rowsData.length
+          ? rowsData.map(r => {
+              // Row key: real card id if present, else synthetic per submission
+              const rowKey = (r.id != null && r.id !== '') ? String(r.id) : `sub-${r.submission_id}`;
+              return `
+                <tr data-card-id="${escapeHtml(rowKey)}">
+                  ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
+                </tr>
+              `;
+            }).join('')
+          : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
+      }
+    </tbody>
+  </table>
+`;
 
-        </tbody>
-      </table>
-    `;
 
     // Render
     if ($box) {
@@ -685,16 +693,19 @@ const btnApply   = $('applyBulkStatus');
 const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 
 
-// Always show these five statuses (hide only when the group is Closed)
-const PHASE_OPTIONS = (g === 'closed')
-  ? []
-  : [
-      ['shipped_to_psa',    'Ship to PSA'],
-      ['in_grading',        'In grading'],
-      ['graded',            'Graded'],
-      ['shipped_back_to_us','Shipped Back to Us'],
-      ['received_from_psa', 'Received from PSA'],
-    ];
+const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
+const anyShippedBack = rowsData.some(r => (effectiveRowStatus(r) === 'shipped_back_to_us'));
+
+let PHASE_OPTIONS = [];
+if (gPhase === 'atpsa') {
+  PHASE_OPTIONS = [
+    ['shipped_back_to_us','Shipped Back to Us'],
+    ['received_from_psa','Received from PSA'],
+  ];
+} else if (gPhase === 'returned' && anyShippedBack) {
+  PHASE_OPTIONS = [['received_from_psa','Received from PSA']];
+}
+
 
 
 // Populate dropdown
@@ -787,14 +798,17 @@ tbodyEl?.addEventListener('change', (e) => {
 
   const cardId = sel.dataset.cardId;
   const sid    = sel.dataset.sid;
+  const scode  = sel.dataset.scode || '';
   const to     = sel.value;
-  if (!sid) return; // safety guard: should never post without a submission_id
+  if (!sid && !scode) return;
 
-  const rowObj = rowsData.find(r => String(r.id) === String(cardId)) || {};
+  const rowObj = rowsData.find(r =>
+  String(r.id ?? `sub-${r.submission_id}`) === String(cardId)
+) || {};
   const from   = effectiveRowStatus(rowObj) || 'received_from_psa';
 
   sel.classList.add('dirty');
-  pending.set(String(cardId), { cardId, submissionId: sid, from, to });
+  pending.set(String(cardId), { cardId, submissionId: sid, submissionCode: scode, from, to });
   setStatusSaveEnabled();
 });
 
@@ -803,35 +817,49 @@ const subLabel = (sid) => {
   return s?.code || String(sid);
 };
 
-async function saveRowStatuses(){
+async function saveRowStatuses() {
   if (!pending.size) return;
 
-  // Pick the furthest target per submission if multiple cards edited
-  const targetBySub = new Map(); // sid -> status
-  for (const { submissionId, to } of pending.values()) {
-    const key = String(submissionId);
-    if (!targetBySub.has(key)) targetBySub.set(key, to);
-    else if (idxOf(to) > idxOf(targetBySub.get(key))) targetBySub.set(key, to);
+  // Build the furthest target per submission (identified by id OR code)
+  const targets = new Map(); // key -> { subId, subCode, to }
+  for (const { submissionId, submissionCode, to } of pending.values()) {
+    const key = String(submissionId || submissionCode);
+    const prev = targets.get(key);
+    if (!prev || idxOf(to) > idxOf(prev.to)) {
+      targets.set(key, { subId: submissionId, subCode: submissionCode, to });
+    }
   }
 
   btnSaveStatuses.disabled = true;
   btnSaveStatuses.textContent = 'Saving…';
 
   try {
-    for (const [sid, to] of targetBySub) {
+    for (const { subId, subCode, to } of targets.values()) {
+      const body = { status: to, cascade_cards: true };
+      if (subId && isUuid(subId)) {
+        body.submission_id = subId;          // use UUID when we have it
+      } else if (subCode) {
+        body.submission_code = subCode;      // fall back to code
+      } else {
+        throw new Error('Missing submission identifier');
+      }
+
       const r = await fetch('/api/admin/submissions.set-status', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  credentials: 'same-origin',
-  body: JSON.stringify({
-    submission_id: sid,      // <-- always an id now
-    status: to,
-    cascade_cards: true
-  })
-});
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      });
       const jj = await r.json().catch(() => ({}));
-      if (!r.ok || jj.ok !== true) throw new Error(jj.error || `Failed to update ${subLabel(sid)}`);
+      if (!r.ok || jj.ok !== true) {
+        throw new Error(jj.error || `Failed to update ${subCode || subId}`);
+      }
     }
+
+    // Re-render the SAME group (uses the outer "id" – not shadowed)
+    pending.clear();
+    btnSaveStatuses.disabled = true;
+    btnSaveStatuses.textContent = 'Save status changes';
     await renderDetail(root, id, codeOut);
   } catch (err) {
     alert(err.message || 'Failed to save status changes');
@@ -839,6 +867,7 @@ async function saveRowStatuses(){
     btnSaveStatuses.textContent = 'Save status changes';
   }
 }
+
 
 btnSaveStatuses?.addEventListener('click', saveRowStatuses);
 
