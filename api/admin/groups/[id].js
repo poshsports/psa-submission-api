@@ -176,151 +176,163 @@ if (wantCards) {
   if (ids.length) {
     const client = sb();
 
-    // One function so we can re-run after we normalize numbering
-    const selectCards = async () => {
-      return client
-        .from('submission_cards')
-        .select(`
-          id,
-          submission_id,
-          created_at,
-          status,
-          grading_service,
-          year,
-          brand,
-          set,
-          player,
-          card_number,
-          variation,
-          notes,
-          card_index,
-          break_date,
-          break_channel,
-          break_number,
-          card_description,
-          group_cards!left ( group_id, card_no )
-        `)
-        .in('submission_id', ids)
-        // NO filter on group_cards.group_id — keep the LEFT JOIN intact
-        .order('submission_id', { ascending: true })
-        .order('card_index', { ascending: true });
-    };
+    // 0) Read card_info for these submissions
+    const { data: rawSubs, error: rsErr } = await client
+      .from('psa_submissions')
+      .select('submission_id, created_at, status, grading_service, card_info')
+      .in('submission_id', ids);
+    if (rsErr) {
+      return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: rsErr.message });
+    }
 
-    // Try to load normalized cards first
+    // 1) Ensure submission_cards exist (materialize missing rows by (submission_id, card_index))
+    const { data: existingRows, error: exErr } = await client
+      .from('submission_cards')
+      .select('id, submission_id, card_index')
+      .in('submission_id', ids);
+    if (exErr) {
+      return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: exErr.message });
+    }
+
+    const haveBySub = new Map();
+    for (const r of existingRows || []) {
+      const key = String(r.submission_id);
+      if (!haveBySub.has(key)) haveBySub.set(key, new Set());
+      haveBySub.get(key).add(Number(r.card_index));
+    }
+
+    const toInsert = [];
+    for (const sub of rawSubs || []) {
+      const sid = String(sub.submission_id);
+      const haveIdx = haveBySub.get(sid) || new Set();
+      const info = Array.isArray(sub.card_info) ? sub.card_info : [];
+      info.forEach((ci, i) => {
+        if (!haveIdx.has(i)) {
+          // derive a description from common keys if present
+          const desc =
+            ci?.description ??
+            ci?.card_description ??
+            ci?.title ??
+            ci?.card ??
+            ci?.name ??
+            null;
+
+          toInsert.push({
+            submission_id: sub.submission_id,
+            card_index: i,
+            status: sub.status ?? null,
+            grading_service: sub.grading_service ?? null,
+
+            // card meta (best-effort)
+            year: ci?.year ?? null,
+            brand: ci?.brand ?? null,
+            set: ci?.set ?? null,
+            player: ci?.player ?? null,
+            card_number: ci?.card_number ?? null,
+            variation: ci?.variation ?? null,
+            notes: ci?.notes ?? null,
+            card_description: desc,
+
+            // break meta
+            break_date: ci?.break_date ?? null,
+            break_channel: ci?.break_channel ?? null,
+            break_number: ci?.break_number ?? null
+          });
+        }
+      });
+    }
+
+    if (toInsert.length) {
+      const { error: insErr } = await client.from('submission_cards').insert(toInsert);
+      if (insErr) {
+        return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: insErr.message });
+      }
+    }
+
+    // 2) Select cards (now guaranteed to exist) with LEFT join to group_cards
+    const selectCards = async () => client
+      .from('submission_cards')
+      .select(`
+        id,
+        submission_id,
+        created_at,
+        status,
+        grading_service,
+        year,
+        brand,
+        set,
+        player,
+        card_number,
+        variation,
+        notes,
+        card_index,
+        break_date,
+        break_channel,
+        break_number,
+        card_description,
+        group_cards!left ( group_id, card_no )
+      `)
+      .in('submission_id', ids)
+      .order('submission_id', { ascending: true })
+      .order('card_index', { ascending: true });
+
     let { data: c, error: cErr } = await selectCards();
     if (cErr) {
       return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: cErr.message });
     }
 
-    // If we have real card rows, ensure numbering rows exist for THIS group, then renumber 1..N
-    if (Array.isArray(c) && c.length > 0) {
-      // If any card in this set is missing a group_cards link, create it
-      const { data: existingLinks, error: exErr } = await client
-        .from('group_cards')
-        .select('card_id')
-        .eq('group_id', groupId);
+    // 3) Ensure group_cards links exist for THIS group, then renumber 1..N
+    const { data: existingLinks, error: linkErr } = await client
+      .from('group_cards')
+      .select('card_id')
+      .eq('group_id', groupId);
+    if (!linkErr) {
+      const have = new Set((existingLinks || []).map(r => String(r.card_id)));
+      const need = (c || [])
+        .filter(row => !have.has(String(row.id)))
+        .map(row => ({ group_id: groupId, card_id: row.id, card_no: null }));
 
-      if (!exErr) {
-        const have = new Set((existingLinks || []).map(r => String(r.card_id)));
-        const need = (c || [])
-          .filter(row => !have.has(String(row.id)))
-          .map(row => ({ group_id: groupId, card_id: row.id, card_no: null }));
-
-        if (need.length) {
-          // Create missing links, then normalize numbering 1..N
-          const { error: insErr } = await client.from('group_cards').insert(need);
-          if (!insErr) {
-            // Renumber via your existing RPC (used by Edit Card #)
-            await client.rpc('renumber_group_cards', { p_group_id: groupId }).catch(() => {});
-            // Re-select to pick up freshly assigned card_no
-            const r2 = await selectCards();
-            if (!r2.error && Array.isArray(r2.data)) c = r2.data;
-          }
+      if (need.length) {
+        const { error: insLinkErr } = await client.from('group_cards').insert(need);
+        if (!insLinkErr) {
+          await client.rpc('renumber_group_cards', { p_group_id: groupId }).catch(() => {});
+          const r2 = await selectCards();
+          if (!r2.error && Array.isArray(r2.data)) c = r2.data;
         }
       }
-
-      // Build response rows (prefer created_at from submission when available)
-      const toYMD = (val) => {
-        try {
-          if (!val) return null;
-          const s = String(val);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-          const d = new Date(s);
-          return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
-        } catch { return null; }
-      };
-
-      cards = (c || []).map(row => {
-        const sub = subById.get(String(row.submission_id));
-        const createdFrom = sub?.created_at ?? row.created_at;
-
-        // Find numbering for THIS group if present
-        const gc = Array.isArray(row.group_cards)
-          ? row.group_cards.find(g => String(g.group_id) === String(groupId))
-          : null;
-
-        return {
-          ...row,
-          created_at: createdFrom,
-          _created_on: toYMD(createdFrom),
-          _break_on:   toYMD(row.break_date ?? row.created_at),
-          group_card_no: gc?.card_no ?? null
-        };
-      });
-    } else {
-      // Fallback: materialized rows not present yet — read JSON card_info to at least display rows
-      const { data: rawSubs, error: rsErr } = await client
-        .from('psa_submissions')
-        .select('submission_id, created_at, status, grading_service, card_info')
-        .in('submission_id', ids);
-
-      if (rsErr) {
-        return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: rsErr.message });
-      }
-
-      const toYMD = (val) => {
-        try {
-          if (!val) return null;
-          const s = String(val);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-          const d = new Date(s);
-          return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
-        } catch { return null; }
-      };
-
-      const rows = [];
-      for (const sub of rawSubs || []) {
-        const info = Array.isArray(sub.card_info) ? sub.card_info : [];
-        info.forEach((ci, i) => {
-          rows.push({
-            id: null, // no card_id yet
-            submission_id: sub.submission_id,
-            created_at: sub.created_at,
-            status: sub.status,
-            grading_service: sub.grading_service,
-            year: ci.year ?? null,
-            brand: ci.brand ?? null,
-            set: ci.set ?? null,
-            player: ci.player ?? null,
-            card_number: ci.card_number ?? null,
-            variation: ci.variation ?? null,
-            notes: ci.notes ?? null,
-            card_index: i,
-            break_date: ci.break_date ?? null,
-            break_channel: ci.break_channel ?? null,
-            break_number: ci.break_number ?? null,
-            card_description: ci.card_description ?? null,
-            _created_on: toYMD(sub.created_at),
-            _break_on: toYMD(ci.break_date ?? sub.created_at),
-            group_card_no: null
-          });
-        });
-      }
-      cards = rows;
     }
+
+    // 4) Build response
+    const toYMD = (val) => {
+      try {
+        if (!val) return null;
+        const s = String(val);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const d = new Date(s);
+        return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
+      } catch { return null; }
+    };
+
+    const subById = new Map(submissions.map(s => [String(s.id), s]));
+    cards = (c || []).map(row => {
+      const sub = subById.get(String(row.submission_id));
+      const createdFrom = sub?.created_at ?? row.created_at;
+
+      // prefer an explicit card_description; if missing, client will fall back to bits
+      const gc = Array.isArray(row.group_cards)
+        ? row.group_cards.find(g => String(g.group_id) === String(groupId))
+        : null;
+
+      return {
+        ...row,
+        created_at: createdFrom,
+        _created_on: toYMD(createdFrom),
+        _break_on:   toYMD(row.break_date ?? row.created_at),
+        group_card_no: gc?.card_no ?? null
+      };
+    });
   }
 }
-
 
       res.status(200).json({
         ...group,
