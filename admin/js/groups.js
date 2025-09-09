@@ -550,7 +550,7 @@ const CARD_COLS = [
 const eff     = effectiveRowStatus(c) || 'received_from_psa';
 const gStat   = String(grp?.status || '').toLowerCase();
 
-const showSelect = (gStat === 'returned') || POST_PSA_SET.has(eff);
+const showSelect = POST_PSA_SET.has(eff);
 
 // If we can't resolve a real submission id, show read-only text (no dropdown).
 if (!sid || !showSelect) {
