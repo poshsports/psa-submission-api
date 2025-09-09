@@ -169,64 +169,68 @@ export default async function handler(req, res) {
       }
       const subById = new Map(submissions.map(s => [String(s.id), s]));
 
-      // ---- cards ----
-      let cards = [];
-      if (wantCards) {
-        const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
-        if (ids.length) {
-          const { data: c, error: cErr } = await sb()
-            .from('submission_cards')
-            .select(`
-              id,
-              submission_id,
-              created_at,
-              status,
-              grading_service,
-              year,
-              brand,
-              set,
-              player,
-              card_number,
-              variation,
-              notes,
-              card_index,
-              break_date,
-              break_channel,
-              break_number,
-              card_description,
-              group_cards!left ( group_id, card_no )
-            `)
-            .in('submission_id', ids)
-            .eq('group_cards.group_id', groupId)           // only numbering for THIS group
-            .order('card_no', { ascending: true, foreignTable: 'group_cards' })
-            .order('submission_id', { ascending: true })
-            .order('card_index', { ascending: true });
+     // ---- cards ----
+let cards = [];
+if (wantCards) {
+  const ids = [...new Set(members.map(m => m.submission_id).filter(Boolean))];
+  if (ids.length) {
+    const { data: c, error: cErr } = await sb()
+      .from('submission_cards')
+      .select(`
+        id,
+        submission_id,
+        created_at,
+        status,
+        grading_service,
+        year,
+        brand,
+        set,
+        player,
+        card_number,
+        variation,
+        notes,
+        card_index,
+        break_date,
+        break_channel,
+        break_number,
+        card_description,
+        group_cards!left ( group_id, card_no )
+      `)
+      .in('submission_id', ids)
+      // IMPORTANT: do NOT filter on group_cards.group_id, or you’ll exclude unnumbered cards
+      .order('submission_id', { ascending: true })
+      .order('card_index', { ascending: true });
 
-          if (!cErr) {
-            const toYMD = (val) => {
-              try {
-                if (!val) return null;
-                const s = String(val);
-                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-                const d = new Date(s);
-                return isNaN(d) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
-              } catch { return null; }
-            };
+    if (!cErr) {
+      const toYMD = (val) => {
+        try {
+          if (!val) return null;
+          const s = String(val);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+          const d = new Date(s);
+          return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10);
+        } catch { return null; }
+      };
 
-            cards = (c || []).map(row => {
-              const sub = subById.get(String(row.submission_id));
-              const createdFrom = sub?.created_at ?? row.created_at;
-              return {
-                ...row,
-                created_at: createdFrom,
-                _created_on: toYMD(createdFrom),
-                _break_on:   toYMD(row.break_date ?? row.created_at),
-                group_card_no: row?.group_cards?.[0]?.card_no ?? null
-              };
-            });
-          }
-        }
-      }
+      cards = (c || []).map(row => {
+        const sub = subById.get(String(row.submission_id));
+        const createdFrom = sub?.created_at ?? row.created_at;
+        // If numbering exists for THIS group, surface it; otherwise null
+        const gc = Array.isArray(row.group_cards)
+          ? row.group_cards.find(g => g.group_id === groupId)
+          : null;
+
+        return {
+          ...row,
+          created_at: createdFrom,
+          _created_on: toYMD(createdFrom),
+          _break_on:   toYMD(row.break_date ?? row.created_at),
+          group_card_no: gc?.card_no ?? null
+        };
+      });
+    }
+  }
+}
 
       res.status(200).json({
         ...group,
