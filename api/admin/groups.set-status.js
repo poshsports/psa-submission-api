@@ -26,11 +26,19 @@ const ALLOWED = new Set([
   'delivered',
 ]);
 
-// Frontend "phase" aliases ➜ concrete submission statuses
+// Optional phase aliases ➜ concrete submission statuses
 const STATUS_ALIASES = {
   ready_to_ship: 'received',
   at_psa: 'shipped_to_psa',
 };
+
+// Forward-only rank (lower -> earlier)
+const FLOW = [
+  'pending_payment','submitted','submitted_paid','received',
+  'shipped_to_psa','in_grading','graded','shipped_back_to_us',
+  'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
+];
+const RANK = FLOW.reduce((m, v, i) => ((m[v] = i), m), {});
 
 // Group lifecycle rank (forward-only)
 const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
@@ -129,7 +137,7 @@ export default async function handler(req, res) {
       groupRow = data; groupId = data.id;
     }
 
-    // 1) Update submissions via your existing RPC
+    // --- 1) Update submissions via your existing RPC (best effort) ---
     const { data: rpcData, error: rpcErr } = await supabase.rpc(
       'set_submissions_status_for_group',
       { p_group_id: groupId, p_status: subStatus }
@@ -140,14 +148,14 @@ export default async function handler(req, res) {
       res.end(JSON.stringify({ ok: false, error: rpcErr.message || 'rpc_failed' }));
       return;
     }
-    const updated =
+    const rpcUpdated =
       (typeof rpcData === 'number') ? rpcData :
       (rpcData?.updated ?? rpcData?.count ?? 0);
 
-    // 1b) Guarantee card cascade (idempotent if RPC already cascades)
-    let cardCascadeWarning = null;
+    // --- 1a) Forward-only fallback: bump submissions directly if RPC did nothing ---
+    // Gather submission ids in the group
     let submissionIds = [];
-    try {
+    {
       const { data: members, error: memErr } = await supabase
         .from('group_submissions')
         .select('submission_id')
@@ -155,16 +163,47 @@ export default async function handler(req, res) {
       if (!memErr && Array.isArray(members)) {
         submissionIds = members.map(m => m.submission_id).filter(Boolean);
       }
-    } catch {}
-    if (submissionIds.length) {
-      const { error: cErr } = await supabase
-        .from('submission_cards')
-        .update({ status: subStatus, updated_at: nowIso() })
-        .in('submission_id', submissionIds);
-      if (cErr) cardCascadeWarning = cErr.message || 'cards_update_failed';
     }
 
-    // 2) Advance group lifecycle + timestamps (forward-only)
+    let directUpdated = 0;
+    if (submissionIds.length) {
+      const targetRank = RANK[subStatus] ?? 999;
+      // Read current statuses to keep it forward-only
+      const { data: subsNow } = await supabase
+        .from('submissions')
+        .select('id, status')
+        .in('id', submissionIds);
+
+      const idsToBump = (subsNow || [])
+        .filter(r => (RANK[String(r.status || '')] ?? -1) < targetRank)
+        .map(r => r.id);
+
+      if (idsToBump.length) {
+        const { data: up2, error: upErr2 } = await supabase
+          .from('submissions')
+          .update({ status: subStatus, updated_at: nowIso() })
+          .in('id', idsToBump)
+          .select('id');
+        if (upErr2) {
+          // non-fatal; continue to cards + group
+        } else {
+          directUpdated = Array.isArray(up2) ? up2.length : 0;
+        }
+      }
+    }
+
+    // --- 1b) Ensure cards cascade (idempotent if the RPC already cascades) ---
+    let cardsUpdated = 0;
+    if (submissionIds.length) {
+      const { data: upCards, error: cErr } = await supabase
+        .from('submission_cards')
+        .update({ status: subStatus, updated_at: nowIso() })
+        .in('submission_id', submissionIds)
+        .select('id');
+      if (!cErr && Array.isArray(upCards)) cardsUpdated = upCards.length;
+    }
+
+    // --- 2) Advance group lifecycle + timestamps (forward-only) ---
     let target = targetGroupStatusForSubmissionStatus(subStatus);
     if (requested === 'ready_to_ship') target = 'ReadyToShip';
 
@@ -191,9 +230,11 @@ export default async function handler(req, res) {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
             ok: true,
-            updated,
+            updated_rpc: rpcUpdated,
+            updated_submissions: directUpdated,
+            updated_cards: cardsUpdated,
             group: finalGroup,
-            warning: `submissions_updated_but_group_status_sync_failed: ${uerr.message || 'unknown'}${cardCascadeWarning ? `; ${cardCascadeWarning}` : ''}`
+            warning: `submissions_updated_but_group_status_sync_failed: ${uerr.message || 'unknown'}`
           }));
           return;
         }
@@ -204,14 +245,15 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({
       ok: true,
-      updated,
+      updated_rpc: rpcUpdated,
+      updated_submissions: directUpdated,
+      updated_cards: cardsUpdated,
       group: {
         id: finalGroup.id,
         status: finalGroup.status,
         shipped_at: finalGroup.shipped_at,
         returned_at: finalGroup.returned_at,
-      },
-      ...(cardCascadeWarning ? { warning: cardCascadeWarning } : {})
+      }
     }));
   } catch (err) {
     res.statusCode = 500;
