@@ -1,6 +1,4 @@
 // api/admin/groups.set-status.js
-// Bulk-update all submissions in a group (and their cards), then sync the group header/lifecycle.
-
 import { requireAdmin } from '../_util/adminAuth.js';
 import { createClient } from '@supabase/supabase-js';
 
@@ -12,7 +10,7 @@ const SERVICE_KEY =
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-// Allowed submission statuses (must match DB / UI)
+// Allowed submission statuses (must match DB/UI)
 const ALLOWED = new Set([
   'pending_payment','submitted','submitted_paid','received',
   'shipped_to_psa','in_grading','graded','shipped_back_to_us',
@@ -28,7 +26,7 @@ const FLOW = [
   'shipped_to_psa','in_grading','graded','shipped_back_to_us',
   'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
 ];
-const RANK = FLOW.reduce((m, v, i) => (m[v] = i, m), {});
+const RANK = FLOW.reduce((m, v, i) => ((m[v] = i), m), {});
 
 // Group lifecycle rank (forward-only)
 const GROUP_RANK = { Draft: 0, ReadyToShip: 1, AtPSA: 2, Returned: 3, Closed: 4 };
@@ -71,30 +69,38 @@ export default async function handler(req, res) {
     // Resolve group
     let groupRow = null;
     if (groupId) {
-      const { data, error } = await supabase.from('groups')
-        .select('id,status,shipped_at,returned_at').eq('id', groupId).single();
+      const { data, error } = await supabase
+        .from('groups').select('id,status,shipped_at,returned_at')
+        .eq('id', groupId).single();
       if (error || !data) return res.status(404).json({ ok:false, error:'group_not_found' });
       groupRow = data; groupId = data.id;
     } else {
-      const { data, error } = await supabase.from('groups')
-        .select('id,status,shipped_at,returned_at').eq('code', groupCode).single();
+      const { data, error } = await supabase
+        .from('groups').select('id,status,shipped_at,returned_at')
+        .eq('code', groupCode).single();
       if (error || !data) return res.status(404).json({ ok:false, error:'group_not_found' });
       groupRow = data; groupId = data.id;
     }
 
-    // 1) Best-effort RPC (if present)
+    // 1) Best-effort RPC (kept)
     const { data: rpcData, error: rpcErr } = await supabase
       .rpc('set_submissions_status_for_group', { p_group_id: groupId, p_status: subStatus });
     if (rpcErr) return res.status(500).json({ ok:false, error: rpcErr.message || 'rpc_failed' });
     const rpcUpdated = (typeof rpcData === 'number') ? rpcData : (rpcData?.updated ?? rpcData?.count ?? 0);
 
-    // Collect submission_ids in this group (psa-###)
+    // Collect submission_ids and card_ids for this group
     let submissionIds = [];
+    let cardIds = [];
     {
       const { data: members, error: memErr } = await supabase
         .from('group_submissions').select('submission_id').eq('group_id', groupId);
       if (memErr) return res.status(500).json({ ok:false, error: memErr.message || 'members_query_failed' });
       submissionIds = (members || []).map(m => m.submission_id).filter(Boolean);
+
+      const { data: links, error: linkErr } = await supabase
+        .from('group_cards').select('card_id').eq('group_id', groupId);
+      if (linkErr) return res.status(500).json({ ok:false, error: linkErr.message || 'links_query_failed' });
+      cardIds = (links || []).map(r => r.card_id).filter(Boolean);
     }
 
     // 1a) Forward-only fallback on psa_submissions (by submission_id)
@@ -121,13 +127,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // 1b) Cascade to submission_cards (by submission_id)
+    // 1b) Cascade to cards by card_id (safer than submission_id)
     let updatedCards = 0;
-    if (submissionIds.length) {
+    if (cardIds.length) {
       const { data: upCards } = await supabase
         .from('submission_cards')
         .update({ status: subStatus, updated_at: nowIso() })
-        .in('submission_id', submissionIds)
+        .in('id', cardIds)
         .select('id');
       updatedCards = Array.isArray(upCards) ? upCards.length : 0;
     }
@@ -144,6 +150,7 @@ export default async function handler(req, res) {
         const patch = { status: target, updated_at: nowIso() };
         if (target === 'AtPSA'   && !groupRow.shipped_at)  patch.shipped_at  = nowIso();
         if (target === 'Returned'&& !groupRow.returned_at) patch.returned_at = nowIso();
+
         const { data: up } = await supabase
           .from('groups').update(patch).eq('id', groupId)
           .select('id,status,shipped_at,returned_at').single();
