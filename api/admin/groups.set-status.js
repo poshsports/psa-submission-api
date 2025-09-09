@@ -47,7 +47,9 @@ async function readJson(req) {
   const raw = Buffer.concat(chunks).toString('utf8');
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
+
 const nowIso = () => new Date().toISOString();
+function sample(arr, n = 5) { return (arr || []).slice(0, n); }
 
 export default async function handler(req, res) {
   try {
@@ -168,6 +170,13 @@ export default async function handler(req, res) {
         status: finalGroup.status,
         shipped_at: finalGroup.shipped_at,
         returned_at: finalGroup.returned_at,
+      },
+      debug: {
+        groupId,
+        submissionIds_len: submissionIds.length,
+        submissionIds_sample: sample(submissionIds),
+        cardIds_len: cardIds.length,
+        cardIds_sample: sample(cardIds),
       }
     });
   } catch (err) {
