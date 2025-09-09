@@ -703,32 +703,40 @@ btnApply?.addEventListener('click', async () => {
 
   btnApply.disabled = true;
   btnApply.textContent = 'Applying…';
-  try {
-    const res = await fetch('/api/admin/groups.set-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        status: value,
-        group_id: String(grp?.id || id),
-      })
-    });
+try {
+  const res = await fetch('/api/admin/groups.set-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      status: value,
+      group_id: String(grp?.id || id),
+    })
+  });
 
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
-    // After receiving from PSA, lock bulk in Returned
-    if (value === 'received_from_psa') {
-      updateBulkStatusVisibility('Returned', false);
-    }
+  // 👇 Debug info from the API (helps us verify submission/card selection on the server)
+  if (j.debug) console.log('groups.set-status debug:', j.debug);
 
-    await renderDetail(root, id, codeOut);
-  } catch (err) {
-    alert(err.message || 'Failed to update status');
-    btnApply.disabled = false;
-    btnApply.textContent = 'Apply';
-    return;
+  // Update the group header immediately (optional; we also re-fetch right after)
+  if (j.group?.status) {
+    const statusEl = root.querySelector('.card .note + div'); // the "Status" value cell
+    if (statusEl) statusEl.textContent = j.group.status;
   }
+
+  // If we just marked "Received from PSA", hide bulk in Returned
+  if (value === 'received_from_psa') updateBulkStatusVisibility('Returned', false);
+
+  // Always refresh the detail view to pull updated rows
+  await renderDetail(root, id, codeOut);
+} catch (err) {
+  alert(err.message || 'Failed to update status');
+  btnApply.disabled = false;
+  btnApply.textContent = 'Apply';
+  return;
+}
 });
 
 
