@@ -991,8 +991,15 @@ if (id) {
 }
 
 
-      console.log('submissions.set-status →', body);
-      const r = await fetch('/api/admin/submissions.set-status', {
+      // Decide forward vs backward move using the *submission's* current status
+      const current = String(rec?.status || '');
+      const movingBackward = idxOf(to) < idxOf(current);
+
+      const url = (movingBackward && (grp?.reopen_hold === true))
+        ? '/api/admin/submissions.correct-status'  // admin-only override while reopened
+        : '/api/admin/submissions.set-status';     // original forward-only path
+
+      const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
