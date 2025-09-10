@@ -544,21 +544,13 @@ const CARD_COLS = [
   label: 'Status',
   fmt: (c) => {
     const rawSid = String(c.submission_id || '');
-    const subRec = subById.get(rawSid) || subByCode.get(rawSid) || {};
+const subRec = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-    // Prefer a real UUID from whatever field your API uses.
-    const pickUuid = (v) => {
-      const s = String(v || '').trim();
-      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s) ? s : '';
-    };
-    const sid =
-      pickUuid(subRec.id) ||
-      pickUuid(subRec.uuid) ||
-      pickUuid(subRec.submission_id) ||
-      '';
+// Prefer *any* id the API gave us (UUID, numeric, etc.). Fall back to the row’s submission_id.
+const sid   = String(subRec?.id ?? c.submission_id ?? '').trim();
+// Keep the human code as a fallback/debug aid.
+const scode = String(subRec?.code ?? rawSid ?? '').trim();
 
-    // Always keep the human code handy as a fallback/debug aid
-    const scode = String(subRec.code || rawSid || '');
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
     const showSelect = POST_PSA_SET.has(eff);
@@ -843,13 +835,16 @@ async function saveRowStatuses() {
   try {
     for (const { subId, subCode, to } of targets.values()) {
             const body = { status: to, cascade_cards: true };
-      // Send both: backend can pick whichever it supports.
-      if (subId)  body.submission_id  = subId;
-      if (subCode) body.submission_code = subCode;
-      if (!subId && !subCode) throw new Error('Missing submission identifier');
+// Backend requires submission_id. Use it whenever present; only fall back to code if truly no id.
+if (subId) {
+  body.submission_id = subId;
+} else if (subCode) {
+  body.submission_code = subCode;
+} else {
+  throw new Error('Missing submission identifier');
+}
+console.log('submissions.set-status →', body);
 
-            // Debug what we are sending (visible in DevTools console)
-      console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
