@@ -426,6 +426,10 @@ root.innerHTML = `
     state.currentId = null;
     renderList(root);
   });
+  
+// UUID helper used when building payloads:
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (s) => UUID_RE.test(String(s || '').trim());
 
   const $box = $('gdetail');
   try {
@@ -516,44 +520,28 @@ const CARD_COLS = [
   }
 },
   {
-    label: 'Card',
-    fmt: (c) => {
-      const desc = (c.card_description && String(c.card_description).trim())
-        ? safe(c.card_description) : '';
-      if (desc) return desc;
-      const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
-        .filter(v => v != null && String(v).trim() !== '')
-        .map(v => safe(v));
-      return bits.join(' · ') || '—';
-    }
-  },
-  {
-    label: 'Card #',
-    fmt: (c) => {
-      const n = (c.group_card_no ?? null);
-      const txt = (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
-      return `<span class="cardno-read">${txt}</span>`;
-    }
-  },
-  { label: 'Break date',    fmt: (c) => safe(c._break_on || '') },
-  { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
-  { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
-
-  // Status column: becomes a dropdown in post-PSA phase
-{
   label: 'Status',
   fmt: (c) => {
-    const rawSid = String(c.submission_id || '');
-const subRec = subById.get(rawSid) || subByCode.get(rawSid) || {};
+    const rawSid  = String(c.submission_id || '');
+    const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-// Prefer *any* id the API gave us (UUID, numeric, etc.). Fall back to the row’s submission_id.
-const sid   = String(subRec?.id ?? c.submission_id ?? '').trim();
-// Keep the human code as a fallback/debug aid.
-const scode = String(subRec?.code ?? rawSid ?? '').trim();
+    // Only treat true UUIDs as "id"
+    const pickUuid = (v) => {
+      const s = String(v || '').trim();
+      return UUID_RE.test(s) ? s : '';
+    };
 
+    const sid =
+      pickUuid(subRec.id) ||
+      pickUuid(subRec.uuid) ||
+      pickUuid(subRec.submission_id) ||
+      '';
+
+    const scode = String(subRec.code || rawSid || '');
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
     const showSelect = POST_PSA_SET.has(eff);
+
     if ((!sid && !scode) || !showSelect) {
       return eff ? escapeHtml(prettyStatus(eff)) : '—';
     }
@@ -575,6 +563,7 @@ const scode = String(subRec?.code ?? rawSid ?? '').trim();
     `;
   },
 },
+
 
 
   {
@@ -834,17 +823,16 @@ async function saveRowStatuses() {
 
   try {
     for (const { subId, subCode, to } of targets.values()) {
-            const body = { status: to, cascade_cards: true };
-// Backend requires submission_id. Use it whenever present; only fall back to code if truly no id.
-if (subId) {
-  body.submission_id = subId;
-} else if (subCode) {
-  body.submission_code = subCode;
-} else {
-  throw new Error('Missing submission identifier');
-}
-console.log('submissions.set-status →', body);
+      const body = { status: to, cascade_cards: true };
 
+      // Only include submission_id if it's a real UUID; always include code when present.
+      if (isUuid(subId)) body.submission_id = subId;
+      if (subCode)       body.submission_code = subCode;
+      if (!body.submission_id && !body.submission_code) {
+        throw new Error('Missing submission identifier');
+      }
+
+      console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -857,7 +845,6 @@ console.log('submissions.set-status →', body);
       }
     }
 
-    // Re-render the SAME group (uses the outer "id" – not shadowed)
     pending.clear();
     btnSaveStatuses.disabled = true;
     btnSaveStatuses.textContent = 'Save status changes';
@@ -868,6 +855,7 @@ console.log('submissions.set-status →', body);
     btnSaveStatuses.textContent = 'Save status changes';
   }
 }
+
 
 
 btnSaveStatuses?.addEventListener('click', saveRowStatuses);
