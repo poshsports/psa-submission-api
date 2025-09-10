@@ -753,15 +753,30 @@ const btnApply   = $('applyBulkStatus');
 const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack = rowsData.some(r => (effectiveRowStatus(r) === 'shipped_back_to_us'));
 
+// Build the bulk options based on group phase.
+// We use submission statuses (the server maps these to the right group phase).
 let PHASE_OPTIONS = [];
-if (gPhase === 'atpsa') {
+
+if (gPhase === 'draft' || gPhase === 'readytoship') {
+  // Allow advancing the whole group into the AtPSA phase
+  PHASE_OPTIONS = [
+    ['shipped_to_psa',   'Shipped to PSA'],
+    ['in_grading',       'In Grading'],
+    ['graded',           'Graded'],
+  ];
+} else if (gPhase === 'atpsa') {
+  // At PSA → either mark all as shipped back to us, or received from PSA
   PHASE_OPTIONS = [
     ['shipped_back_to_us','Shipped Back to Us'],
-    ['received_from_psa','Received from PSA'],
+    ['received_from_psa', 'Received from PSA'],
   ];
 } else if (gPhase === 'returned' && anyShippedBack) {
-  PHASE_OPTIONS = [['received_from_psa','Received from PSA']];
+  // In Returned, only offer "Received from PSA" while any row is still shipped back
+  PHASE_OPTIONS = [
+    ['received_from_psa', 'Received from PSA'],
+  ];
 }
+
 
 
 
