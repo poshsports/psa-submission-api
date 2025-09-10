@@ -482,9 +482,22 @@ const pickBreakChannel = (row, sub) =>
     const submissions = Array.isArray(grp?.submissions) ? grp.submissions : [];
     const cards = Array.isArray(grp?.cards) ? grp.cards : [];
 
-// Map submissions for quick lookup by id OR by code
-const subById   = new Map(submissions.map(s => [String(s.id), s]));
-const subByCode = new Map(submissions.map(s => [String(s.code), s]));
+// Accept multiple possible property names from the API
+const pickUuid = (s) => {
+  const cand = String(s.id ?? s.uuid ?? s.submission_uuid ?? '').trim();
+  return UUID_RE.test(cand) ? cand : '';
+};
+const pickCode = (s) => String(s.code ?? s.submission_id ?? s.submission_code ?? '').trim();
+
+const subById = new Map();
+const subByCode = new Map();
+for (const s of submissions) {
+  const uid = pickUuid(s);
+  const cod = pickCode(s);
+  if (uid) subById.set(uid, s);
+  if (cod) subByCode.set(cod, s);
+}
+
 
 const POST_PSA_SET = new Set(POST_PSA_ORDER);
 const PRE_PSA_SET  = new Set(PRE_PSA_ORDER);
@@ -568,11 +581,15 @@ const CARD_COLS = [
     const rawSid  = String(c.submission_id || '');
     const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-const idCandidate = String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
-const sid   = toUuid(idCandidate);
-const scode = sid ? '' : String(subRec?.code ?? rawSid ?? '').trim();
+const idCandidate =
+  String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_uuid ?? '').trim();
+const sid = toUuid(idCandidate);
 
-
+const scode = String(
+  sid
+    ? '' // prefer UUID
+    : (subRec?.code ?? subRec?.submission_id ?? subRec?.submission_code ?? rawSid ?? '')
+).trim();
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
     const showSelect = POST_PSA_SET.has(eff);
@@ -882,21 +899,30 @@ async function saveRowStatuses() {
       // 2) Recover from our maps if either piece is missing or mixed up
       //    (covers: id in code, code in id, or one side empty)
       const rec =
-        (id   && subById.get(id)) ||
-        (code && subByCode.get(code)) ||
-        subByCode.get(subId || '') ||
-        subById.get(subCode || '');
+  (id   && subById.get(id)) ||
+  (code && subByCode.get(code)) ||
+  subById.get(subId || '') ||
+  subByCode.get(subId || '') ||
+  subById.get(subCode || '') ||
+  subByCode.get(subCode || '');
+
 
       if (rec) {
-        if (!id)   id   = toUuid(rec.id || rec.uuid || rec.submission_id);
-        if (!code) code = String(rec.code || rec.submission_id || '').trim();
-      }
+  if (!id)   id   = toUuid(rec.id ?? rec.uuid ?? rec.submission_uuid);
+  if (!code) code = String(rec.code ?? rec.submission_id ?? rec.submission_code ?? '').trim();
+}
 
-      // 3) Must have a real UUID now — fail fast with a clear message
-      if (!id) throw new Error(`Couldn't resolve UUID for submission ${code || subCode || subId}`);
 
-      // 4) Send ONLY the UUID; let the server cascade to cards
-      const body = { status: to, cascade_cards: true, submission_id: id };
+      // 3) Build body. Prefer UUID; if we only have a code, let backend resolve it.
+const body = { status: to, cascade_cards: true };
+if (id) {
+  body.submission_id = id;
+} else if (code) {
+  body.submission_code = code; // backend should accept this
+} else {
+  throw new Error(`Couldn't resolve identifier for submission ${subCode || subId}`);
+}
+
 
       console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
