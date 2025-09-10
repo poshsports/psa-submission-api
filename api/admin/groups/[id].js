@@ -117,7 +117,7 @@ export default async function handler(req, res) {
 const client = sb();
 const { data: base, error: gErr } = await client
   .from('groups')
-  .select('id, code, status, notes, shipped_at, returned_at, created_at, updated_at')
+  .select('id, code, status, reopen_hold, notes, shipped_at, returned_at, created_at, updated_at')
   .eq('id', groupId)
   .single();
 
@@ -415,7 +415,7 @@ const allSubsPost = (!allCardsPost && Array.isArray(submissions) && submissions.
 
 const bulk_locked = allCardsPost || allSubsPost;
 
-// "Closed" once everything is delivered to customer
+// "Closed" (by data) once everything is delivered to customer
 const isDelivered = (s) => toStatus(s) === 'delivered';
 const allCardsDelivered = (Array.isArray(cards) && cards.length > 0)
   ? cards.every(c => isDelivered(c?.status))
@@ -423,9 +423,13 @@ const allCardsDelivered = (Array.isArray(cards) && cards.length > 0)
 const allSubsDelivered = (!allCardsDelivered && Array.isArray(submissions) && submissions.length > 0)
   ? submissions.every(s => isDelivered(s?.status))
   : false;
-const closed = allCardsDelivered || allSubsDelivered;
+const closed_by_data = allCardsDelivered || allSubsDelivered;
 
-// Present an effective status (do NOT mutate DB here)
+// After a manual Re-open we hold the group open until the admin closes it
+const suppressAutoClose = !!group.reopen_hold;
+
+// What the UI should show right now
+const closed = suppressAutoClose ? false : closed_by_data;
 const status_effective = closed ? 'Closed' : (group.status || '');
 
 // Return group with effective status + lock flags
@@ -438,6 +442,8 @@ res.status(200).json({
   members,
   submissions,
   cards,
+  reopen_hold: !!group.reopen_hold,
+  closed_by_data,
   _debug: { version: 'v3', include: [...includeSet] }
 });
 
