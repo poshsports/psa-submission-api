@@ -444,7 +444,7 @@ const toUuid = (v) => (UUID_RE.test(String(v || '').trim()) ? String(v).trim() :
     const payload = await res.json();
     if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
     const grp = payload?.group ?? payload;
-    const isClosed = !!grp?.closed || String(grp?.status || '').toLowerCase() === 'closed';
+    const isClosed = String(grp?.status || '').toLowerCase() === 'closed';
 
     const safe = (v) => escapeHtml(String(v ?? ''));
 
