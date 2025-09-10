@@ -259,12 +259,15 @@ if (wantCards) {
     }
 
 
-    if (toInsert.length) {
-      const { error: insErr } = await client.from('submission_cards').insert(toInsert);
-      if (insErr) {
-        return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: insErr.message });
+        if (toInsert.length) {
+      const { error: upErr } = await client
+        .from('submission_cards')
+        .upsert(toInsert, { onConflict: 'submission_id,card_index' }); // idempotent
+      if (upErr) {
+        return res.status(500).json({ ...group, members, submissions, cards: [], _cards_error: upErr.message });
       }
     }
+
 
     // 2) Select cards (now guaranteed to exist) with LEFT join to group_cards
     const selectCards = async () => client
