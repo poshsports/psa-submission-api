@@ -399,12 +399,29 @@ if (wantCards) {
   }
 }
 
+      // Compute lock for bulk updates:
+      // lock once ALL items in the group are at/after 'received_from_psa'
+      const POST_PSA_SET = new Set([
+        'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
+      ]);
+
+      // Prefer card statuses when cards exist; otherwise fall back to submission statuses.
+      const allCardsPost = (Array.isArray(cards) && cards.length > 0)
+        ? cards.every(c => POST_PSA_SET.has(String(c?.status || '').toLowerCase()))
+        : false;
+
+      const allSubsPost = (!allCardsPost && Array.isArray(submissions) && submissions.length > 0)
+        ? submissions.every(s => POST_PSA_SET.has(String(s?.status || '').toLowerCase()))
+        : false;
+
+      const bulk_locked = allCardsPost || allSubsPost;
+
       res.status(200).json({
         ...group,
+        bulk_locked,
         members,
         submissions,
         cards,
-        bulk_locked, // ← NEW
         _debug: { version: 'v3', include: [...includeSet] }
       });
       return;
