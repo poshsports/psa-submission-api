@@ -766,7 +766,28 @@ $('btnReopen')?.addEventListener('click', async () => {
 });
 
 $('btnCloseGroup')?.addEventListener('click', async () => {
+  // 1) Guard: every row must be Delivered to Customer
+  const notDelivered = rowsData.filter(r => (effectiveRowStatus(r) !== 'delivered'));
+
+  if (notDelivered.length) {
+    const sample = notDelivered.slice(0, 5).map(r => {
+      const sid = String(r.submission_id || '');
+      const sub = subById.get(sid) || subByCode.get(sid) || {};
+      const label = sub.code || sid || '?';
+      return `${label} → ${prettyStatus(effectiveRowStatus(r))}`;
+    });
+
+    alert(
+      'You can only close the group once every submission is Delivered to Customer.\n\n' +
+      `Still pending: ${notDelivered.length}` +
+      (sample.length ? `\n\nExamples:\n• ${sample.join('\n• ')}` : '')
+    );
+    return;
+  }
+
+  // 2) Proceed with the close if everything is delivered
   if (!confirm('Close this group now? This sets the stored status to "Closed" and ends the manual hold.')) return;
+
   try {
     const r = await fetch('/api/admin/groups.close', {
       method: 'POST',
@@ -781,6 +802,7 @@ $('btnCloseGroup')?.addEventListener('click', async () => {
     alert(e.message || 'Close failed');
   }
 });
+
 
       
 // --- Bulk status (submissions in this group) ---
