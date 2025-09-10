@@ -113,17 +113,24 @@ export default async function handler(req, res) {
         groupId = byCode.id;
       }
 
-      // Base group via RPC
-      const { data: rpcData, error: rpcErr } = await sb().rpc('get_group', { p_group_id: groupId });
-      if (rpcErr) {
-        res.status(500).json({ ok: false, error: rpcErr.message || 'Database error', _debug: { version: 'v3' } });
-        return;
-      }
-      const group = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-      if (!group) {
-        res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
-        return;
-      }
+// Base group — read stored status directly (no auto-close on read)
+const client = sb();
+const { data: base, error: gErr } = await client
+  .from('groups')
+  .select('id, code, status, notes, shipped_at, returned_at, created_at, updated_at')
+  .eq('id', groupId)
+  .single();
+
+if (gErr) {
+  res.status(500).json({ ok: false, error: gErr.message || 'Database error', _debug: { version: 'v3' } });
+  return;
+}
+if (!base) {
+  res.status(404).json({ ok: false, error: 'Group not found', _debug: { version: 'v3' } });
+  return;
+}
+
+const group = { ...base };
 
       // ---- members ----
       let members = [];
