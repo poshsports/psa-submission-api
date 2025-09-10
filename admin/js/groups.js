@@ -427,8 +427,6 @@ root.innerHTML = `
     renderList(root);
   });
 
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const isUuid = (s) => UUID_RE.test(String(s || '').trim());
   const $box = $('gdetail');
   try {
     // Fetch the group (include all the data we need in one go)
@@ -836,10 +834,12 @@ async function saveRowStatuses() {
   try {
     for (const { subId, subCode, to } of targets.values()) {
       const body = { status: to, cascade_cards: true };
-      if (subId && isUuid(subId)) {
-        body.submission_id = subId;          // use UUID when we have it
+            // Always prefer submission_id if we have one (UUID or numeric).
+      if (subId) {
+        body.submission_id = subId;
       } else if (subCode) {
-        body.submission_code = subCode;      // fall back to code
+        // Fallback only if your API really supports codes; otherwise this is ignored.
+        body.submission_code = subCode;
       } else {
         throw new Error('Missing submission identifier');
       }
