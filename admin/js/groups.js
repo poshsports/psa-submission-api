@@ -754,24 +754,60 @@ const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack = rowsData.some(r => (effectiveRowStatus(r) === 'shipped_back_to_us'));
 
 // Build the bulk options based on group phase.
-// Show the full ladder (shipped_to_psa → received_from_psa) while we haven't marked Received.
+// Show the full ladder (shipped_to_psa → received_from_psa) until we lock.
 // The server enforces forward-only moves.
 let PHASE_OPTIONS = [];
 
-// Full ladder we want visible pre-Received
 const PRE_RECEIVED_OPTIONS = [
-  ['shipped_to_psa',   'Shipped to PSA'],
-  ['in_grading',       'In Grading'],
-  ['graded',           'Graded'],
+  ['shipped_to_psa',    'Shipped to PSA'],
+  ['in_grading',        'In Grading'],
+  ['graded',            'Graded'],
   ['shipped_back_to_us','Shipped Back to Us'],
   ['received_from_psa', 'Received from PSA'],
 ];
 
-// If we are in Draft / ReadyToShip / AtPSA / Returned (but not fully received),
-// show all options; backend will block any invalid/backwards transitions.
+// Default: show the ladder pre-Received
 if (gPhase === 'draft' || gPhase === 'readytoship' || gPhase === 'atpsa' || gPhase === 'returned') {
   PHASE_OPTIONS = PRE_RECEIVED_OPTIONS;
 }
+
+// Write options
+const bulkSel =
+  document.getElementById('bulkStatusSelect') ||
+  document.querySelector('#bulk-status-select, [data-role="bulk-status"]');
+const bulkApply =
+  document.getElementById('bulkStatusApply') ||
+  document.querySelector('#bulk-status-apply, [data-role="bulk-apply"]');
+
+if (bulkSel) {
+  bulkSel.innerHTML = '';
+  const opt0 = document.createElement('option');
+  opt0.value = '';
+  opt0.textContent = '— Select a status —';
+  bulkSel.appendChild(opt0);
+
+  for (const [value, label] of PHASE_OPTIONS) {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    bulkSel.appendChild(o);
+  }
+}
+
+// NEW: lock the control once ALL submissions are at/after 'received_from_psa'
+const bulkLocked = !!(group && group.bulk_locked);
+if (bulkLocked) {
+  if (bulkSel) {
+    bulkSel.disabled = true;
+    // Optional: add a visual hint
+    bulkSel.title = 'Bulk changes disabled after Received from PSA';
+  }
+  if (bulkApply) {
+    bulkApply.disabled = true;
+    bulkApply.title = 'Bulk changes disabled after Received from PSA';
+  }
+}
+
 
 // (If you ever want to restrict after Received, add a branch here based on a flag
 // like `allReceivedFromPsa` and set PHASE_OPTIONS = [] to hide the dropdown.)
