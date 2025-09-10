@@ -91,12 +91,53 @@ export default async function handler(req, res){
       res.end(JSON.stringify({ ok:false, error:'submission_not_found' })); return;
     }
 
-    const resolvedId = sub.id;
-    const curr = String(sub.status || '').toLowerCase();
-    if (RANK[status] < (RANK[curr] ?? -1)) {
-      res.statusCode = 400; res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:'cannot_move_backward' })); return;
+const resolvedId = sub.id;
+const curr = String(sub.status || '').toLowerCase();
+
+const movingBackward = RANK[status] < (RANK[curr] ?? -1);
+if (movingBackward) {
+  // Allow backward only within the post-PSA ladder AND only if the
+  // submission is in any group that has been re-opened (reopen_hold = true).
+  const POST_SET = new Set([
+    'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
+  ]);
+
+  let allowBackward = false;
+
+  if (POST_SET.has(curr) && POST_SET.has(status)) {
+    try {
+      const code = sub.submission_id; // human code like 'psa-190'
+
+      // Which groups contain this submission?
+      const { data: links, error: linksErr } = await supabase
+        .from('group_submissions')
+        .select('group_id')
+        .eq('submission_id', code);
+
+      if (!linksErr && Array.isArray(links) && links.length) {
+        const groupIds = [...new Set(links.map(r => r.group_id).filter(Boolean))];
+        if (groupIds.length) {
+          // Is any of those groups currently re-opened?
+          const { data: openGroups, error: gErr } = await supabase
+            .from('groups')
+            .select('id')
+            .in('id', groupIds)
+            .eq('reopen_hold', true)
+            .limit(1);
+
+          allowBackward = !gErr && Array.isArray(openGroups) && openGroups.length > 0;
+        }
+      }
+    } catch {
+      // swallow; we'll default to disallow
     }
+  }
+
+  if (!allowBackward) {
+    res.statusCode = 400; res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok:false, error:'cannot_move_backward' })); return;
+  }
+}
 
     // Update canonical submission status; DB trigger syncs cards.
     const { data: upd, error: uErr } = await supabase
