@@ -723,13 +723,14 @@ const table = `
         <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
             <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
-            <div>
-              <div class="note">Status</div>
-              <div id="gstatus">
-                <strong>${statusOut || '—'}</strong>
-                ${isClosed ? '<button id="btnReopen" class="ghost" title="Unlock for edits">Re-open</button>' : ''}
-              </div>
-            </div>
+<div>
+  <div class="note">Status</div>
+  <div id="gstatus">
+    <strong>${statusOut || '—'}</strong>
+    ${isClosed ? '<button id="btnReopen" class="ghost" title="Unlock for edits">Re-open</button>' : ''}
+    ${(!isClosed && grp.reopen_hold) ? '<button id="btnCloseGroup" class="primary" title="Mark group Closed">Close group</button>' : ''}
+  </div>
+</div>
             <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
             <div><div class="note">Returned</div><div>${returnedOut}</div></div>
             <div><div class="note">Updated</div><div>${updatedOut}</div></div>
@@ -764,6 +765,24 @@ $('btnReopen')?.addEventListener('click', async () => {
   }
 });
 
+$('btnCloseGroup')?.addEventListener('click', async () => {
+  if (!confirm('Close this group now? This sets the stored status to "Closed" and ends the manual hold.')) return;
+  try {
+    const r = await fetch('/api/admin/groups.close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ group_id: String(grp?.id || id) })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Close failed');
+    await renderDetail(root, id, codeOut);
+  } catch (e) {
+    alert(e.message || 'Close failed');
+  }
+});
+
+      
 // --- Bulk status (submissions in this group) ---
 // Supported bulk steps by phase:
 // Draft          -> ready_to_ship, at_psa
