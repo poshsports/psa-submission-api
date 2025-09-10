@@ -543,14 +543,25 @@ const CARD_COLS = [
 {
   label: 'Status',
   fmt: (c) => {
-    const rawSid  = String(c.submission_id || '');
-    const subRec  = subById.get(rawSid) || subByCode.get(rawSid);
-    const sid     = subRec?.id ? String(subRec.id) : '';
-    const scode   = subRec?.code ? String(subRec.code) : rawSid;
+    const rawSid = String(c.submission_id || '');
+    const subRec = subById.get(rawSid) || subByCode.get(rawSid) || {};
+
+    // Prefer a real UUID from whatever field your API uses.
+    const pickUuid = (v) => {
+      const s = String(v || '').trim();
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s) ? s : '';
+    };
+    const sid =
+      pickUuid(subRec.id) ||
+      pickUuid(subRec.uuid) ||
+      pickUuid(subRec.submission_id) ||
+      '';
+
+    // Always keep the human code handy as a fallback/debug aid
+    const scode = String(subRec.code || rawSid || '');
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
     const showSelect = POST_PSA_SET.has(eff);
-
     if ((!sid && !scode) || !showSelect) {
       return eff ? escapeHtml(prettyStatus(eff)) : '—';
     }
@@ -560,7 +571,6 @@ const CARD_COLS = [
       return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
     }).join('');
 
-    // IMPORTANT: this key must match the <tr data-card-id="..."> in the table builder
     const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
 
     return `
@@ -573,7 +583,6 @@ const CARD_COLS = [
     `;
   },
 },
-
 
 
   {
@@ -833,17 +842,14 @@ async function saveRowStatuses() {
 
   try {
     for (const { subId, subCode, to } of targets.values()) {
-      const body = { status: to, cascade_cards: true };
-            // Always prefer submission_id if we have one (UUID or numeric).
-      if (subId) {
-        body.submission_id = subId;
-      } else if (subCode) {
-        // Fallback only if your API really supports codes; otherwise this is ignored.
-        body.submission_code = subCode;
-      } else {
-        throw new Error('Missing submission identifier');
-      }
+            const body = { status: to, cascade_cards: true };
+      // Send both: backend can pick whichever it supports.
+      if (subId)  body.submission_id  = subId;
+      if (subCode) body.submission_code = subCode;
+      if (!subId && !subCode) throw new Error('Missing submission identifier');
 
+            // Debug what we are sending (visible in DevTools console)
+      console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
