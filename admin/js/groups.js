@@ -754,8 +754,8 @@ const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack = rowsData.some(r => (effectiveRowStatus(r) === 'shipped_back_to_us'));
 
 // Build the bulk options based on group phase.
-// Show the full ladder (shipped_to_psa → received_from_psa) until we lock.
-// The server enforces forward-only moves.
+// Show the full ladder (shipped_to_psa → received_from_psa) pre-Received.
+// The server still enforces forward-only moves.
 let PHASE_OPTIONS = [];
 
 const PRE_RECEIVED_OPTIONS = [
@@ -766,66 +766,33 @@ const PRE_RECEIVED_OPTIONS = [
   ['received_from_psa', 'Received from PSA'],
 ];
 
-// Default: show the ladder pre-Received
 if (gPhase === 'draft' || gPhase === 'readytoship' || gPhase === 'atpsa' || gPhase === 'returned') {
   PHASE_OPTIONS = PRE_RECEIVED_OPTIONS;
 }
 
-// Write options
-const bulkSel =
-  document.getElementById('bulkStatusSelect') ||
-  document.querySelector('#bulk-status-select, [data-role="bulk-status"]');
-const bulkApply =
-  document.getElementById('bulkStatusApply') ||
-  document.querySelector('#bulk-status-apply, [data-role="bulk-apply"]');
-
-if (bulkSel) {
-  bulkSel.innerHTML = '';
-  const opt0 = document.createElement('option');
-  opt0.value = '';
-  opt0.textContent = '— Select a status —';
-  bulkSel.appendChild(opt0);
-
-  for (const [value, label] of PHASE_OPTIONS) {
-    const o = document.createElement('option');
-    o.value = value;
-    o.textContent = label;
-    bulkSel.appendChild(o);
-  }
+// Populate <select id="bulkStatus"> and default Apply state
+if (bulkSelect) {
+  bulkSelect.innerHTML =
+    `<option value="">— Select a status —</option>` +
+    PHASE_OPTIONS.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
+  btnApply.disabled = true;
 }
 
-// NEW: lock the control once ALL submissions are at/after 'received_from_psa'
-const bulkLocked = !!(group && group.bulk_locked);
+// Lock controls once ALL submissions are at/after 'received_from_psa'
+const bulkLocked = !!(grp && grp.bulk_locked);
 if (bulkLocked) {
-  if (bulkSel) {
-    bulkSel.disabled = true;
-    // Optional: add a visual hint
-    bulkSel.title = 'Bulk changes disabled after Received from PSA';
+  if (bulkSelect) {
+    bulkSelect.disabled = true;
+    bulkSelect.title = 'Bulk changes disabled after Received from PSA';
   }
-  if (bulkApply) {
-    bulkApply.disabled = true;
-    bulkApply.title = 'Bulk changes disabled after Received from PSA';
+  if (btnApply) {
+    btnApply.disabled = true;
+    btnApply.title = 'Bulk changes disabled after Received from PSA';
   }
 }
-
 
 // (If you ever want to restrict after Received, add a branch here based on a flag
 // like `allReceivedFromPsa` and set PHASE_OPTIONS = [] to hide the dropdown.)
-
-
-
-// Populate dropdown
-if (bulkSelect) {
-  if (PHASE_OPTIONS.length) {
-    bulkSelect.innerHTML =
-      `<option value="">— Select a status —</option>` +
-      PHASE_OPTIONS.map(([v, l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('');
-    btnApply.disabled = true;
-  } else {
-    bulkSelect.innerHTML = `<option value="">— No bulk actions —</option>`;
-    btnApply.disabled = true;
-  }
-}
 
 // Show/hide the wrapper based on whether there are options
 updateBulkStatusVisibility(grp?.status, PHASE_OPTIONS.length > 0);
