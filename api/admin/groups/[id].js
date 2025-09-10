@@ -333,6 +333,36 @@ if (wantCards) {
       } catch { return null; }
     };
 
+        const PRE  = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
+    const POST = new Set(['received_from_psa','balance_due','paid','shipped_to_customer','delivered']);
+
+    const phaseOf = (st) => {
+      const s = String(st || '').toLowerCase();
+      if (PRE.has(s)) return 'pre';
+      if (s === 'in_grading' || s === 'graded') return 'at_psa';
+      if (s === 'shipped_back_to_us') return 'return';
+      if (POST.has(s)) return 'post';
+      return 'pre';
+    };
+
+    const effective = (subStatus, cardStatus) => {
+      const sub = String(subStatus || '').toLowerCase();
+      const card = String(cardStatus || '').toLowerCase();
+      const ph = phaseOf(sub);
+
+      // Pre-PSA → show submission status
+      if (ph === 'pre') return sub || card;
+
+      // At the handoff → prefer a post-PSA card status if present
+      if (sub === 'received_from_psa') return POST.has(card) ? card : sub;
+
+      // Post-PSA → submission dominates (paid/shipped/delivered)
+      if (POST.has(sub)) return sub;
+
+      // At PSA / Return → show submission status
+      return sub || card;
+    };
+
     const subById = new Map(submissions.map(s => [String(s.id), s]));
     cards = (c || []).map(row => {
       const sub = subById.get(String(row.submission_id));
@@ -343,14 +373,22 @@ if (wantCards) {
         ? row.group_cards.find(g => String(g.group_id) === String(groupId))
         : null;
 
+      const raw_card_status = row.status; // keep the DB value for audit/debug
+      const display_status  = effective(sub?.status, raw_card_status);
+
       return {
         ...row,
+        // IMPORTANT: we *override* status so the UI shows the effective status
+        status: display_status,
+        raw_card_status,
+
         created_at: createdFrom,
         _created_on: toYMD(createdFrom),
         _break_on:   toYMD(row.break_date ?? row.created_at),
         group_card_no: gc?.card_no ?? null
       };
     });
+
   }
 }
 
