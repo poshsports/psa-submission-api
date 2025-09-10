@@ -566,9 +566,11 @@ const CARD_COLS = [
     const rawSid  = String(c.submission_id || '');
     const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-    // Accept any non-empty id (not just UUID)
-    const sid   = String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
-    const scode = String(subRec?.code ?? rawSid ?? '').trim();
+    const idCandidate =
+  String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
+const sid   = isUuid(idCandidate) ? idCandidate : '';
+const scode = String(subRec?.code ?? rawSid ?? '').trim();
+
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
     const showSelect = POST_PSA_SET.has(eff);
@@ -871,13 +873,11 @@ async function saveRowStatuses() {
   try {
     for (const { subId, subCode, to } of targets.values()) {
 // Accept numeric / non-UUID ids too
-let submissionId = String(subId || '').trim();
+let submissionId = String(subId || '').trim();   // may be UUID or a human code
 let code         = String(subCode || '').trim();
 
 // Try to recover from our in-memory maps if either is missing
-if ((!submissionId || !code) &&
-    (subById.has(subId || '') || subByCode.has(subCode || '') ||
-     subById.has(subCode || '') || subByCode.has(subId || ''))) {
+if ((!submissionId && !code) || !code) {
   const rec =
     subById.get(subId || '') ||
     subByCode.get(subCode || '') ||
@@ -890,17 +890,20 @@ if ((!submissionId || !code) &&
 }
 
 // Last-resort mirroring for odd edge cases
-if (!code && subId && !UUID_RE.test(String(subId)))          code         = String(subId).trim();
-if (!submissionId && subCode && UUID_RE.test(String(subCode))) submissionId = String(subCode).trim();
+if (!code && submissionId && !isUuid(submissionId)) code = submissionId;  // id was actually the code
+if (!submissionId && isUuid(code))                  submissionId = code;  // rare but safe
 
 const body = { status: to, cascade_cards: true };
-if (submissionId) body.submission_id = submissionId;  // server expects this
-if (code)         body.submission_code = code;        // optional helper
 
+// Final safety: never send a non-UUID as submission_id
+if (!isUuid(submissionId)) submissionId = '';
 
-      if (!body.submission_id && !body.submission_code) {
-        throw new Error('Missing submission identifier');
-      }
+if (isUuid(submissionId)) body.submission_id   = submissionId;
+if (code)                 body.submission_code = code;
+
+if (!body.submission_id && !body.submission_code) {
+  throw new Error('Missing submission identifier');
+}
 
       console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
