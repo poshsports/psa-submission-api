@@ -452,6 +452,19 @@ const isUuid = (s) => UUID_RE.test(String(s || '').trim());
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;  // already YYYY-MM-DD
       try { return new Date(s).toISOString().slice(0, 10); } catch { return s.slice(0, 10); }
     };
+// Normalize break date/channel coming from cards, submissions, or members
+const pickBreakDate = (row, sub) =>
+  row._break_on
+  || toYMD(row.break_on || row.break_date || row.breakDate || row.created_at)
+  || (sub ? toYMD(sub.break_on || sub.break_date || sub.created_at) : '');
+
+const pickBreakChannel = (row, sub) =>
+  row.break_channel
+  || row.break_channel_name
+  || row.channel
+  || row.channel_name
+  || (sub ? (sub.break_channel || sub.break_channel_name || sub.channel || sub.channel_name) : '')
+  || '';
 
     // Header fields
     const codeOut     = safe(grp?.code || codeHint || '');
@@ -546,50 +559,42 @@ const CARD_COLS = [
   { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
   { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
 
-  // ===== Status (UUID in data-sid, human code in data-scode) =====
-  {
-    label: 'Status',
-    fmt: (c) => {
-      const rawSid  = String(c.submission_id || '');
-      const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
+// ===== Status (submission_id in data-sid, code in data-scode) =====
+{
+  label: 'Status',
+  fmt: (c) => {
+    const rawSid  = String(c.submission_id || '');
+    const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-      const pickUuid = (v) => {
-        const s = String(v || '').trim();
-        return UUID_RE.test(s) ? s : '';
-      };
+    // Accept any non-empty id (not just UUID)
+    const sid   = String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
+    const scode = String(subRec?.code ?? rawSid ?? '').trim();
 
-      const sid =
-        pickUuid(subRec.id) ||
-        pickUuid(subRec.uuid) ||
-        pickUuid(subRec.submission_id) ||
-        '';
+    const eff = effectiveRowStatus(c) || 'received_from_psa';
+    const showSelect = POST_PSA_SET.has(eff);
 
-      const scode = String(subRec.code || rawSid || '');
+    if ((!sid && !scode) || !showSelect) {
+      return eff ? escapeHtml(prettyStatus(eff)) : '—';
+    }
 
-      const eff = effectiveRowStatus(c) || 'received_from_psa';
-      const showSelect = POST_PSA_SET.has(eff);
+    const options = POST_PSA_ORDER.map(v => {
+      const sel = (v === eff) ? 'selected' : '';
+      return `<option value="${v}" ${sel}>${escapeHtml(prettyStatus(v))}</option>`;
+    }).join('');
 
-      if ((!sid && !scode) || !showSelect) {
-        return eff ? escapeHtml(prettyStatus(eff)) : '—';
-      }
+    const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
 
-      const options = POST_PSA_ORDER.map(v => {
-        const sel = (v === eff) ? 'selected' : '';
-        return `<option value="${v}" ${sel}>${escapeHtml(prettyStatus(v))}</option>`;
-      }).join('');
-
-      const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
-
-      return `
-        <select class="row-status"
-                data-sid="${escapeHtml(sid)}"
-                data-scode="${escapeHtml(scode)}"
-                data-card-id="${escapeHtml(rowKey)}">
-          ${options}
-        </select>
-      `;
-    },
+    return `
+      <select class="row-status"
+              data-sid="${escapeHtml(sid)}"
+              data-scode="${escapeHtml(scode)}"
+              data-card-id="${escapeHtml(rowKey)}">
+        ${options}
+      </select>
+    `;
   },
+},
+
 
   {
     label: 'Service',
@@ -603,48 +608,67 @@ const CARD_COLS = [
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
 ];
 
-    // Build rows: prefer cards; if none, fall back to members/submissions only
-    const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
+   // Build rows: prefer cards; if none, fall back to members/submissions only
+const memberOrder = new Map(members.map((m, i) => [String(m.submission_id), i]));
 
-    const rowsData = (Array.isArray(cards) && cards.length > 0)
-      // cards come from API; add _created_on if missing
-      ? cards.map(r => ({ ...r, _created_on: r._created_on || toYMD(r.created_at) }))
-      : members.map(m => {
-          const sid = String(m.submission_id || '');
-          const sub = (subById.get(sid) || subByCode.get(sid) || {});
-          const createdFrom = sub.created_at || m.created_at || null;
-          return {
-            // shape it like a "card" row so CARD_COLS formats it
-            created_at: createdFrom,
-            _created_on: toYMD(createdFrom),
-            submission_id: sid,
-            status: sub.status || '',
-            grading_service: sub.grading_service || '',
-            year: '',
-            brand: '',
-            set: '',
-            player: '',
-            card_number: '',
-            variation: '',
-            notes: m.note || '',
-            card_index: 0
-          };
-        });
+const rowsData = (Array.isArray(cards) && cards.length > 0)
+  ? cards.map(r => {
+      const raw = { ...r };
+      const sKey = String(raw.submission_id || raw.submission_code || '');
+const sub =
+  subById.get(sKey) ||
+  subByCode.get(sKey) ||
+  (raw.submission_code ? (subByCode.get(String(raw.submission_code)) || subById.get(String(raw.submission_code))) : undefined);
 
-    // Keep rows aligned to member order, then by card_index if present
+      return {
+        ...raw,
+        _created_on: raw._created_on || toYMD(raw.created_at),
+        _break_on:   pickBreakDate(raw, sub),
+        break_channel: pickBreakChannel(raw, sub),
+      };
+    })
+  : members.map(m => {
+      const sid = String(m.submission_id || '');
+      const sub = (subById.get(sid) || subByCode.get(sid) || {});
+      const createdFrom = sub.created_at || m.created_at || null;
+
+      const temp = {
+        // shape it like a "card" row so CARD_COLS formats it
+        created_at: createdFrom,
+        _created_on: toYMD(createdFrom),
+        submission_id: sid,
+        status: sub.status || '',
+        grading_service: sub.grading_service || '',
+        year: '',
+        brand: '',
+        set: '',
+        player: '',
+        card_number: '',
+        variation: '',
+        notes: m.note || '',
+        card_index: 0
+      };
+
+      // Fill normalized break fields for fallback rows
+      temp._break_on = pickBreakDate(temp, sub);
+      temp.break_channel = pickBreakChannel(temp, sub);
+
+      return temp;
+    });
+
+// Keep rows aligned to member order, then by card_index if present
 rowsData.sort((a, b) => {
   const ag = (a.group_card_no != null) ? Number(a.group_card_no) : null;
   const bg = (b.group_card_no != null) ? Number(b.group_card_no) : null;
 
-  // Prefer explicit group numbering when available
   if (ag != null && bg != null && ag !== bg) return ag - bg;
 
-  // Fallback to previous stable ordering (member order, then card_index)
   const oa = memberOrder.get(String(a.submission_id)) ?? 0;
   const ob = memberOrder.get(String(b.submission_id)) ?? 0;
   if (oa !== ob) return oa - ob;
   return (a.card_index ?? 0) - (b.card_index ?? 0);
 });
+
     
     // Build the table HTML
 const table = `
@@ -703,7 +727,6 @@ const table = `
 
 const bulkSelect = $('bulkStatus');
 const btnApply   = $('applyBulkStatus');
-const g = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 
 
 const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
@@ -847,31 +870,33 @@ async function saveRowStatuses() {
 
   try {
     for (const { subId, subCode, to } of targets.values()) {
-      // Try to recover identifiers if one is blank
-      let id   = isUuid(subId) ? subId : '';
-      let code = subCode || '';
+// Accept numeric / non-UUID ids too
+let submissionId = String(subId || '').trim();
+let code         = String(subCode || '').trim();
 
-      if (!id || !code) {
-        // Look up by whatever we have
-        const rec =
-          subById.get(subId || '') ||
-          subByCode.get(subCode || '') ||
-          subById.get(subCode || '') ||   // in case subId actually held a code
-          subByCode.get(subId || '');
+// Try to recover from our in-memory maps if either is missing
+if ((!submissionId || !code) &&
+    (subById.has(subId || '') || subByCode.has(subCode || '') ||
+     subById.has(subCode || '') || subByCode.has(subId || ''))) {
+  const rec =
+    subById.get(subId || '') ||
+    subByCode.get(subCode || '') ||
+    subById.get(subCode || '') ||
+    subByCode.get(subId || '');
+  if (rec) {
+    if (!submissionId) submissionId = String(rec.id || rec.uuid || rec.submission_id || '').trim();
+    if (!code)         code         = String(rec.code || '').trim();
+  }
+}
 
-        if (rec) {
-          if (!id)   id   = isUuid(rec.id) ? rec.id : '';
-          if (!code) code = rec.code || '';
-        }
-      }
+// Last-resort mirroring for odd edge cases
+if (!code && subId && !UUID_RE.test(String(subId)))          code         = String(subId).trim();
+if (!submissionId && subCode && UUID_RE.test(String(subCode))) submissionId = String(subCode).trim();
 
-      // As a last resort, if we only have one, mirror it into the other field
-      if (!code && subId && !isUuid(subId)) code = subId; // human code ended up in subId
-      if (!id && isUuid(subCode)) id = subCode;            // unlikely, but safe
+const body = { status: to, cascade_cards: true };
+if (submissionId) body.submission_id = submissionId;  // server expects this
+if (code)         body.submission_code = code;        // optional helper
 
-      const body = { status: to, cascade_cards: true };
-      if (id)   body.submission_id   = id;   // UUID only
-      if (code) body.submission_code = code; // always include code if we have it
 
       if (!body.submission_id && !body.submission_code) {
         throw new Error('Missing submission identifier');
