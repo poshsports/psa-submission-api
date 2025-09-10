@@ -479,7 +479,6 @@ const SUB_DOMINATES_SET = new Set([
   'shipped_to_customer',
   'delivered',
 ]);
-const postPsaLabel = (v) => prettyStatus(v);
 
 // Which status should a row *show*?
 // • Pre-PSA: always show the submission status (reflects bulk updates immediately).
@@ -513,66 +512,92 @@ function effectiveRowStatus(cardRow) {
 
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
+
   { label: 'Submission', fmt: (c) => {
-    const raw = String(c.submission_id || '');
-    const sub = subById.get(raw) || subByCode.get(raw);
-    return safe(sub?.code || raw);
-  }
-},
-  {
-  label: 'Status',
-  fmt: (c) => {
-    const rawSid  = String(c.submission_id || '');
-    const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
-
-    // Only treat true UUIDs as "id"
-    const pickUuid = (v) => {
-      const s = String(v || '').trim();
-      return UUID_RE.test(s) ? s : '';
-    };
-
-    const sid =
-      pickUuid(subRec.id) ||
-      pickUuid(subRec.uuid) ||
-      pickUuid(subRec.submission_id) ||
-      '';
-
-    const scode = String(subRec.code || rawSid || '');
-
-    const eff = effectiveRowStatus(c) || 'received_from_psa';
-    const showSelect = POST_PSA_SET.has(eff);
-
-    if ((!sid && !scode) || !showSelect) {
-      return eff ? escapeHtml(prettyStatus(eff)) : '—';
+      const raw = String(c.submission_id || '');
+      const sub = subById.get(raw) || subByCode.get(raw);
+      return safe(sub?.code || raw);
     }
-
-    const options = POST_PSA_ORDER.map(v => {
-      const sel = (v === eff) ? 'selected' : '';
-      return `<option value="${v}" ${sel}>${escapeHtml(postPsaLabel(v))}</option>`;
-    }).join('');
-
-    const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
-
-    return `
-      <select class="row-status"
-              data-sid="${escapeHtml(sid)}"
-              data-scode="${escapeHtml(scode)}"
-              data-card-id="${escapeHtml(rowKey)}">
-        ${options}
-      </select>
-    `;
   },
-},
 
+  {
+    label: 'Card',
+    fmt: (c) => {
+      const desc = (c.card_description && String(c.card_description).trim())
+        ? safe(c.card_description) : '';
+      if (desc) return desc;
+      const bits = [c.year, c.brand, c.set, c.player, c.card_number, c.variation]
+        .filter(v => v != null && String(v).trim() !== '')
+        .map(v => safe(v));
+      return bits.join(' · ') || '—';
+    }
+  },
 
+  {
+    label: 'Card #',
+    fmt: (c) => {
+      const n = (c.group_card_no ?? null);
+      const txt = (n == null || Number.isNaN(Number(n))) ? '—' : String(n);
+      return `<span class="cardno-read">${txt}</span>`;
+    }
+  },
+
+  { label: 'Break date',    fmt: (c) => safe(c._break_on || '') },
+  { label: 'Break #',       fmt: (c) => safe(c.break_number || '') },
+  { label: 'Break channel', fmt: (c) => safe(c.break_channel || '') },
+
+  // ===== Status (UUID in data-sid, human code in data-scode) =====
+  {
+    label: 'Status',
+    fmt: (c) => {
+      const rawSid  = String(c.submission_id || '');
+      const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
+
+      const pickUuid = (v) => {
+        const s = String(v || '').trim();
+        return UUID_RE.test(s) ? s : '';
+      };
+
+      const sid =
+        pickUuid(subRec.id) ||
+        pickUuid(subRec.uuid) ||
+        pickUuid(subRec.submission_id) ||
+        '';
+
+      const scode = String(subRec.code || rawSid || '');
+
+      const eff = effectiveRowStatus(c) || 'received_from_psa';
+      const showSelect = POST_PSA_SET.has(eff);
+
+      if ((!sid && !scode) || !showSelect) {
+        return eff ? escapeHtml(prettyStatus(eff)) : '—';
+      }
+
+      const options = POST_PSA_ORDER.map(v => {
+        const sel = (v === eff) ? 'selected' : '';
+        return `<option value="${v}" ${sel}>${escapeHtml(prettyStatus(v))}</option>`;
+      }).join('');
+
+      const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
+
+      return `
+        <select class="row-status"
+                data-sid="${escapeHtml(sid)}"
+                data-scode="${escapeHtml(scode)}"
+                data-card-id="${escapeHtml(rowKey)}">
+          ${options}
+        </select>
+      `;
+    },
+  },
 
   {
     label: 'Service',
     fmt: (c) => {
-  const raw = String(c.submission_id || '');
-  const sub = subById.get(raw) || subByCode.get(raw);
-  return safe(c.grading_service || sub?.grading_service || '');
-},
+      const raw = String(c.submission_id || '');
+      const sub = subById.get(raw) || subByCode.get(raw);
+      return safe(c.grading_service || sub?.grading_service || '');
+    },
   },
 
   { label: 'Notes', fmt: (c) => safe(c.notes || '') },
@@ -710,7 +735,7 @@ if (bulkSelect) {
 }
 
 // Show/hide the wrapper based on whether there are options
-updateBulkStatusVisibility(g, PHASE_OPTIONS.length > 0);
+updateBulkStatusVisibility(grp?.status, PHASE_OPTIONS.length > 0);
 
 // Enable Apply only when a value is chosen
 bulkSelect?.addEventListener('change', () => {
@@ -808,7 +833,6 @@ const subLabel = (sid) => {
 async function saveRowStatuses() {
   if (!pending.size) return;
 
-  // Build the furthest target per submission (identified by id OR code)
   const targets = new Map(); // key -> { subId, subCode, to }
   for (const { submissionId, submissionCode, to } of pending.values()) {
     const key = String(submissionId || submissionCode);
@@ -823,11 +847,32 @@ async function saveRowStatuses() {
 
   try {
     for (const { subId, subCode, to } of targets.values()) {
-      const body = { status: to, cascade_cards: true };
+      // Try to recover identifiers if one is blank
+      let id   = isUuid(subId) ? subId : '';
+      let code = subCode || '';
 
-      // Only include submission_id if it's a real UUID; always include code when present.
-      if (isUuid(subId)) body.submission_id = subId;
-      if (subCode)       body.submission_code = subCode;
+      if (!id || !code) {
+        // Look up by whatever we have
+        const rec =
+          subById.get(subId || '') ||
+          subByCode.get(subCode || '') ||
+          subById.get(subCode || '') ||   // in case subId actually held a code
+          subByCode.get(subId || '');
+
+        if (rec) {
+          if (!id)   id   = isUuid(rec.id) ? rec.id : '';
+          if (!code) code = rec.code || '';
+        }
+      }
+
+      // As a last resort, if we only have one, mirror it into the other field
+      if (!code && subId && !isUuid(subId)) code = subId; // human code ended up in subId
+      if (!id && isUuid(subCode)) id = subCode;            // unlikely, but safe
+
+      const body = { status: to, cascade_cards: true };
+      if (id)   body.submission_id   = id;   // UUID only
+      if (code) body.submission_code = code; // always include code if we have it
+
       if (!body.submission_id && !body.submission_code) {
         throw new Error('Missing submission identifier');
       }
@@ -840,9 +885,7 @@ async function saveRowStatuses() {
         body: JSON.stringify(body)
       });
       const jj = await r.json().catch(() => ({}));
-      if (!r.ok || jj.ok !== true) {
-        throw new Error(jj.error || `Failed to update ${subCode || subId}`);
-      }
+      if (!r.ok || jj.ok !== true) throw new Error(jj.error || 'Failed to update');
     }
 
     pending.clear();
