@@ -158,13 +158,20 @@ export default async function handler(req, res) {
             });
             return;
           }
-          submissions = (subs || []).map(r => ({
-            id: r.submission_id,
-            created_at: r.created_at,
-            status: r.status,
-            grading_service: r.grading_service,
-            customer_email: r.customer_email
-          }));
+               submissions = (subs || []).map(r => ({
+        id: r.submission_id,
+        created_at: r.created_at,
+        status: r.status,
+        grading_service: r.grading_service,
+        customer_email: r.customer_email
+      }));
+
+      // Flag: lock bulk control once ALL submissions are at/after 'received_from_psa'
+      const POST_SET = new Set(['received_from_psa','balance_due','paid','shipped_to_customer','delivered']);
+      const bulk_locked =
+        submissions.length > 0 &&
+        submissions.every(s => POST_SET.has(String(s.status || '').toLowerCase()));
+
         }
       }
       const subById = new Map(submissions.map(s => [String(s.id), s]));
@@ -397,6 +404,7 @@ if (wantCards) {
         members,
         submissions,
         cards,
+        bulk_locked, // ← NEW
         _debug: { version: 'v3', include: [...includeSet] }
       });
       return;
