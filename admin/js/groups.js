@@ -754,29 +754,27 @@ const gPhase = String(grp?.status || '').toLowerCase().replace(/\s+/g,'');
 const anyShippedBack = rowsData.some(r => (effectiveRowStatus(r) === 'shipped_back_to_us'));
 
 // Build the bulk options based on group phase.
-// We use submission statuses (the server maps these to the right group phase).
+// Show the full ladder (shipped_to_psa → received_from_psa) while we haven't marked Received.
+// The server enforces forward-only moves.
 let PHASE_OPTIONS = [];
 
-if (gPhase === 'draft' || gPhase === 'readytoship') {
-  // Allow advancing the whole group into the AtPSA phase
-  PHASE_OPTIONS = [
-    ['shipped_to_psa',   'Shipped to PSA'],
-    ['in_grading',       'In Grading'],
-    ['graded',           'Graded'],
-  ];
-} else if (gPhase === 'atpsa') {
-  // At PSA → either mark all as shipped back to us, or received from PSA
-  PHASE_OPTIONS = [
-    ['shipped_back_to_us','Shipped Back to Us'],
-    ['received_from_psa', 'Received from PSA'],
-  ];
-} else if (gPhase === 'returned' && anyShippedBack) {
-  // In Returned, only offer "Received from PSA" while any row is still shipped back
-  PHASE_OPTIONS = [
-    ['received_from_psa', 'Received from PSA'],
-  ];
+// Full ladder we want visible pre-Received
+const PRE_RECEIVED_OPTIONS = [
+  ['shipped_to_psa',   'Shipped to PSA'],
+  ['in_grading',       'In Grading'],
+  ['graded',           'Graded'],
+  ['shipped_back_to_us','Shipped Back to Us'],
+  ['received_from_psa', 'Received from PSA'],
+];
+
+// If we are in Draft / ReadyToShip / AtPSA / Returned (but not fully received),
+// show all options; backend will block any invalid/backwards transitions.
+if (gPhase === 'draft' || gPhase === 'readytoship' || gPhase === 'atpsa' || gPhase === 'returned') {
+  PHASE_OPTIONS = PRE_RECEIVED_OPTIONS;
 }
 
+// (If you ever want to restrict after Received, add a branch here based on a flag
+// like `allReceivedFromPsa` and set PHASE_OPTIONS = [] to hide the dropdown.)
 
 
 
