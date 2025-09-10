@@ -389,29 +389,51 @@ export default async function handler(req, res) {
         }
       }
 
-      // Compute lock for bulk updates (once, at the end)
-      const POST_PSA_SET = new Set([
-        'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
-      ]);
+// Compute lock for bulk updates:
+// lock once ALL items in the group are at/after 'received_from_psa'
+const POST_PSA_SET = new Set([
+  'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
+]);
 
-      const allCardsPost = (Array.isArray(cards) && cards.length > 0)
-        ? cards.every(c => POST_PSA_SET.has(String(c?.status || '').toLowerCase()))
-        : false;
+const toStatus = (v) => String(v ?? '').toLowerCase();
 
-      const allSubsPost = (!allCardsPost && Array.isArray(submissions) && submissions.length > 0)
-        ? submissions.every(s => POST_PSA_SET.has(String(s?.status || '').toLowerCase()))
-        : false;
+// Prefer card statuses when cards exist; otherwise fall back to submission statuses.
+const allCardsPost = (Array.isArray(cards) && cards.length > 0)
+  ? cards.every(c => POST_PSA_SET.has(toStatus(c?.status)))
+  : false;
 
-      const bulk_locked = allCardsPost || allSubsPost;
+const allSubsPost = (!allCardsPost && Array.isArray(submissions) && submissions.length > 0)
+  ? submissions.every(s => POST_PSA_SET.has(toStatus(s?.status)))
+  : false;
 
-      res.status(200).json({
-        ...group,
-        bulk_locked,
-        members,
-        submissions,
-        cards,
-        _debug: { version: 'v3', include: [...includeSet] }
-      });
+const bulk_locked = allCardsPost || allSubsPost;
+
+// "Closed" once everything is delivered to customer
+const isDelivered = (s) => toStatus(s) === 'delivered';
+const allCardsDelivered = (Array.isArray(cards) && cards.length > 0)
+  ? cards.every(c => isDelivered(c?.status))
+  : false;
+const allSubsDelivered = (!allCardsDelivered && Array.isArray(submissions) && submissions.length > 0)
+  ? submissions.every(s => isDelivered(s?.status))
+  : false;
+const closed = allCardsDelivered || allSubsDelivered;
+
+// Present an effective status (do NOT mutate DB here)
+const status_effective = closed ? 'Closed' : (group.status || '');
+
+// Return group with effective status + lock flags
+res.status(200).json({
+  ...group,
+  status: status_effective,     // override for display
+  status_effective,
+  closed,                       // boolean for the UI
+  bulk_locked,
+  members,
+  submissions,
+  cards,
+  _debug: { version: 'v3', include: [...includeSet] }
+});
+
       return;
     }
 
