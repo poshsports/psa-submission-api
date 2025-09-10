@@ -205,10 +205,20 @@ if (wantCards) {
     for (const sub of rawSubs || []) {
       const sid = String(sub.submission_id);
       const haveIdx = haveBySub.get(sid) || new Set();
-      const info = Array.isArray(sub.card_info) ? sub.card_info : [];
+
+      // Robustly parse card_info (can be JSON text or already an array)
+      let info = [];
+      try {
+        info = Array.isArray(sub.card_info)
+          ? sub.card_info
+          : JSON.parse(sub.card_info || '[]');
+      } catch {
+        info = [];
+      }
+
       info.forEach((ci, i) => {
         if (!haveIdx.has(i)) {
-          // derive a description from common keys if present
+          // Derive a description from common keys if present
           const desc =
             ci?.description ??
             ci?.card_description ??
@@ -221,9 +231,15 @@ if (wantCards) {
             submission_id: sub.submission_id,
             card_index: i,
             status: sub.status ?? null,
-            grading_service: sub.grading_service ?? null,
 
-            // card meta (best-effort)
+            // Prefer card-level grading_service, fall back to submission default
+            grading_service:
+              ci?.grading_service ??
+              ci?.psa_grading ??
+              sub.grading_service ??
+              null,
+
+            // Card meta (best-effort)
             year: ci?.year ?? null,
             brand: ci?.brand ?? null,
             set: ci?.set ?? null,
@@ -233,14 +249,15 @@ if (wantCards) {
             notes: ci?.notes ?? null,
             card_description: desc,
 
-            // break meta
-            break_date: ci?.break_date ?? null,
-            break_channel: ci?.break_channel ?? null,
+            // Break meta (CHANNEL FIX: accept break_channel OR channel)
+            break_date: ci?.break_date ?? ci?.date ?? null,
+            break_channel: ci?.break_channel ?? ci?.channel ?? null,
             break_number: ci?.break_number ?? null
           });
         }
       });
     }
+
 
     if (toInsert.length) {
       const { error: insErr } = await client.from('submission_cards').insert(toInsert);
