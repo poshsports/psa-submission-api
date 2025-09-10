@@ -1,6 +1,7 @@
 // api/admin/submissions.set-status.js
-// Update ONE submission's status (forward-only) and cascade to its cards.
-// Accepts submission id *or* code.
+// Update ONE submission's status (forward-only).
+// Accepts UUID or human code (submission_code / submission_id like 'psa-186').
+// Card status syncing is handled in DB by trigger: trg_psa_submissions_sync_cards.
 
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '../_util/adminAuth.js';
@@ -52,7 +53,10 @@ export default async function handler(req, res){
     }
 
     const body = await readJson(req);
-    const key = String(body?.submission_id || body?.id || '').trim(); // can be id OR code
+    // Accept UUID OR human code. We also accept submission_code for clarity.
+    const key = String(
+      body?.submission_id || body?.submission_code || body?.id || body?.code || ''
+    ).trim(); // can be UUID OR 'psa-###'
     const status = String(body?.status || '').trim().toLowerCase();
 
     if (!key) {
@@ -66,18 +70,18 @@ export default async function handler(req, res){
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Look up by id first; if not found, look up by code.
+    // Look up by UUID first; if not found, try human code via submission_id column.
     let sub = null, sErr = null;
     let q = await supabase.from('psa_submissions')
-      .select('id, status')
+      .select('id, submission_id, status')
       .eq('id', key)
       .single();
     sub = q.data; sErr = q.error;
 
     if (!sub) {
       q = await supabase.from('psa_submissions')
-        .select('id, status')
-        .eq('code', key)
+        .select('id, submission_id, status')
+        .eq('submission_id', key) // ✅ human code column (e.g., 'psa-186')
         .single();
       sub = q.data; sErr = q.error;
     }
@@ -94,12 +98,12 @@ export default async function handler(req, res){
       res.end(JSON.stringify({ ok:false, error:'cannot_move_backward' })); return;
     }
 
-    // 1) Update submission
+    // Update canonical submission status; DB trigger syncs cards.
     const { data: upd, error: uErr } = await supabase
       .from('psa_submissions')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status }) // timestamp handled by DB trigger if present
       .eq('id', resolvedId)
-      .select('id, status')
+      .select('id, submission_id, status')
       .single();
 
     if (uErr || !upd) {
@@ -107,21 +111,15 @@ export default async function handler(req, res){
       res.end(JSON.stringify({ ok:false, error:uErr?.message || 'update_failed' })); return;
     }
 
-    // 2) Cascade to cards in that submission
-    const { error: cErr, count } = await supabase
-      .from('submission_cards')
-      .update({ status })
-      .eq('submission_id', resolvedId)
-      .select('id', { count: 'exact', head: true });
-
-    if (cErr) {
-      res.statusCode = 500; res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ok:false, error:cErr.message || 'card_update_failed' })); return;
-    }
-
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ ok:true, submission_id: upd.id, status: upd.status, cards_updated: count ?? 0 }));
+    res.end(JSON.stringify({
+      ok: true,
+      submission_id: upd.id,          // UUID (kept for backward compatibility)
+      submission_code: upd.submission_id, // human code like 'psa-186'
+      status: upd.status
+      // cards are synced by DB trigger
+    }));
   } catch (err) {
     res.statusCode = 500; res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok:false, error:String(err?.message || err || 'unknown_error') }));
