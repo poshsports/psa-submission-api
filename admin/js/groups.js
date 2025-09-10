@@ -444,6 +444,7 @@ const toUuid = (v) => (UUID_RE.test(String(v || '').trim()) ? String(v).trim() :
     const payload = await res.json();
     if (payload && payload.ok === false) throw new Error(payload.error || 'Group fetch failed');
     const grp = payload?.group ?? payload;
+    const isClosed = !!grp?.closed || String(grp?.status || '').toLowerCase() === 'closed';
 
     const safe = (v) => escapeHtml(String(v ?? ''));
 
@@ -592,7 +593,7 @@ const scode = String(
 ).trim();
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
-    const showSelect = POST_PSA_SET.has(eff);
+    const showSelect = POST_PSA_SET.has(eff) && !isClosed;
 
     if ((!sid && !scode) || !showSelect) {
       return eff ? escapeHtml(prettyStatus(eff)) : '—';
@@ -722,7 +723,13 @@ const table = `
         <div class="card" style="padding:12px;border:1px solid #eee;border-radius:12px;background:#fff;margin-bottom:14px">
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
             <div><div class="note">Code</div><div><strong>${codeOut}</strong></div></div>
-            <div><div class="note">Status</div><div>${statusOut || '—'}</div></div>
+            <div>
+              <div class="note">Status</div>
+              <div id="gstatus">
+                <strong>${statusOut || '—'}</strong>
+                ${isClosed ? '<button id="btnReopen" class="ghost" title="Unlock for edits">Re-open</button>' : ''}
+              </div>
+            </div>
             <div><div class="note">Shipped</div><div>${shippedOut}</div></div>
             <div><div class="note">Returned</div><div>${returnedOut}</div></div>
             <div><div class="note">Updated</div><div>${updatedOut}</div></div>
@@ -739,6 +746,24 @@ const table = `
         </div>
       `;
       ensureScroller();
+// Handle "Re-open" (sets group back to Returned and unlocks editing)
+$('btnReopen')?.addEventListener('click', async () => {
+  if (!confirm('Re-open this group? This sets the group back to "Returned" and unlocks editing.')) return;
+  try {
+    const r = await fetch('/api/admin/groups.reopen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ group_id: String(grp?.id || id) })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Re-open failed');
+    await renderDetail(root, id, codeOut);
+  } catch (e) {
+    alert(e.message || 'Re-open failed');
+  }
+});
+
 // --- Bulk status (submissions in this group) ---
 // Supported bulk steps by phase:
 // Draft          -> ready_to_ship, at_psa
@@ -796,6 +821,13 @@ if (bulkLocked) {
 
 // Show/hide the wrapper based on whether there are options
 updateBulkStatusVisibility(grp?.status, PHASE_OPTIONS.length > 0);
+// If closed, lock the UI hard
+if (isClosed) {
+  updateBulkStatusVisibility('Closed', false); // hide bulk block
+  $('btnSaveStatuses')?.setAttribute('disabled','true');
+  $('btnEditOrder')?.setAttribute('disabled','true');
+}
+
 
 // Enable Apply only when a value is chosen
 bulkSelect?.addEventListener('change', () => {
@@ -827,11 +859,11 @@ try {
   // 👇 Debug info from the API (helps us verify submission/card selection on the server)
   if (j.debug) console.log('groups.set-status debug:', j.debug);
 
-  // Update the group header immediately (optional; we also re-fetch right after)
-  if (j.group?.status) {
-    const statusEl = root.querySelector('.card .note + div'); // the "Status" value cell
-    if (statusEl) statusEl.textContent = j.group.status;
-  }
+// Update the group header immediately (optional; we also re-fetch right after)
+if (j.group?.status) {
+  const statusEl = root.querySelector('#gstatus strong');
+  if (statusEl) statusEl.textContent = j.group.status;
+}
 
   // If we just marked "Received from PSA", hide bulk in Returned
   if (value === 'received_from_psa') updateBulkStatusVisibility('Returned', false);
