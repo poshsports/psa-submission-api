@@ -430,6 +430,8 @@ root.innerHTML = `
 // UUID helper used when building payloads:
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (s) => UUID_RE.test(String(s || '').trim());
+const toUuid = (v) => (UUID_RE.test(String(v || '').trim()) ? String(v).trim() : '');
+
 
   const $box = $('gdetail');
   try {
@@ -566,10 +568,10 @@ const CARD_COLS = [
     const rawSid  = String(c.submission_id || '');
     const subRec  = subById.get(rawSid) || subByCode.get(rawSid) || {};
 
-    const idCandidate =
-  String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
-const sid   = isUuid(idCandidate) ? idCandidate : '';
-const scode = String(subRec?.code ?? rawSid ?? '').trim();
+const idCandidate = String(subRec?.id ?? subRec?.uuid ?? subRec?.submission_id ?? '').trim();
+const sid   = toUuid(idCandidate);
+const scode = sid ? '' : String(subRec?.code ?? rawSid ?? '').trim();
+
 
 
     const eff = effectiveRowStatus(c) || 'received_from_psa';
@@ -587,13 +589,13 @@ const scode = String(subRec?.code ?? rawSid ?? '').trim();
     const rowKey = (c.id != null && c.id !== '') ? String(c.id) : `sub-${c.submission_id}`;
 
     return `
-      <select class="row-status"
-              data-sid="${escapeHtml(sid)}"
-              data-scode="${escapeHtml(scode)}"
-              data-card-id="${escapeHtml(rowKey)}">
-        ${options}
-      </select>
-    `;
+  <select class="row-status"
+          data-sid="${escapeHtml(sid)}"
+          ${scode ? `data-scode="${escapeHtml(scode)}"` : ''}
+          data-card-id="${escapeHtml(rowKey)}">
+    ${options}
+  </select>
+`;
   },
 },
 
@@ -858,6 +860,7 @@ const subLabel = (sid) => {
 async function saveRowStatuses() {
   if (!pending.size) return;
 
+  // For each submission, keep only the most advanced target status
   const targets = new Map(); // key -> { subId, subCode, to }
   for (const { submissionId, submissionCode, to } of pending.values()) {
     const key = String(submissionId || submissionCode);
@@ -872,45 +875,35 @@ async function saveRowStatuses() {
 
   try {
     for (const { subId, subCode, to } of targets.values()) {
-// Accept numeric / non-UUID ids too
-let submissionId = String(subId || '').trim();   // may be UUID or a human code
-let code         = String(subCode || '').trim();
+      // 1) Normalize what we have
+      let id   = toUuid(subId);
+      let code = String(subCode || '').trim();
 
-// Try to recover from our in-memory maps if either is missing
-if ((!submissionId && !code) || !code) {
-  const rec =
-    subById.get(subId || '') ||
-    subByCode.get(subCode || '') ||
-    subById.get(subCode || '') ||
-    subByCode.get(subId || '');
-  if (rec) {
-    if (!submissionId) submissionId = String(rec.id || rec.uuid || rec.submission_id || '').trim();
-    if (!code)         code         = String(rec.code || '').trim();
-  }
-}
+      // 2) Recover from our maps if either piece is missing or mixed up
+      //    (covers: id in code, code in id, or one side empty)
+      const rec =
+        (id   && subById.get(id)) ||
+        (code && subByCode.get(code)) ||
+        subByCode.get(subId || '') ||
+        subById.get(subCode || '');
 
-// Last-resort mirroring for odd edge cases
-if (!code && submissionId && !isUuid(submissionId)) code = submissionId;  // id was actually the code
-if (!submissionId && isUuid(code))                  submissionId = code;  // rare but safe
+      if (rec) {
+        if (!id)   id   = toUuid(rec.id || rec.uuid || rec.submission_id);
+        if (!code) code = String(rec.code || rec.submission_id || '').trim();
+      }
 
-const body = { status: to, cascade_cards: true };
+      // 3) Must have a real UUID now — fail fast with a clear message
+      if (!id) throw new Error(`Couldn't resolve UUID for submission ${code || subCode || subId}`);
 
-// Final safety: never send a non-UUID as submission_id
-if (!isUuid(submissionId)) submissionId = '';
-
-if (isUuid(submissionId)) body.submission_id   = submissionId;
-if (code)                 body.submission_code = code;
-
-if (!body.submission_id && !body.submission_code) {
-  throw new Error('Missing submission identifier');
-}
+      // 4) Send ONLY the UUID; let the server cascade to cards
+      const body = { status: to, cascade_cards: true, submission_id: id };
 
       console.log('submissions.set-status →', body);
       const r = await fetch('/api/admin/submissions.set-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
       const jj = await r.json().catch(() => ({}));
       if (!r.ok || jj.ok !== true) throw new Error(jj.error || 'Failed to update');
@@ -926,8 +919,6 @@ if (!body.submission_id && !body.submission_code) {
     btnSaveStatuses.textContent = 'Save status changes';
   }
 }
-
-
 
 btnSaveStatuses?.addEventListener('click', saveRowStatuses);
 
