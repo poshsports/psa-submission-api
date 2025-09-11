@@ -1266,6 +1266,125 @@ async function openSubmissionDetails(id) {
     `;
 
     if (bodyEl) bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
+// === Manual Status Edit (pre-PSA only) ==============================
+(() => {
+  const pill = document.getElementById('as-status-pill');
+  if (!pill) return;
+
+  // The only statuses we allow from this UI (backwards OK)
+  const ALLOWED = ['pending_payment','submitted','submitted_paid','received'];
+
+  const subCode  = pill.getAttribute('data-sub-code') || '';     // "psa-197" style
+  let currentRaw = (pill.getAttribute('data-current') || '').toLowerCase();
+
+  // Build the popover element (on demand)
+  function buildPopover() {
+    const pop = document.createElement('div');
+    pop.id = 'sub-status-pop';
+    pop.setAttribute('role', 'menu');
+    pop.style.position = 'absolute';
+    pop.style.zIndex = '10000';
+    pop.style.background = '#fff';
+    pop.style.border = '1px solid #ddd';
+    pop.style.borderRadius = '10px';
+    pop.style.boxShadow = '0 8px 18px rgba(0,0,0,.12)';
+    pop.style.padding = '6px';
+    pop.style.minWidth = '220px';
+
+    pop.innerHTML = `
+      <div style="padding:4px 6px 8px 6px" class="note">Set status</div>
+      ${ALLOWED.map(v => `
+        <button type="button"
+                class="menu-item"
+                data-value="${v}"
+                style="display:flex;align-items:center;gap:8px; width:100%; text-align:left; padding:8px 10px; border:none; background:none; cursor:pointer; border-radius:8px">
+          <span style="flex:1">${escapeHtml(prettyStatus(v))}</span>
+          ${v === currentRaw ? '<span aria-hidden="true">✓</span>' : ''}
+        </button>
+      `).join('')}
+    `;
+
+    // hover affordance
+    pop.addEventListener('mouseover', (e) => {
+      const it = e.target.closest('.menu-item'); if (!it) return;
+      Array.from(pop.querySelectorAll('.menu-item')).forEach(b => b.style.background = '');
+      it.style.background = '#f5f7fb';
+    });
+
+    // click -> save
+    pop.addEventListener('click', async (e) => {
+      const it = e.target.closest('.menu-item'); if (!it) return;
+      const to = String(it.dataset.value || '').trim();
+      if (!to || !subCode) return;
+
+      // disable UI while saving
+      Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
+
+      try {
+        // Use the admin override endpoint so backward moves are allowed
+        const r = await fetch('/api/admin/submissions.correct-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            submission_code: subCode, // "psa-###"
+            status: to,
+            cascade_cards: false
+          })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+
+        // Update the pill immediately
+        pill.textContent = prettyStatus(to);
+        pill.setAttribute('data-current', to);
+        currentRaw = to;
+
+        // Optional: refresh the table data so the list reflects the change
+        try { await loadReal?.(); } catch {}
+
+        closePopover();
+      } catch (err) {
+        alert(err.message || 'Status update failed');
+        Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
+      }
+    });
+
+    document.body.appendChild(pop);
+    return pop;
+  }
+
+  function openPopover() {
+    let pop = document.getElementById('sub-status-pop') || buildPopover();
+    positionPopover(pop, pill);
+
+    // Outside click / ESC to close
+    const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== pill) closePopover(); };
+    const onEsc = (e) => { if (e.key === 'Escape') closePopover(); };
+    pop.__off = () => {
+      document.removeEventListener('mousedown', onDoc, true);
+      document.removeEventListener('keydown', onEsc, true);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    document.addEventListener('keydown', onEsc, true);
+  }
+
+  function closePopover() {
+    const pop = document.getElementById('sub-status-pop');
+    if (!pop) return;
+    pop.__off?.(); pop.__off = null;
+    pop.remove();
+  }
+
+  // Toggle on pill click
+  pill.addEventListener('click', (e) => {
+    e.preventDefault();
+    const existing = document.getElementById('sub-status-pop');
+    if (existing) { closePopover(); return; }
+    openPopover();
+  });
+})();
+
   } catch (e) {
     if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
   }
