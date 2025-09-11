@@ -26,20 +26,26 @@ const STATUS_LABELS = Object.freeze({
   pending_payment:       'Pending Payment',
   submitted:             'Submitted',
   submitted_paid:        'Submitted (Paid)',
-  // pre-PSA intake complete
-  received:              'Received (intake complete)',
+
+  // intake complete (keep legacy alias + add canonical token)
+  received:              'Received (intake complete)',     // legacy alias
+  intake_complete:       'Received (intake complete)',     // <-- add this
+
   shipped_to_psa:        'Shipped to PSA',
   in_grading:            'In Grading',
   graded:                'Graded',
   shipped_back_to_us:    'Shipped Back to Us',
+
   // post-PSA check-in
   received_from_psa:     'Received from PSA',
+
   // customer-level
   balance_due:           'Balance Due',
   paid:                  'Paid',
   shipped_to_customer:   'Shipped to Customer',
   delivered:             'Delivered to Customer',
 });
+
 
 export const prettyStatus = (s) => {
   if (!s) return '';
