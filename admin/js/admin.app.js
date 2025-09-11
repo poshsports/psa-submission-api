@@ -381,27 +381,33 @@ function ensureSelectionColumn() {
     });
   }
 
-  // ── Helpers (now outside the if-block so they exist on every render) ────────
-  const selAll = thead.querySelector('#__selAll');
+// ── Helpers (re-query tbody each time; table swaps it on render) ───────────
+const selAll = thead.querySelector('#__selAll');
 
-  const getVisibleRows = () =>
-    Array.from(tbody.querySelectorAll('tr[data-id]')).filter(tr =>
-      tr.offsetParent !== null &&            // not display:none; not detached
-      tr.style.display !== 'none' &&
-      !tr.classList.contains('hide')
-    );
+const getTbody = () => document.getElementById('subsTbody');
 
-  const updateSelAllUI = () => {
-    if (!selAll) return;
-    const rows = getVisibleRows();
-    const total = rows.length;
-    const checkedCount = rows.reduce((n, tr) => {
-      const cb = tr.querySelector('input.__selrow');
-      return n + (cb && cb.checked ? 1 : 0);
-    }, 0);
-    selAll.indeterminate = checkedCount > 0 && checkedCount < total;
-    selAll.checked = total > 0 && checkedCount === total;
-  };
+const getVisibleRows = () => {
+  const tb = getTbody();
+  if (!tb) return [];
+  return Array.from(tb.querySelectorAll('tr[data-id]')).filter(tr => {
+    const cs = window.getComputedStyle(tr);
+    // visible in current page/filter (not display:none/hidden and not .hide)
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && !tr.classList.contains('hide');
+  });
+};
+
+const updateSelAllUI = () => {
+  if (!selAll) return;
+  const rows = getVisibleRows();
+  const total = rows.length;
+  const checkedCount = rows.reduce((n, tr) => {
+    const cb = tr.querySelector('input.__selrow');
+    return n + (cb && cb.checked ? 1 : 0);
+  }, 0);
+  selAll.indeterminate = checkedCount > 0 && checkedCount < total;
+  selAll.checked = total > 0 && checkedCount === total;
+};
+
 
   // ── Row checkboxes ──────────────────────────────────────────────────────────
   const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
