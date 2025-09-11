@@ -25,34 +25,54 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Resolve group: try code, then id
-    const client = sb();
-    let groupId = null;
-    {
-      const { data: byCode, error: codeErr } = await client
-        .from('groups')
-        .select('id, code, status')
-        .eq('code', groupParam)
-        .limit(1)
-        .maybeSingle();
+// Resolve group: try code, then id — and enforce status guard
+const client = sb();
+let groupId = null;
+let groupRow = null;
 
-      if (byCode?.id) {
-        groupId = byCode.id;
-      } else {
-        const { data: byId, error: idErr } = await client
-          .from('groups')
-          .select('id, code, status')
-          .eq('id', groupParam)
-          .limit(1)
-          .maybeSingle();
-        if (byId?.id) groupId = byId.id;
-      }
-    }
+{
+  const { data: byCode } = await client
+    .from('groups')
+    .select('id, code, status')
+    .eq('code', groupParam)
+    .limit(1)
+    .maybeSingle();
 
-    if (!groupId) {
-      res.status(404).json({ ok: false, error: 'Group not found' });
-      return;
+  if (byCode?.id) {
+    groupId = byCode.id;
+    groupRow = byCode;
+  } else {
+    const { data: byId } = await client
+      .from('groups')
+      .select('id, code, status')
+      .eq('id', groupParam)
+      .limit(1)
+      .maybeSingle();
+    if (byId?.id) {
+      groupId = byId.id;
+      groupRow = byId;
     }
+  }
+}
+
+if (!groupId) {
+  res.status(404).json({ ok: false, error: 'Group not found' });
+  return;
+}
+
+// 🚫 Guard: once shipped (or any non-open state), block adding members.
+// Only Draft or ReadyToShip are open for adding.
+const st = String(groupRow?.status || '').toLowerCase().replace(/\s+/g, '');
+const isOpen = (st === 'draft' || st === 'readytoship');
+if (!isOpen) {
+  res.status(409).json({
+    ok: false,
+    code: 'group_locked',
+    error: `Cannot add submissions to ${groupRow?.code || 'this group'} because its status is “${groupRow?.status || 'Unknown'}”.`
+  });
+  return;
+}
+
 
     // NOTE: insert_at is reserved for future use (e.g., front/back of list)
     // Current numbering is handled in SQL trigger and by stable ordering of cards.
