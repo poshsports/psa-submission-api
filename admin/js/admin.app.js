@@ -1206,7 +1206,7 @@ async function openSubmissionDetails(id) {
               data-action="as-edit-status"
               data-current="${escapeHtml(String(r.status || ''))}"
               data-sub-code="${escapeHtml(String(r.submission_id || r.id || id))}">
-              ${escapeHtml(String(r.status || '')) || '—'}
+              ${escapeHtml(prettyStatus(String(r.status || ''))) || '—'}
             </span>
           </div>
         </div>
