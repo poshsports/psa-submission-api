@@ -1330,16 +1330,24 @@ if (currentRaw === 'received' || currentRaw === 'received_intake_complete') {
 
       try {
         // Use the admin override endpoint so backward moves are allowed
-        const r = await fetch('/api/admin/submissions.correct-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({
-            submission_code: subCode, // "psa-###"
-            status: to,
-            cascade_cards: false
-          })
-        });
+const token = to; // 'pending_payment' | 'submitted' | 'intake_complete' (map 'submitted_paid' -> 'submitted')
+
+const r = await fetch('/api/admin/submissions.correct-status', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'same-origin',
+  body: JSON.stringify({
+    // identifiers
+    submission_code: subCode,
+    // what many backends look for:
+    status: token,         // our original
+    new_status: token,     // alt name
+    status_key: token,     // alt name
+    to: token,             // alt name
+    // extras
+    cascade_cards: false
+  })
+});
         const j = await r.json().catch(() => ({}));
         if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
