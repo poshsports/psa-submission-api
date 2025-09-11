@@ -1271,11 +1271,13 @@ async function openSubmissionDetails(id) {
   const pill = document.getElementById('as-status-pill');
   if (!pill) return;
 
-  // The only statuses we allow from this UI (backwards OK)
-  const ALLOWED = ['pending_payment','submitted','submitted_paid','received'];
+// The only statuses we allow from this UI (must match backend tokens)
+const ALLOWED = ['pending_payment','submitted','submitted_paid','intake_complete'];
 
   const subCode  = pill.getAttribute('data-sub-code') || '';     // "psa-197" style
-  let currentRaw = (pill.getAttribute('data-current') || '').toLowerCase();
+  let currentRaw = (pill.getAttribute('data-current') || '').toLowerCase().replace(/\s+/g, '_');
+// Map legacy/friendly values to the backend token so the checkmark works
+if (currentRaw === 'received') currentRaw = 'intake_complete';
 
   // Build the popover element (on demand)
   function buildPopover() {
@@ -1314,7 +1316,8 @@ async function openSubmissionDetails(id) {
     // click -> save
     pop.addEventListener('click', async (e) => {
       const it = e.target.closest('.menu-item'); if (!it) return;
-      const to = String(it.dataset.value || '').trim();
+      let to = String(it.dataset.value || '').trim();
+      if (to === 'received') to = 'intake_complete';
       if (!to || !subCode) return;
 
       // disable UI while saving
