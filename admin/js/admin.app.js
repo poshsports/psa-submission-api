@@ -348,7 +348,7 @@ function ensureSelectionColumn() {
   const tbody = document.getElementById('subsTbody');
   if (!thead || !tbody) return;
 
-  // Header checkbox (select all)
+  // ── Header checkbox (select all) ────────────────────────────────────────────
   let th0 = thead.querySelector('th.__selcol');
   if (!th0) {
     th0 = document.createElement('th');
@@ -361,26 +361,49 @@ function ensureSelectionColumn() {
     if (firstTh) firstTh.parentNode.insertBefore(th0, firstTh);
     else thead.appendChild(th0);
 
-    const selAll = th0.querySelector('#__selAll');
+    const selAllHeader = th0.querySelector('#__selAll');
 
     // prevent row click handler from firing
-    selAll?.addEventListener('click', (e) => e.stopPropagation());
+    selAllHeader?.addEventListener('click', (e) => e.stopPropagation());
 
-    selAll?.addEventListener('change', () => {
-      const rows = tbody.querySelectorAll('tr[data-id]');
+    // select/clear ONLY the currently visible rows
+    selAllHeader?.addEventListener('change', () => {
+      const rows = getVisibleRows();
       rows.forEach(tr => {
         const id = tr.getAttribute('data-id');
         const cb = tr.querySelector('input.__selrow');
         if (!id || !cb) return;
-        cb.checked = selAll.checked;
+        cb.checked = selAllHeader.checked;
         if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
       });
-      // notify anything listening (e.g., group modal)
+      updateSelAllUI();
       document.dispatchEvent(new CustomEvent('psa:selection-changed'));
     });
   }
 
-  // Row checkboxes
+  // ── Helpers (now outside the if-block so they exist on every render) ────────
+  const selAll = thead.querySelector('#__selAll');
+
+  const getVisibleRows = () =>
+    Array.from(tbody.querySelectorAll('tr[data-id]')).filter(tr =>
+      tr.offsetParent !== null &&            // not display:none; not detached
+      tr.style.display !== 'none' &&
+      !tr.classList.contains('hide')
+    );
+
+  const updateSelAllUI = () => {
+    if (!selAll) return;
+    const rows = getVisibleRows();
+    const total = rows.length;
+    const checkedCount = rows.reduce((n, tr) => {
+      const cb = tr.querySelector('input.__selrow');
+      return n + (cb && cb.checked ? 1 : 0);
+    }, 0);
+    selAll.indeterminate = checkedCount > 0 && checkedCount < total;
+    selAll.checked = total > 0 && checkedCount === total;
+  };
+
+  // ── Row checkboxes ──────────────────────────────────────────────────────────
   const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
   rows.forEach(tr => {
     const id = tr.getAttribute('data-id');
@@ -395,14 +418,17 @@ function ensureSelectionColumn() {
       const firstTd = tr.querySelector('td');
       if (firstTd) tr.insertBefore(td0, firstTd); else tr.appendChild(td0);
 
-      const cb = td0.querySelector('input.__selrow');
-      cb.checked = __selectedSubs.has(id);
+const cb = td0.querySelector('input.__selrow');
+cb.checked = __selectedSubs.has(id);
 
-      cb.addEventListener('click', (e) => e.stopPropagation());
-      cb.addEventListener('change', () => {
-        if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
-        document.dispatchEvent(new CustomEvent('psa:selection-changed'));
-      });
+cb.addEventListener('click', (e) => e.stopPropagation());
+cb.addEventListener('change', () => {
+  if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+  updateSelAllUI();
+  document.dispatchEvent(new CustomEvent('psa:selection-changed'));
+});
+cb.__wiredSel = true; // <- mark as wired to avoid double-binding later
+
     } else {
       // keep in sync if table re-rendered
       const cb = td0.querySelector('input.__selrow');
@@ -412,6 +438,7 @@ function ensureSelectionColumn() {
         if (!cb.__wiredSel) {
           cb.addEventListener('change', () => {
             if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
+            updateSelAllUI();
             document.dispatchEvent(new CustomEvent('psa:selection-changed'));
           });
           cb.__wiredSel = true;
@@ -419,7 +446,11 @@ function ensureSelectionColumn() {
       }
     }
   });
+
+  // Initialize header checkbox state for the current page/filter
+  updateSelAllUI();
 }
+
 
 function getSelectedSubmissionIds() {
   return Array.from(__selectedSubs);
