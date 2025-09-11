@@ -1,5 +1,5 @@
 // /admin/js/admin.app.js
-import { $, debounce, escapeHtml } from './util.js';
+import { $, debounce, escapeHtml, prettyStatus } from './util.js';
 import { fetchSubmissions, logout, fetchSubmissionDetails, fetchGroups, createGroup, addToGroup } from './api.js';
 import * as tbl from './table.js';
 import * as views from './views.js';
@@ -1196,12 +1196,20 @@ async function openSubmissionDetails(id) {
           <div class="info-label">Submission</div>
           <div class="info-value"><code>${escapeHtml(String(r.submission_id || r.id || id))}</code></div>
         </div>
-
         <div class="info">
           <div class="info-label">Status</div>
-          <div class="info-value"><span class="pill">${escapeHtml(String(r.status || '')) || '—'}</span></div>
+          <div class="info-value">
+            <span
+              id="as-status-pill"
+              class="pill"
+              title="Click to change status"
+              data-action="as-edit-status"
+              data-current="${escapeHtml(String(r.status || ''))}"
+              data-sub-code="${escapeHtml(String(r.submission_id || r.id || id))}">
+              ${escapeHtml(String(r.status || '')) || '—'}
+            </span>
+          </div>
         </div>
-
         <div class="info">
           <div class="info-label">Cards</div>
           <div class="info-value">${escapeHtml(String(r.cards ?? (Array.isArray(cards) ? cards.length : 0)))}</div>
