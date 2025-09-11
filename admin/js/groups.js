@@ -704,11 +704,14 @@ const table = `
           ? rowsData.map(r => {
               // Row key: real card id if present, else synthetic per submission
               const rowKey = (r.id != null && r.id !== '') ? String(r.id) : `sub-${r.submission_id}`;
-              return `
-                <tr data-card-id="${escapeHtml(rowKey)}">
-                  ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
-                </tr>
-              `;
+return `
+  <tr
+    data-card-id="${escapeHtml(rowKey)}"
+    data-submission-id="${escapeHtml(String(r.submission_id || ''))}"
+  >
+    ${CARD_COLS.map(col => `<td>${col.fmt(r)}</td>`).join('')}
+  </tr>
+`;
             }).join('')
           : `<tr><td colspan="${CARD_COLS.length}" class="note">No members.</td></tr>`
       }
