@@ -542,12 +542,23 @@ function effectiveRowStatus(cardRow) {
 const CARD_COLS = [
   { label: 'Created',    fmt: (c) => safe(c._created_on || '') },
 
-  { label: 'Submission', fmt: (c) => {
-      const raw = String(c.submission_id || '');
-      const sub = subById.get(raw) || subByCode.get(raw);
-      return safe(sub?.code || raw);
-    }
-  },
+{ label: 'Submission', fmt: (c) => {
+    const raw = String(c.submission_id || '');
+    const sub = subById.get(raw) || subByCode.get(raw);
+    const label = safe(sub?.code || raw);
+
+    // Only show Remove when group is editable
+    const editable = (grp && (grp.status === 'Draft' || grp.status === 'ReadyToShip'));
+
+    return editable
+      ? `<span class="mono">${label}</span>
+         <button type="button"
+                 class="link danger xs"
+                 data-action="remove-sub"
+                 data-submission-id="${safe(raw)}">Remove</button>`
+      : `<span class="mono">${label}</span>`;
+  }
+},
 
   {
     label: 'Card',
@@ -750,6 +761,35 @@ return `
         </div>
       `;
       ensureScroller();
+      
+      // === Remove-from-group (delegated, per-submission) ===
+$box?.addEventListener('click', async (e) => {
+  const btn = e.target.closest?.('[data-action="remove-sub"]');
+  if (!btn) return;
+
+  const sid = btn.dataset.submissionId || btn.closest('tr')?.dataset.submissionId || '';
+  // Prefer codeOut/grp.code; id also works for your API
+  const groupKeyForRemove = (grp?.code || codeOut || id || '').trim();
+
+  if (!sid || !groupKeyForRemove) {
+    alert('Missing group or submission id');
+    return;
+  }
+  if (!confirm(`Remove submission ${sid} (and all its cards) from ${groupKeyForRemove}?`)) return;
+
+  try {
+    btn.disabled = true;
+    await removeFromGroup(groupKeyForRemove, [sid]);
+    // Re-fetch to show the renumbered Card # and updated rows
+    await renderDetail(root, id, codeOut);
+  } catch (err) {
+    console.error(err);
+    alert(err.message || 'Remove failed');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // Handle "Re-open" (sets group back to Returned and unlocks editing)
 $('btnReopen')?.addEventListener('click', async () => {
   if (!confirm('Re-open this group? This sets the group back to "Returned" and unlocks editing.')) return;
