@@ -1,5 +1,5 @@
 import { $, debounce, escapeHtml, prettyStatus } from './util.js';
-import { fetchGroups, logout, deleteGroup } from './api.js';
+import { fetchGroups, logout, deleteGroup, removeFromGroup } from './api.js';
 
 // Post-PSA progression (used in multiple places)
 const POST_PSA_ORDER = [
