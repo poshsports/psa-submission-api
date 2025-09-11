@@ -366,19 +366,31 @@ function ensureSelectionColumn() {
     // prevent row click handler from firing
     selAllHeader?.addEventListener('click', (e) => e.stopPropagation());
 
-    // select/clear ONLY the currently visible rows
-    selAllHeader?.addEventListener('change', () => {
-      const rows = getVisibleRows();
-      rows.forEach(tr => {
-        const id = tr.getAttribute('data-id');
-        const cb = tr.querySelector('input.__selrow');
-        if (!id || !cb) return;
-        cb.checked = selAllHeader.checked;
-        if (cb.checked) __selectedSubs.add(id); else __selectedSubs.delete(id);
-      });
-      updateSelAllUI();
-      document.dispatchEvent(new CustomEvent('psa:selection-changed'));
-    });
+// select/clear ONLY the currently visible rows (fire 'change' so row logic runs)
+selAllHeader?.addEventListener('change', () => {
+  const checked = selAllHeader.checked;
+  const rows = getVisibleRows();
+  const ids = [];
+
+  rows.forEach(tr => {
+    const id = tr.getAttribute('data-id');
+    if (!id) return;
+    ids.push(id);
+    const cb = tr.querySelector('input.__selrow');
+    if (cb) {
+      cb.checked = checked;
+      // trigger the row's own listener to update __selectedSubs and header state
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+
+  // belt & suspenders: sync the Set in case any row lacks a listener yet
+  if (checked) ids.forEach(id => __selectedSubs.add(id));
+  else ids.forEach(id => __selectedSubs.delete(id));
+
+  updateSelAllUI();
+  document.dispatchEvent(new CustomEvent('psa:selection-changed'));
+});
   }
 
 // ── Helpers (re-query tbody each time; table swaps it on render) ───────────
@@ -410,7 +422,7 @@ const updateSelAllUI = () => {
 
 
   // ── Row checkboxes ──────────────────────────────────────────────────────────
-  const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+  const rows = Array.from((getTbody()?.querySelectorAll('tr[data-id]')) || []);
   rows.forEach(tr => {
     const id = tr.getAttribute('data-id');
     if (!id) return;
