@@ -1318,53 +1318,49 @@ if (currentRaw === 'received' || currentRaw === 'received_intake_complete') {
       it.style.background = '#f5f7fb';
     });
 
-    // click -> save
-    pop.addEventListener('click', async (e) => {
-      const it = e.target.closest('.menu-item'); if (!it) return;
-      let to = String(it.dataset.value || '').trim();
-      if (to === 'received') to = 'intake_complete';
-      if (!to || !subCode) return;
+// click -> save
+pop.addEventListener('click', async (e) => {
+  const it = e.target.closest('.menu-item'); if (!it) return;
 
-      // disable UI while saving
-      Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
+  let to = String(it.dataset.value || '').trim();
+  if (to === 'received') to = 'intake_complete';
 
-      try {
-        // Use the admin override endpoint so backward moves are allowed
-const token = to; // 'pending_payment' | 'submitted' | 'intake_complete' (map 'submitted_paid' -> 'submitted')
+  // normalize for API (submitted_paid → submitted)
+  const token = (to === 'submitted_paid') ? 'submitted' : to;
+  if (!token || !subCode) return;
 
-const r = await fetch('/api/admin/submissions.correct-status', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  credentials: 'same-origin',
-  body: JSON.stringify({
-    // identifiers
-    submission_code: subCode,
-    // what many backends look for:
-    status: token,         // our original
-    new_status: token,     // alt name
-    status_key: token,     // alt name
-    to: token,             // alt name
-    // extras
-    cascade_cards: false
-  })
-});
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+  // disable UI while saving
+  Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
 
-        // Update the pill immediately
-        pill.textContent = prettyStatus(to);
-        pill.setAttribute('data-current', to);
-        currentRaw = to;
-
-        // Optional: refresh the table data so the list reflects the change
-        try { await loadReal?.(); } catch {}
-
-        closePopover();
-      } catch (err) {
-        alert(err.message || 'Status update failed');
-        Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
-      }
+  try {
+    const r = await fetch('/api/admin/submissions.correct-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        submission_code: subCode,
+        status: token,
+        new_status: token,
+        status_key: token,
+        to: token,
+        cascade_cards: false
+      })
     });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+
+    // Update pill with the UI label you chose
+    pill.textContent = prettyStatus(to);
+    pill.setAttribute('data-current', to);
+    currentRaw = to;
+
+    try { await loadReal?.(); } catch {}
+    closePopover();
+  } catch (err) {
+    alert(err.message || 'Status update failed');
+    Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
+  }
+});
 
     document.body.appendChild(pop);
     return pop;
