@@ -782,41 +782,60 @@ function renderGroupModalHome(preselectedIds){
     }
   });
 
-  // ===== Add to existing (guard; add only eligible) =====
-  const btnAdd = $('gm-add-existing');
-  let chosenCode = '';
+// ===== Add to existing (guard; add only eligible) =====
+const btnAdd = $('gm-add-existing');
+let chosenCode = '';
 
-  const applyChosen = async () => {
-    if (!chosenCode) return;
+const applyChosen = async () => {
+  if (!chosenCode) return;
 
-    let ids = preselectedIds.slice();
-    let eligibleIds = [];
-
-    if (ids.length) {
-      const { eligible } = splitSelectionByEligibility();
-      eligibleIds = eligible.map(x => x.id);
-    } else {
-      ids = parseIdsFromInput($('gm-ids')?.value || '');
-      if (!ids.length) return alert('Please select rows or paste submission IDs.');
-      const r = eligibleIdsFromList(ids);
-      eligibleIds = r.eligibleIds;
+  // 🔎 If we can find this group, block when not Draft/ReadyToShip
+  try {
+    const resp = await fetchGroups({ q: chosenCode, limit: 25, offset: 0 });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const match = items.find(g => String(g.code || '').toUpperCase() === chosenCode.toUpperCase());
+    if (match) {
+      const st = String(match.status || '').toLowerCase().replace(/\s+/g, '');
+      const isOpen = (st === 'draft' || st === 'readytoship');
+      if (!isOpen) {
+        alert(`You can’t add to ${match.code} because its status is “${match.status}”.`);
+        return;
+      }
     }
+  } catch {
+    // If search fails, we’ll fall back to the server guard in Step 2.
+  }
 
-    if (!eligibleIds.length) {
-      alert('All chosen submissions are already attached to a group.');
-      return; // ❌ nothing to add
-    }
+  // Build the eligible ID list exactly as before
+  let ids = preselectedIds.slice();
+  let eligibleIds = [];
 
-    try {
-      const result = await addToGroup(chosenCode, eligibleIds);
-      const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
-      alert(`Added ${addedSubs} ${plural(addedSubs,'submission','submissions')} and ${addedCards} ${plural(addedCards,'card','cards')} to ${chosenCode}.`);
-      closeGroupModal();
-      loadReal?.();
-    } catch (e) {
-      alert(`Add failed: ${e.message}`);
-    }
-  };
+  if (ids.length) {
+    const { eligible } = splitSelectionByEligibility();
+    eligibleIds = eligible.map(x => x.id);
+  } else {
+    ids = parseIdsFromInput($('gm-ids')?.value || '');
+    if (!ids.length) return alert('Please select rows or paste submission IDs.');
+    const r = eligibleIdsFromList(ids);
+    eligibleIds = r.eligibleIds;
+  }
+
+  if (!eligibleIds.length) {
+    alert('All chosen submissions are already attached to a group.');
+    return;
+  }
+
+  try {
+    const result = await addToGroup(chosenCode, eligibleIds);
+    const { addedSubs, addedCards } = extractAddCounts(result, eligibleIds.length, eligibleIds);
+    alert(`Added ${addedSubs} ${plural(addedSubs,'submission','submissions')} and ${addedCards} ${plural(addedCards,'card','cards')} to ${chosenCode}.`);
+    closeGroupModal();
+    loadReal?.();
+  } catch (e) {
+    alert(`Add failed: ${e.message}`);
+  }
+};
+
 
   $('gm-add-existing')?.addEventListener('click', applyChosen);
   $('gm-manual')?.addEventListener('input', (e) => {
@@ -839,33 +858,59 @@ const renderRows = (items = [], { heading = null } = {}) => {
     return;
   }
 
-  const rowsHtml = items.map(r => {
-    const code = escapeHtml(String(r.code || ''));
-    const status = escapeHtml(String(r.status || ''));
-    const notes = escapeHtml(String(r.notes || ''));
-    const cnt = Number(r.submission_count ?? r.members ?? r.count ?? 0);
-    return `
-      <tr class="gm-row" data-code="${code}" title="Use ${code}">
-        <td><strong>${code}</strong></td>
-        <td>${status}</td>
-        <td>${cnt}</td>
-        <td>${notes}</td>
-      </tr>
-    `;
-  }).join('');
+const rowsHtml = items.map(r => {
+  const id   = String(r.id ?? '').trim();
+  const code = escapeHtml(r.code || '');
+  const statusRaw = String(r.status || '');
+  const status = escapeHtml(statusRaw);
+  const notes  = escapeHtml(r.notes  || '');
+  const cnt = Number(r.submission_count ?? r.members ?? r.member_count ?? 0);
+
+  // Only Draft/ReadyToShip are “open” for adding
+  const s = statusRaw.toLowerCase().replace(/\s+/g, '');
+  const isOpen = (s === 'draft' || s === 'readytoship');
+
+  const cls = isOpen ? 'gm-row selectable' : 'gm-row disabled';
+  const title = isOpen
+    ? `Use ${code}`
+    : `Cannot add to ${code} (status: ${statusRaw})`;
+
+  return `
+    <tr class="${cls}"
+        data-id="${escapeHtml(id)}"
+        data-code="${code}"
+        title="${escapeHtml(title)}">
+      <td><strong>${code}</strong></td>
+      <td>${status}</td>
+      <td>${cnt}</td>
+      <td>${notes}</td>
+    </tr>
+  `;
+}).join('');
+
 
   tb.innerHTML = (heading ? `<tr><td colspan="4" class="note">${escapeHtml(heading)}</td></tr>` : '') + rowsHtml;
 
-  tb.querySelectorAll('tr.gm-row').forEach(tr => {
-    tr.addEventListener('click', () => {
-      tb.querySelectorAll('tr.gm-row.selected').forEach(x => x.classList.remove('selected'));
-      tr.classList.add('selected');
-      chosenCode = tr.getAttribute('data-code') || '';
-      if ($('gm-manual')) $('gm-manual').value = chosenCode;
-      if (btnAdd) btnAdd.disabled = !chosenCode;
-    });
-    tr.addEventListener('dblclick', applyChosen);
+tb.querySelectorAll('tr.gm-row').forEach(tr => {
+  const isDisabled = tr.classList.contains('disabled');
+
+  tr.addEventListener('click', () => {
+    if (isDisabled) return; // 🚫 ignore disabled rows
+    tb.querySelectorAll('tr.gm-row.selected').forEach(x => x.classList.remove('selected'));
+    tr.classList.add('selected');
+    chosenCode = tr.getAttribute('data-code') || '';
+    if ($('gm-manual')) $('gm-manual').value = chosenCode;
+    if (btnAdd) btnAdd.disabled = !chosenCode;
   });
+
+  tr.addEventListener('dblclick', () => {
+    if (isDisabled) return; // 🚫 ignore disabled rows
+    // select then apply
+    tr.click();
+    applyChosen();
+  });
+});
+
 };
 
 
