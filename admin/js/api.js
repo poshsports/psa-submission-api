@@ -93,6 +93,22 @@ export async function addToGroup(groupIdOrCode, submissionIds) {
   return r.json(); // { ok, added_submissions, added_cards }
 }
 
+// Remove an entire submission (all its cards) from a group
+export async function removeFromGroup(groupIdOrCode, submissionIds) {
+  const id = encodeURIComponent(groupIdOrCode);
+  const body = { submission_ids: Array.isArray(submissionIds) ? submissionIds : [submissionIds] };
+
+  const r = await fetch(`/api/admin/groups/${id}/submissions/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || j.message || 'Remove from group failed');
+  return j; // { ok, removed_submissions, removed_cards, group_code }
+}
+
 // --- Groups (read-only) ---
 export async function fetchGroups({ status=null, q=null, limit=50, offset=0 } = {}) {
   const params = new URLSearchParams();
