@@ -394,8 +394,6 @@ selAllHeader?.addEventListener('change', () => {
   }
 
 // ── Helpers (re-query tbody each time; table swaps it on render) ───────────
-const selAll = thead.querySelector('#__selAll');
-
 const getTbody = () => document.getElementById('subsTbody');
 
 const getVisibleRows = () => {
@@ -408,17 +406,56 @@ const getVisibleRows = () => {
   });
 };
 
+// there can be MORE THAN ONE header checkbox if the header is cloned/sticky
+const getHeaderChecks = () => Array.from(document.querySelectorAll('input#__selAll'));
+
+// keep ALL header checkboxes in sync with row state
 const updateSelAllUI = () => {
-  if (!selAll) return;
   const rows = getVisibleRows();
   const total = rows.length;
   const checkedCount = rows.reduce((n, tr) => {
     const cb = tr.querySelector('input.__selrow');
     return n + (cb && cb.checked ? 1 : 0);
   }, 0);
-  selAll.indeterminate = checkedCount > 0 && checkedCount < total;
-  selAll.checked = total > 0 && checkedCount === total;
+
+  const heads = getHeaderChecks();
+  heads.forEach(h => {
+    h.indeterminate = checkedCount > 0 && checkedCount < total;
+    h.checked = total > 0 && checkedCount === total;
+  });
 };
+
+// delegated handler so clicks on ANY cloned header checkbox work
+if (!document.__psaSelAllDelegated) {
+  document.__psaSelAllDelegated = true;
+  document.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (!(el && el.id === '__selAll')) return;
+
+    const checked = !!el.checked;
+    const rows = getVisibleRows();
+    const ids = [];
+
+    rows.forEach(tr => {
+      const id = tr.getAttribute('data-id');
+      if (!id) return;
+      ids.push(id);
+      const cb = tr.querySelector('input.__selrow');
+      if (cb) {
+        cb.checked = checked;
+        // fire the row's own handler to keep Set/UI in sync
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    // safety sync
+    if (checked) ids.forEach(id => __selectedSubs.add(id));
+    else ids.forEach(id => __selectedSubs.delete(id));
+
+    updateSelAllUI();
+    document.dispatchEvent(new CustomEvent('psa:selection-changed'));
+  }, true);
+}
 
 
   // ── Row checkboxes ──────────────────────────────────────────────────────────
