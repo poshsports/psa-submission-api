@@ -1275,9 +1275,14 @@ async function openSubmissionDetails(id) {
 const ALLOWED = ['pending_payment','submitted','submitted_paid','intake_complete'];
 
   const subCode  = pill.getAttribute('data-sub-code') || '';     // "psa-197" style
-  let currentRaw = (pill.getAttribute('data-current') || '').toLowerCase().replace(/\s+/g, '_');
-// Map legacy/friendly values to the backend token so the checkmark works
-if (currentRaw === 'received') currentRaw = 'intake_complete';
+const norm = (s) => String(s || '')
+  .toLowerCase()
+  .replace(/[()\s]+/g, '_'); // strip spaces + parentheses
+
+let currentRaw = norm(pill.getAttribute('data-current'));
+if (currentRaw === 'received' || currentRaw === 'received_intake_complete') {
+  currentRaw = 'intake_complete';
+}
 
   // Build the popover element (on demand)
   function buildPopover() {
