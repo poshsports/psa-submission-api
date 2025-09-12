@@ -1208,7 +1208,7 @@ async function openSubmissionDetails(id) {
           <div class="info-value">
             <span
               id="as-status-pill"
-              class="pill${inGroupFlag ? ' locked' : ''}"
+              class="pill${inGroupFlag ? ' locked' : ''}" ${inGroupFlag ? 'aria-disabled="true"' : ''}
               title="${escapeHtml(pillTitle)}"
               data-action="as-edit-status"
               data-current="${escapeHtml(String(r.status || ''))}"
