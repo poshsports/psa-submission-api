@@ -1190,6 +1190,13 @@ async function openSubmissionDetails(id) {
     const shipHTML = renderAddress(r);
 
     // ---- INFO GRID (card-style) ----
+    // Group awareness for status pill
+    const groupCode   = String(r.group_code || r.group || r.group_id || '').trim();
+    const inGroupFlag = !!(groupCode && groupCode !== '---');
+    const pillTitle   = inGroupFlag
+      ? `Status is managed by its group${groupCode ? ` (${groupCode})` : ''}. Remove from group to change.`
+      : 'Click to change status';
+
     const infoGrid = `
       <div class="info-grid">
         <div class="info">
@@ -1201,11 +1208,13 @@ async function openSubmissionDetails(id) {
           <div class="info-value">
             <span
               id="as-status-pill"
-              class="pill"
-              title="Click to change status"
+              class="pill${inGroupFlag ? ' locked' : ''}"
+              title="${escapeHtml(pillTitle)}"
               data-action="as-edit-status"
               data-current="${escapeHtml(String(r.status || ''))}"
-              data-sub-code="${escapeHtml(String(r.submission_id || r.id || id))}">
+              data-sub-code="${escapeHtml(String(r.submission_id || r.id || id))}"
+              data-in-group="${inGroupFlag ? '1' : ''}"
+              data-group="${escapeHtml(groupCode)}">
               ${escapeHtml(prettyStatus(String(r.status || ''))) || '—'}
             </span>
           </div>
@@ -1257,6 +1266,7 @@ async function openSubmissionDetails(id) {
       </div>
     `;
 
+
     const cardsHTML = renderCardsTable(cards);
     const jsonHTML = `
       <details style="margin-top:12px">
@@ -1266,30 +1276,54 @@ async function openSubmissionDetails(id) {
     `;
 
     if (bodyEl) bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
-// === Manual Status Edit (pre-PSA only UI; short pill label) ================
+// === Manual Status Edit (pre-PSA only UI; short pill label; LOCK if grouped) ===
 (() => {
   const pill = document.getElementById('as-status-pill');
   if (!pill) return;
 
-  // UI only shows choices up to "received"
+  // Only show choices up to "received" in this UI
   const UI_CHOICES = ['pending_payment','submitted','submitted_paid','received'];
 
-  // Keep full pretty in title, but shorten long pill text
+  // Shorten the “received (intake complete)” pill without changing tooltip
   const prettyStatusShort = (v) => {
     const t = String(v || '').toLowerCase().replace(/[()\s]+/g, '_');
     if (t === 'received') return 'Received';
     return prettyStatus(v);
   };
 
-  const subCode = pill.getAttribute('data-sub-code') || '';
-  const norm = s => String(s || '').toLowerCase().replace(/[()\s]+/g, '_');
-  let currentRaw = norm(pill.getAttribute('data-current'));
+  const subCode  = pill.getAttribute('data-sub-code') || '';
+  const norm     = s => String(s || '').toLowerCase().replace(/[()\s]+/g, '_');
+  const curAttr  = pill.getAttribute('data-current') || '';
+  let currentRaw = norm(curAttr);
 
   // Make the pill cleaner immediately
-  pill.textContent = prettyStatusShort(currentRaw);
-  pill.setAttribute('title', prettyStatus(currentRaw)); // hover shows full wording
+  pill.textContent = prettyStatusShort(curAttr);
+  pill.setAttribute('title', prettyStatus(curAttr)); // full text on hover
 
-  // For route choice
+  // 🔒 If the submission is in a group, disable edits from the pill
+  let inGroup = !!(pill.getAttribute('data-in-group')); // "1" or ""
+  const groupFromAttr = pill.getAttribute('data-group') || '';
+  if (!inGroup && subCode) {
+    // Fallback: check current table data if present
+    try {
+      const row = findRowForSubmissionId(subCode);
+      const g = String(row?.group_code || row?.group || row?.group_id || '').trim();
+      if (g && g !== '---') inGroup = true;
+    } catch {}
+  }
+  if (inGroup) {
+    pill.classList.add('locked');
+    pill.style.cursor = 'not-allowed';
+    pill.style.opacity = '0.7';
+    pill.setAttribute(
+      'title',
+      `Status is managed by its group${groupFromAttr ? ` (${groupFromAttr})` : ''}. Remove from group to change.`
+    );
+    pill.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+    return; // do NOT wire the popover
+  }
+
+  // Routing rules: backward within pre-PSA uses correct-status, otherwise set-status
   const PRE_SET = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
   const RANK = {
     pending_payment:0, submitted:1, submitted_paid:2, received:3, shipped_to_psa:4,
@@ -1397,6 +1431,7 @@ async function openSubmissionDetails(id) {
     openPopover();
   });
 })();
+
 
 
   } catch (e) {
