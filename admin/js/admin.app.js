@@ -1266,21 +1266,36 @@ async function openSubmissionDetails(id) {
     `;
 
     if (bodyEl) bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
-// === Manual Status Edit (use set-status route) ==============================
+// === Manual Status Edit (pre-PSA only UI; short pill label) ================
 (() => {
   const pill = document.getElementById('as-status-pill');
   if (!pill) return;
 
-  // Canonical tokens (must match server ALLOWED)
-  const ALLOWED = [
-    'pending_payment','submitted','submitted_paid','received',
-    'shipped_to_psa','in_grading','graded','shipped_back_to_us',
-    'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
-  ];
+  // UI only shows choices up to "received"
+  const UI_CHOICES = ['pending_payment','submitted','submitted_paid','received'];
+
+  // Keep full pretty in title, but shorten long pill text
+  const prettyStatusShort = (v) => {
+    const t = String(v || '').toLowerCase().replace(/[()\s]+/g, '_');
+    if (t === 'received') return 'Received';
+    return prettyStatus(v);
+  };
 
   const subCode = pill.getAttribute('data-sub-code') || '';
   const norm = s => String(s || '').toLowerCase().replace(/[()\s]+/g, '_');
   let currentRaw = norm(pill.getAttribute('data-current'));
+
+  // Make the pill cleaner immediately
+  pill.textContent = prettyStatusShort(currentRaw);
+  pill.setAttribute('title', prettyStatus(currentRaw)); // hover shows full wording
+
+  // For route choice
+  const PRE_SET = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
+  const RANK = {
+    pending_payment:0, submitted:1, submitted_paid:2, received:3, shipped_to_psa:4,
+    in_grading:5, graded:6, shipped_back_to_us:7, received_from_psa:8,
+    balance_due:9, paid:10, shipped_to_customer:11, delivered:12
+  };
 
   function buildPopover() {
     const pop = document.createElement('div');
@@ -1297,12 +1312,12 @@ async function openSubmissionDetails(id) {
 
     pop.innerHTML = `
       <div style="padding:4px 6px 8px 6px" class="note">Set status</div>
-      ${ALLOWED.map(v => `
+      ${UI_CHOICES.map(v => `
         <button type="button"
                 class="menu-item"
                 data-value="${v}"
                 style="display:flex;align-items:center;gap:8px; width:100%; text-align:left; padding:8px 10px; border:none; background:none; cursor:pointer; border-radius:8px">
-          <span style="flex:1">${prettyStatus(v)}</span>
+          <span style="flex:1">${prettyStatusShort(v)}</span>
           ${v === currentRaw ? '<span aria-hidden="true">✓</span>' : ''}
         </button>
       `).join('')}
@@ -1314,54 +1329,42 @@ async function openSubmissionDetails(id) {
       it.style.background = '#f5f7fb';
     });
 
-// inside: pop.addEventListener('click', async (e) => { ... })
-pop.addEventListener('click', async (e) => {
-  const it = e.target.closest('.menu-item'); if (!it) return;
+    pop.addEventListener('click', async (e) => {
+      const it = e.target.closest('.menu-item'); if (!it) return;
+      const token = String(it.dataset.value || '').trim();
+      if (!token || !subCode) return;
 
-  const token = String(it.dataset.value || '').trim();
-  if (!token || !subCode) return;
+      // backward within pre-PSA -> correct-status, otherwise set-status
+      const isBackward = (RANK[token] ?? 999) < (RANK[currentRaw] ?? 999);
+      const bothPre    = PRE_SET.has(token) && PRE_SET.has(currentRaw);
+      const url = (isBackward && bothPre)
+        ? '/api/admin/submissions.correct-status'
+        : '/api/admin/submissions.set-status';
 
-  // rank & phase helpers
-  const RANK = {
-    pending_payment:0, submitted:1, submitted_paid:2, received:3, shipped_to_psa:4,
-    in_grading:5, graded:6, shipped_back_to_us:7,
-    received_from_psa:8, balance_due:9, paid:10, shipped_to_customer:11, delivered:12
-  };
-  const PRE_SET = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
+      Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
 
-  const curr = currentRaw;                  // normalized current token
-  const isBackward = (RANK[token] ?? 999) < (RANK[curr] ?? 999);
-  const bothPre    = PRE_SET.has(token) && PRE_SET.has(curr);
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submission_code: subCode, status: token })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
-  // choose route:
-  const url = (isBackward && bothPre)
-    ? '/api/admin/submissions.correct-status'   // allow pre-PSA backward overrides
-    : '/api/admin/submissions.set-status';      // normal forward (and post rules)
+        pill.textContent = prettyStatusShort(token);
+        pill.setAttribute('title', prettyStatus(token));
+        pill.setAttribute('data-current', token);
+        currentRaw = norm(token);
 
-  Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
-
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ submission_code: subCode, status: token })
+        try { await loadReal?.(); } catch {}
+        closePopover();
+      } catch (err) {
+        alert(err.message || 'Status update failed');
+        Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
+      }
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
-
-    pill.textContent = prettyStatus(token);
-    pill.setAttribute('data-current', token);
-    currentRaw = token;
-
-    try { await loadReal?.(); } catch {}
-    closePopover();
-  } catch (err) {
-    alert(err.message || 'Status update failed');
-    Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
-  }
-});
-
 
     document.body.appendChild(pop);
     return pop;
@@ -1370,7 +1373,6 @@ pop.addEventListener('click', async (e) => {
   function openPopover() {
     let pop = document.getElementById('sub-status-pop') || buildPopover();
     positionPopover(pop, pill);
-
     const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== pill) closePopover(); };
     const onEsc  = (e) => { if (e.key === 'Escape') closePopover(); };
     pop.__off = () => {
@@ -1388,7 +1390,6 @@ pop.addEventListener('click', async (e) => {
     pop.remove();
   }
 
-  // Toggle on pill click
   pill.addEventListener('click', (e) => {
     e.preventDefault();
     const existing = document.getElementById('sub-status-pop');
