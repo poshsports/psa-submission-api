@@ -58,7 +58,9 @@ function getCheckedStatuses() {
 function updateStatusButtonLabel() {
   const btn = $('btnStatus'); if (!btn) return;
   const vals = getCheckedStatuses();
-  btn.textContent = vals.length ? `Status: ${vals.join(', ')}` : 'Status: All';
+  btn.textContent = vals.length
+    ? `Status: ${vals.map(prettyStatus).join(', ')}`
+    : 'Status: All';
 }
 
 function openStatusPopover() {
@@ -1189,13 +1191,18 @@ async function openSubmissionDetails(id) {
     const email   = r.customer_email || r.email || '';
     const shipHTML = renderAddress(r);
 
-    // ---- INFO GRID (card-style) ----
-    // Group awareness for status pill
-    const groupCode   = String(r.group_code || r.group || r.group_id || '').trim();
-    const inGroupFlag = !!(groupCode && groupCode !== '---');
-    const pillTitle   = inGroupFlag
-      ? `Status is managed by its group${groupCode ? ` (${groupCode})` : ''}. Remove from group to change.`
-      : 'Click to change status';
+// ---- INFO GRID (card-style) ----
+// Group awareness for status pill (normalized)
+const rawGroup = (r.group_code ?? r.group_id ?? r.group ?? null);
+const groupCode = typeof rawGroup === 'object' && rawGroup
+  ? String(rawGroup.code ?? rawGroup.id ?? rawGroup.group_code ?? '').trim()
+  : String(rawGroup ?? '').trim();
+
+const inGroupFlag = !!(groupCode && groupCode !== '---');
+const pillTitle = inGroupFlag
+  ? `Status is managed by its group${groupCode ? ` (${groupCode})` : ''}. Remove from group to change.`
+  : 'Click to change status';
+
 
     const infoGrid = `
       <div class="info-grid">
@@ -1208,7 +1215,8 @@ async function openSubmissionDetails(id) {
           <div class="info-value">
             <span
               id="as-status-pill"
-              class="pill${inGroupFlag ? ' locked' : ''}" ${inGroupFlag ? 'aria-disabled="true"' : ''}
+              class="pill${inGroupFlag ? ' locked' : ''}"
+              ${inGroupFlag ? 'aria-disabled="true" tabindex="-1"' : 'role="button" tabindex="0"'}
               title="${escapeHtml(pillTitle)}"
               data-action="as-edit-status"
               data-current="${escapeHtml(String(r.status || ''))}"
@@ -1424,12 +1432,23 @@ async function openSubmissionDetails(id) {
     pop.remove();
   }
 
-  pill.addEventListener('click', (e) => {
+// mouse click to toggle
+pill.addEventListener('click', (e) => {
+  e.preventDefault();
+  const existing = document.getElementById('sub-status-pop');
+  if (existing) { closePopover(); return; }
+  openPopover();
+});
+
+// keyboard support (only meaningful when not locked)
+pill.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
     const existing = document.getElementById('sub-status-pop');
     if (existing) { closePopover(); return; }
     openPopover();
-  });
+  }
+});
 })();
 
 
