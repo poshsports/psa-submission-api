@@ -1266,25 +1266,22 @@ async function openSubmissionDetails(id) {
     `;
 
     if (bodyEl) bodyEl.innerHTML = infoGrid + cardsHTML + jsonHTML;
-// === Manual Status Edit (pre-PSA only) ==============================
+// === Manual Status Edit (use set-status route) ==============================
 (() => {
   const pill = document.getElementById('as-status-pill');
   if (!pill) return;
 
-// The only statuses we allow from this UI (must match backend tokens)
-const ALLOWED = ['pending_payment','submitted','submitted_paid','intake_complete'];
+  // Canonical tokens (must match server ALLOWED)
+  const ALLOWED = [
+    'pending_payment','submitted','submitted_paid','received',
+    'shipped_to_psa','in_grading','graded','shipped_back_to_us',
+    'received_from_psa','balance_due','paid','shipped_to_customer','delivered'
+  ];
 
-  const subCode  = pill.getAttribute('data-sub-code') || '';     // "psa-197" style
-const norm = (s) => String(s || '')
-  .toLowerCase()
-  .replace(/[()\s]+/g, '_'); // strip spaces + parentheses
+  const subCode = pill.getAttribute('data-sub-code') || '';
+  const norm = s => String(s || '').toLowerCase().replace(/[()\s]+/g, '_');
+  let currentRaw = norm(pill.getAttribute('data-current'));
 
-let currentRaw = norm(pill.getAttribute('data-current'));
-if (currentRaw === 'received' || currentRaw === 'received_intake_complete') {
-  currentRaw = 'intake_complete';
-}
-
-  // Build the popover element (on demand)
   function buildPopover() {
     const pop = document.createElement('div');
     pop.id = 'sub-status-pop';
@@ -1305,62 +1302,47 @@ if (currentRaw === 'received' || currentRaw === 'received_intake_complete') {
                 class="menu-item"
                 data-value="${v}"
                 style="display:flex;align-items:center;gap:8px; width:100%; text-align:left; padding:8px 10px; border:none; background:none; cursor:pointer; border-radius:8px">
-          <span style="flex:1">${escapeHtml(prettyStatus(v))}</span>
+          <span style="flex:1">${prettyStatus(v)}</span>
           ${v === currentRaw ? '<span aria-hidden="true">✓</span>' : ''}
         </button>
       `).join('')}
     `;
 
-    // hover affordance
     pop.addEventListener('mouseover', (e) => {
       const it = e.target.closest('.menu-item'); if (!it) return;
       Array.from(pop.querySelectorAll('.menu-item')).forEach(b => b.style.background = '');
       it.style.background = '#f5f7fb';
     });
 
-// click -> save
-pop.addEventListener('click', async (e) => {
-  const it = e.target.closest('.menu-item'); if (!it) return;
+    // click -> save (no remapping; call the working route)
+    pop.addEventListener('click', async (e) => {
+      const it = e.target.closest('.menu-item'); if (!it) return;
+      const token = String(it.dataset.value || '').trim();
+      if (!token || !subCode) return;
 
-  let to = String(it.dataset.value || '').trim();
-  if (to === 'received') to = 'intake_complete';
+      Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
 
-  // normalize for API (submitted_paid → submitted)
-  const token = (to === 'submitted_paid') ? 'submitted' : to;
-  if (!token || !subCode) return;
+      try {
+        const r = await fetch('/api/admin/submissions.set-status', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submission_code: subCode, status: token })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
 
-  // disable UI while saving
-  Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
+        pill.textContent = prettyStatus(token);
+        pill.setAttribute('data-current', token);
+        currentRaw = token;
 
-  try {
-    const r = await fetch('/api/admin/submissions.correct-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        submission_code: subCode,
-        status: token,
-        new_status: token,
-        status_key: token,
-        to: token,
-        cascade_cards: false
-      })
+        try { await loadReal?.(); } catch {}
+        closePopover();
+      } catch (err) {
+        alert(err.message || 'Status update failed');
+        Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
+      }
     });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
-
-    // Update pill with the UI label you chose
-    pill.textContent = prettyStatus(to);
-    pill.setAttribute('data-current', to);
-    currentRaw = to;
-
-    try { await loadReal?.(); } catch {}
-    closePopover();
-  } catch (err) {
-    alert(err.message || 'Status update failed');
-    Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
-  }
-});
 
     document.body.appendChild(pop);
     return pop;
@@ -1370,15 +1352,14 @@ pop.addEventListener('click', async (e) => {
     let pop = document.getElementById('sub-status-pop') || buildPopover();
     positionPopover(pop, pill);
 
-    // Outside click / ESC to close
     const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== pill) closePopover(); };
-    const onEsc = (e) => { if (e.key === 'Escape') closePopover(); };
+    const onEsc  = (e) => { if (e.key === 'Escape') closePopover(); };
     pop.__off = () => {
       document.removeEventListener('mousedown', onDoc, true);
-      document.removeEventListener('keydown', onEsc, true);
+      document.removeEventListener('keydown',  onEsc,  true);
     };
     document.addEventListener('mousedown', onDoc, true);
-    document.addEventListener('keydown', onEsc, true);
+    document.addEventListener('keydown',  onEsc,  true);
   }
 
   function closePopover() {
@@ -1396,6 +1377,7 @@ pop.addEventListener('click', async (e) => {
     openPopover();
   });
 })();
+
 
   } catch (e) {
     if (bodyEl) bodyEl.innerHTML = `<div class="error">Failed to load details: ${escapeHtml(e.message || 'Error')}</div>`;
