@@ -1319,18 +1319,21 @@ const pillTitle = inGroupFlag
       if (g && g !== '---') inGroup = true;
     } catch {}
   }
-  if (inGroup) {
-    pill.classList.add('locked');
-    pill.style.cursor = 'not-allowed';
-    pill.style.opacity = '0.7';
-    pill.setAttribute(
-      'title',
-      `Status is managed by its group${groupFromAttr ? ` (${groupFromAttr})` : ''}. Remove from group to change.`
-    );
-    pill.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
-    return; // do NOT wire the popover
-  }
-
+ if (inGroup) {
+  pill.classList.add('locked');
+  pill.style.cursor = 'not-allowed';
+  pill.style.opacity = '0.7';
+  pill.setAttribute(
+    'title',
+    `Status is managed by its group${groupFromAttr ? ` (${groupFromAttr})` : ''}. Remove from group to change.`
+  );
+  pill.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+  return; // do NOT wire the popover
+} else {
+  // unlocked: look/behave like a button
+  pill.style.cursor = 'pointer';
+  pill.style.userSelect = 'none';
+}
   // Routing rules: backward within pre-PSA uses correct-status, otherwise set-status
   const PRE_SET = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
   const RANK = {
