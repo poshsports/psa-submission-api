@@ -477,3 +477,10 @@ tr.drop-below { box-shadow: 0  2px 0 0 var(--primary, #2563eb) inset; }
 
 .row-status.dirty { outline: 2px solid #7aa7ff; border-radius: 6px; }
 
+/* keep pills tidy on narrow layouts */
+.info .pill {
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
