@@ -1314,35 +1314,54 @@ async function openSubmissionDetails(id) {
       it.style.background = '#f5f7fb';
     });
 
-    // click -> save (no remapping; call the working route)
-    pop.addEventListener('click', async (e) => {
-      const it = e.target.closest('.menu-item'); if (!it) return;
-      const token = String(it.dataset.value || '').trim();
-      if (!token || !subCode) return;
+// inside: pop.addEventListener('click', async (e) => { ... })
+pop.addEventListener('click', async (e) => {
+  const it = e.target.closest('.menu-item'); if (!it) return;
 
-      Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
+  const token = String(it.dataset.value || '').trim();
+  if (!token || !subCode) return;
 
-      try {
-        const r = await fetch('/api/admin/submissions.set-status', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ submission_code: subCode, status: token })
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+  // rank & phase helpers
+  const RANK = {
+    pending_payment:0, submitted:1, submitted_paid:2, received:3, shipped_to_psa:4,
+    in_grading:5, graded:6, shipped_back_to_us:7,
+    received_from_psa:8, balance_due:9, paid:10, shipped_to_customer:11, delivered:12
+  };
+  const PRE_SET = new Set(['pending_payment','submitted','submitted_paid','received','shipped_to_psa']);
 
-        pill.textContent = prettyStatus(token);
-        pill.setAttribute('data-current', token);
-        currentRaw = token;
+  const curr = currentRaw;                  // normalized current token
+  const isBackward = (RANK[token] ?? 999) < (RANK[curr] ?? 999);
+  const bothPre    = PRE_SET.has(token) && PRE_SET.has(curr);
 
-        try { await loadReal?.(); } catch {}
-        closePopover();
-      } catch (err) {
-        alert(err.message || 'Status update failed');
-        Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
-      }
+  // choose route:
+  const url = (isBackward && bothPre)
+    ? '/api/admin/submissions.correct-status'   // allow pre-PSA backward overrides
+    : '/api/admin/submissions.set-status';      // normal forward (and post rules)
+
+  Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = true);
+
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ submission_code: subCode, status: token })
     });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok !== true) throw new Error(j.error || 'Failed to update status');
+
+    pill.textContent = prettyStatus(token);
+    pill.setAttribute('data-current', token);
+    currentRaw = token;
+
+    try { await loadReal?.(); } catch {}
+    closePopover();
+  } catch (err) {
+    alert(err.message || 'Status update failed');
+    Array.from(pop.querySelectorAll('button.menu-item')).forEach(b => b.disabled = false);
+  }
+});
+
 
     document.body.appendChild(pop);
     return pop;
