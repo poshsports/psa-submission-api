@@ -166,18 +166,93 @@ export default async function handler(req, res) {
   const orderNumber = order?.order_number ?? null;
   const orderName = order?.name ?? null;
 
-  // --- 4) only care if eval variant is in the order (unchanged behavior)
+  // --- 4) read line items and attributes up-front (shared by both flows)
+  const lineItems = Array.isArray(order?.line_items) ? order.line_items : [];
+
+  // Collect attributes from note_attributes, then fill any missing from line item properties (accelerated checkout)
+  const noteAttrs = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
+  const attrs = noteAttrs.reduce((acc, cur) => {
+    const k = String(cur?.name || "").toLowerCase().trim();
+    if (k) acc[k] = String(cur?.value ?? "");
+    return acc;
+  }, {});
+  for (const li of lineItems) {
+    const m = propsToMap(li?.properties);
+    for (const [k, v] of Object.entries(m)) {
+      if (!(k in attrs)) attrs[k] = v;
+    }
+  }
+  dlog("attrs", attrs);
+
+  // ---------- PSA BILLING FLOW ----------
+  // If this order came from our Draft (billing) it carries psa_invoice_id. When paid, mark invoice+subs as paid.
+  const invoiceId = (attrs["psa_invoice_id"] || "").trim();
+  if (invoiceId) {
+    const nowIso = new Date().toISOString();
+
+    // 4.a) Mark billing_invoices as paid and store Shopify order id
+    try {
+      await supabase
+        .from("billing_invoices")
+        .update({ status: "paid", order_id: orderIdStr || null, updated_at: nowIso })
+        .eq("id", invoiceId);
+    } catch (e) {
+      console.error("[PSA billing] failed updating billing_invoices:", e?.message || e);
+    }
+
+    // 4.b) Load linked submissions (from link table), then set them to 'paid'
+    let subs = [];
+    try {
+      const { data: links } = await supabase
+        .from("billing_invoice_submissions")
+        .select("submission_code")
+        .eq("invoice_id", invoiceId);
+      subs = (links || []).map(r => r.submission_code).filter(Boolean);
+    } catch (e) {
+      console.error("[PSA billing] failed reading invoice links:", e?.message || e);
+    }
+
+    let updatedSubs = 0;
+    if (subs.length) {
+      const upd = {
+        status: "paid",
+        paid_at_iso: nowIso
+      };
+      if (SAVE_PSA_ORDER_KEYS) {
+        if (orderIdStr) upd.shopify_order_id = orderIdStr;
+        if (orderNumber != null) upd.shopify_order_number = orderNumber;
+        if (orderName != null) upd.shopify_order_name = orderName;
+        if (shopDomain) upd.shop_domain = shopDomain;
+      }
+      try {
+        const { data: updRows } = await supabase
+          .from("psa_submissions")
+          .update(upd)
+          .in("submission_id", subs)
+          .select("submission_id");
+        updatedSubs = Array.isArray(updRows) ? updRows.length : 0;
+      } catch (e) {
+        console.error("[PSA billing] failed updating psa_submissions:", e?.message || e);
+      }
+    }
+
+    dlog("[PSA billing] invoice paid", { invoiceId, updatedSubs, order: order?.name });
+    return res.status(200).json({ ok: true, billing_paid: true, invoice_id: invoiceId, updated_submissions: updatedSubs });
+  }
+
+  // ---------- ORIGINAL EVAL FLOW (unchanged) ----------
+  // Only proceed if the evaluation SKU is present.
   if (!Number.isFinite(EVAL_VARIANT_ID) || EVAL_VARIANT_ID <= 0) {
     console.warn("[PSA v3] Missing/invalid SHOPIFY_EVAL_VARIANT_ID; skipping.");
     return res.status(200).json({ ok: true, skipped: true, reason: "no_eval_id" });
   }
 
-  const lineItems = Array.isArray(order?.line_items) ? order.line_items : [];
   const hasEval = lineItems.some(li => Number(li.variant_id) === EVAL_VARIANT_ID);
   if (!hasEval) {
     dlog("no eval sku, skipping", { id: order?.id, name: order?.name });
     return res.status(200).json({ ok: true, skipped: true });
   }
+
   const evalQty = lineItems.reduce(
     (acc, li) => acc + (Number(li.variant_id) === EVAL_VARIANT_ID ? Number(li.quantity || 0) : 0),
     0
@@ -186,14 +261,6 @@ export default async function handler(req, res) {
   // Compute the eval-only subtotal (after discounts, before tax/shipping)
   const evalLineSubtotal = computeEvalLineSubtotal(lineItems, EVAL_VARIANT_ID);
 
-  // --- 5) pull our attributes (primary: note_attributes; fallback: line_items.properties)
-  const noteAttrs = Array.isArray(order?.note_attributes) ? order.note_attributes : [];
-  const attrs = noteAttrs.reduce((acc, cur) => {
-    const k = String(cur?.name || "").toLowerCase().trim();
-    acc[k] = String(cur?.value ?? "");
-    return acc;
-  }, {});
-  dlog("attrs", attrs);
 
   let submissionId = attrs["psa_submission_id"] || "";
 
