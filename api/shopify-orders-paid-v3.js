@@ -15,7 +15,8 @@ export const config = { api: { bodyParser: false } }; // needed for raw HMAC bod
 const EVAL_VARIANT_ID = Number(process.env.SHOPIFY_EVAL_VARIANT_ID || "0");
 const SAVE_PSA_PAID_AMOUNT = process.env.SAVE_PSA_PAID_AMOUNT === "1";
 const SAVE_PSA_EVAL_SUBTOTAL = process.env.SAVE_PSA_EVAL_SUBTOTAL === "1";
-const SAVE_PSA_ORDER_KEYS = process.env.SAVE_PSA_ORDER_KEYS === "1";
+const SAVE_ORDER_KEYS_EVAL = process.env.SAVE_PSA_ORDER_KEYS === "1";
+const SAVE_ORDER_KEYS_BILLING = process.env.SAVE_PSA_ORDER_KEYS_BILLING === "1";
 const ENABLE_PSA_IDEMPOTENCY = process.env.ENABLE_PSA_IDEMPOTENCY === "1";
 
 const supabase = createClient(
@@ -265,14 +266,17 @@ if (subs.length) {
   }
 
   // Build the update payload
-  const upd = { status: "paid", paid_at_iso: nowIso };
-  if (SAVE_PSA_ORDER_KEYS) {
-    if (orderIdStr) upd.shopify_order_id = orderIdStr;
-    if (orderNumber != null) upd.shopify_order_number = orderNumber;
-    if (orderName != null) upd.shopify_order_name = orderName;
-    if (shopDomain) upd.shop_domain = shopDomain;
-  }
-
+const upd = {
+  status: "paid",
+  paid_at_iso: nowIso
+};
+// Only write Shopify order keys for billing if explicitly allowed
+if (SAVE_ORDER_KEYS_BILLING) {
+  if (orderIdStr) upd.shopify_order_id = orderIdStr;
+  if (orderNumber != null) upd.shopify_order_number = orderNumber;
+  if (orderName != null) upd.shopify_order_name = orderName;
+  if (shopDomain) upd.shop_domain = shopDomain;
+}
   // Do the update
   try {
     const { data: updRows, error: updErr } = await supabase
@@ -445,12 +449,12 @@ if (subs.length) {
   if (SAVE_PSA_EVAL_SUBTOTAL && Number.isFinite(evalLineSubtotal)) {
     common.eval_line_subtotal = evalLineSubtotal;
   }
-  if (SAVE_PSA_ORDER_KEYS) {
-    if (orderIdStr) common.shopify_order_id = orderIdStr;
-    if (orderNumber != null) common.shopify_order_number = orderNumber;
-    if (orderName != null) common.shopify_order_name = orderName;
-    if (shopDomain) common.shop_domain = shopDomain;
-  }
+if (SAVE_ORDER_KEYS_EVAL) {
+  if (orderIdStr) common.shopify_order_id = orderIdStr;
+  if (orderNumber != null) common.shopify_order_number = orderNumber;
+  if (orderName != null) common.shopify_order_name = orderName;
+  if (shopDomain) common.shop_domain = shopDomain;
+}
 
   // try UPDATE
   const { data: updRows, error: updErr } = await supabase
