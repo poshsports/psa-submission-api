@@ -34,23 +34,36 @@ async function sfetch(path, method = 'GET', body) {
   return { ok: resp.ok, status: resp.status, data, text };
 }
 
+function fp(token) {
+  if (!token) return null;
+  return { starts_with: token.slice(0, 6), ends_with: token.slice(-4), length: token.length };
+}
+
 export default async function handler(req, res) {
   if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
 
-  if (!STORE || !TOKEN) {
-    return json(res, 500, { error: 'Missing SHOPIFY_STORE or SHOPIFY_ADMIN_API_ACCESS_TOKEN' });
+  // allow testing a token safely via ?token=shpat_...
+  const q = new URL(req.url, `https://${req.headers.host}`).searchParams;
+  const tokenFromQuery = q.get('token') || '';
+  const effectiveToken = tokenFromQuery || TOKEN;
+
+  if (!STORE || !effectiveToken) {
+    return json(res, 500, { error: 'Missing SHOPIFY_STORE or SHOPIFY_ADMIN_API_ACCESS_TOKEN (or ?token)' });
   }
 
   try {
-    const shop = await sfetch('/shop.json');
-    const draftCount = await sfetch('/draft_orders/count.json'); // tests read_draft_orders scope
+    // probe three endpoints: /shop, /draft_orders/count, /oauth/access_scopes
+    const shop = await sfetch('/shop.json', 'GET', undefined, effectiveToken);
+    const draftCount = await sfetch('/draft_orders/count.json', 'GET', undefined, effectiveToken);
+    const scopes = await sfetch('/oauth/access_scopes.json', 'GET', undefined, effectiveToken);
+
 
     return json(res, 200, {
       env: { store: STORE, api_version: API_VERSION },
-      token_fingerprint: {
-        starts_with: TOKEN ? TOKEN.slice(0, 6) : null,   // e.g., "shpat_"
-        ends_with:   TOKEN ? TOKEN.slice(-4)   : null,   // last 4 chars only
-        length:      TOKEN ? TOKEN.length      : null
+      tokens: {
+        env_token: fp(TOKEN),
+        query_token_present: !!tokenFromQuery,
+        effective_token: fp(effectiveToken)
       },
       shop: {
         ok: shop.ok, status: shop.status,
@@ -62,8 +75,16 @@ export default async function handler(req, res) {
         ok: draftCount.ok, status: draftCount.status,
         count: draftCount.data?.count ?? null,
         error: draftCount.ok ? null : (draftCount.data || draftCount.text)
+      },
+      access_scopes: {
+        ok: scopes.ok, status: scopes.status,
+        scopes: Array.isArray(scopes.data?.access_scopes)
+          ? scopes.data.access_scopes.map(s => s.handle)
+          : null,
+        error: scopes.ok ? null : (scopes.data || scopes.text)
       }
     });
+
   } catch (e) {
     return json(res, 500, { error: String(e) });
   }
