@@ -35,7 +35,7 @@ export default async function handler(req, res) {
   //    Columns chosen to avoid over-fetching.
 const { data: subs, error: subsErr } = await supabase
   .from("admin_submissions_v")
-  .select("submission_id, status, email, customer_email, customer_name, group_code, cards, created_at")
+  .select("submission_id, status, customer_email, group_code, cards, created_at")
   .eq("status", "received_from_psa")
   .order("created_at", { ascending: false })
   .limit(limit);
