@@ -156,17 +156,24 @@ for (const r of eligible) {
   }
 }
 
-  // 4) Shape output
-  const items = Array.from(bundles.values()).map((b) => ({
+// 4) Shape output (adds aliases used by the table)
+const items = Array.from(bundles.values()).map((b) => {
+  const submission_ids = b.submissions.map(s => s.submission_id).filter(Boolean);
+  const group_codes = Array.from(b.groups);
+  return {
     customer_email: b.customer_email,
     customer_name: b.customer_name,
-    submissions: b.submissions,
-    groups: Array.from(b.groups),
+    submissions: b.submissions,      // detailed rows
+    submission_ids,                  // alias expected by UI
+    groups: group_codes,             // keep existing 'groups'
+    group_codes,                     // alias expected by UI
     cards: b.cards,
     returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
     returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
-    estimated_cents: null, // filled by preview endpoint later
-  }));
+    estimated_cents: null,           // filled by preview later
+  };
+});
 
-  return res.status(200).json({ items });
+return res.status(200).json({ items });
+
 }
