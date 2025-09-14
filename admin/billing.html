@@ -1,0 +1,156 @@
+// /admin/billing.html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PSA Admin – Billing</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div id="login">
+    <div class="psa-login">
+      <h1>PSA Admin</h1>
+      <div id="auth-note" class="muted">not signed in</div>
+      <div class="row" style="gap:8px;align-items:center">
+        <input id="pass" type="password" placeholder="Enter passcode…" style="flex:1" />
+        <button id="btnLogin" class="btn primary" type="button">Sign in</button>
+      </div>
+      <div id="err" class="error"></div>
+    </div>
+  </div>
+
+  <!-- APP SHELL -->
+  <div id="shell" class="hide">
+    <div class="admin-shell">
+      <!-- Sidebar -->
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a id="nav-active"  class="sidebar-item"         href="/admin/index.html">Active submissions</a>
+        <a id="nav-groups"  class="sidebar-item"         href="/admin/groups.html">Groups</a>
+        <a id="nav-billing" class="sidebar-item active"  href="/admin/billing.html">Billing</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item" href="#" title="Coming soon">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
+
+      <!-- Main -->
+      <main class="admin-main">
+        <!-- Top bar -->
+        <div class="topbar">
+          <div class="brand">
+            <span class="dot"></span>
+            <strong>Billing</strong>
+          </div>
+          <div class="top-actions">
+            <button id="btnBatchSend" class="btn primary" type="button" disabled>Create &amp; Send Invoices</button>
+            <span id="auth-note-top" class="muted">passcode session</span>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <input id="q" type="search" placeholder="Search customer or submission…" />
+          <div class="filters">
+            <!-- reserved for future filters (group/date) -->
+          </div>
+          <span class="spacer"></span>
+          <span id="countPill" class="pill">0</span>
+        </div>
+
+        <!-- Billing table shell -->
+        <div class="submissions">
+          <div class="submissions-scroll">
+            <table class="subs-table">
+              <thead id="subsHead"></thead>
+              <tbody id="subsTbody"></tbody>
+            </table>
+          </div>
+          <div id="subsEmpty" class="empty hide">No customers to bill.</div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination">
+          <span class="page-range" id="page-range">0–0 of 0</span>
+          <button class="page-btn" id="prev-page">‹</button>
+          <button class="page-btn" id="next-page">›</button>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Minimal auth + page boot just for Billing page -->
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function doLogin(e){
+      e && e.preventDefault && e.preventDefault();
+      const errEl = $('err');
+      errEl && (errEl.textContent = '');
+      const pass = $('pass')?.value?.trim() || '';
+      if (!pass) { if (errEl) errEl.textContent = 'Enter passcode'; return; }
+      try {
+        const r = await fetch('/api/admin-login', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pass })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) { if (errEl) errEl.textContent = j.error || 'Login failed'; return; }
+        boot();
+      } catch { if (errEl) errEl.textContent = 'Network error'; }
+    }
+
+    function wireAuthUI(){
+      $('btnLogin')?.addEventListener('click', doLogin);
+      $('pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+      const signout = $('sidebar-signout');
+      if (signout) signout.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await fetch('/api/admin-logout', { method:'POST', credentials:'same-origin' }); } catch {}
+        window.location.replace('/admin');
+      });
+    }
+
+    function boot(){
+      const loginEl = $('login'); if (loginEl) loginEl.classList.add('hide');
+      const shellEl = $('shell'); if (shellEl) shellEl.classList.remove('hide');
+
+      const note = $('auth-note');       if (note) note.textContent = 'passcode session';
+      const noteTop = $('auth-note-top');if (noteTop) noteTop.textContent = 'passcode session';
+
+      // Hand off to Billing module
+      import('/admin/js/billing.app.js').then(mod => {
+        mod.showBillingView?.();
+      }).catch(err => {
+        const host = $('subsTbody');
+        if (host) host.innerHTML = `<tr><td colspan="8" class="error">Failed to load billing module.</td></tr>`;
+        console.error(err);
+      });
+    }
+
+    // initial auth check
+    document.addEventListener('DOMContentLoaded', async () => {
+      wireAuthUI();
+      try {
+        const r = await fetch('/api/ok', { credentials:'same-origin' });
+        const j = await r.json().catch(() => ({}));
+        const authed = !!(j && j.ok);
+        const loginEl = $('login');
+        const shellEl = $('shell');
+        const note = $('auth-note');       if (note) note.textContent = authed ? 'passcode session' : 'not signed in';
+        const noteTop = $('auth-note-top');if (noteTop) noteTop.textContent = authed ? 'passcode session' : 'not signed in';
+        if (authed) boot(); else { if (loginEl) loginEl.classList.remove('hide'); if (shellEl) shellEl.classList.add('hide'); }
+      } catch (e){
+        if ($('login')) $('login').classList.remove('hide');
+        if ($('shell')) $('shell').classList.add('hide');
+      }
+    });
+  </script>
+</body>
+</html>
