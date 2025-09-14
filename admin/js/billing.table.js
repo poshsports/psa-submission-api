@@ -222,8 +222,6 @@ export function renderTable(visibleKeys){
         }).join('')}
       </tr>`;
   }).join('');
-}
-
 
   // attach row open handlers after every render
   wireRowOpenHandlers(body);
@@ -243,3 +241,4 @@ export function renderTable(visibleKeys){
 
   try { window.dispatchEvent(new Event('psa:table-rendered')); } catch {}
 }
+
