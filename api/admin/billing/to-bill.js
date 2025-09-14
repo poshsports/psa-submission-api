@@ -156,24 +156,29 @@ for (const r of eligible) {
   }
 }
 
-// 4) Shape output (adds aliases used by the table)
+// 4) Shape output (add aliases & counts for UI)
 const items = Array.from(bundles.values()).map((b) => {
-  const submission_ids = b.submissions.map(s => s.submission_id).filter(Boolean);
-  const group_codes = Array.from(b.groups);
+  const submission_ids = (b.submissions || []).map(s => s.submission_id).filter(Boolean);
+  const group_codes = Array.from(b.groups || []);
   return {
     customer_email: b.customer_email,
     customer_name: b.customer_name,
-    submissions: b.submissions,      // detailed rows
-    submission_ids,                  // alias expected by UI
-    groups: group_codes,             // keep existing 'groups'
-    group_codes,                     // alias expected by UI
+    // arrays
+    submissions: b.submissions || [],
+    submission_ids,
+    groups: group_codes,
+    group_codes,
+    // counts
+    submissions_count: submission_ids.length,
+    groups_count: group_codes.length,
+    // metrics
     cards: b.cards,
     returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
     returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
-    estimated_cents: null,           // filled by preview later
+    // pricing placeholder
+    estimated_cents: null,
   };
 });
 
 return res.status(200).json({ items });
-
 }
