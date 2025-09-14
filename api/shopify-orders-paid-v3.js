@@ -226,41 +226,71 @@ export default async function handler(req, res) {
       console.error("[PSA billing] failed updating billing_invoices:", e?.message || e);
     }
 
-    // 4.b) Load linked submissions (from link table), then set them to 'paid'
-    let subs = [];
-    try {
-      const { data: links } = await supabase
-        .from("billing_invoice_submissions")
-        .select("submission_code")
-        .eq("invoice_id", invoiceId);
-      subs = (links || []).map(r => r.submission_code).filter(Boolean);
-    } catch (e) {
-      console.error("[PSA billing] failed reading invoice links:", e?.message || e);
+// 4.b) Load linked submissions (from link table), then set them to 'paid'
+let subs = [];
+try {
+  const { data: links, error: linkErr } = await supabase
+    .from("billing_invoice_submissions")
+    .select("submission_code")
+    .eq("invoice_id", invoiceId);
+
+  if (linkErr) throw linkErr;
+
+  // Trim + filter to avoid stray whitespace/nulls
+  subs = (links || [])
+    .map(r => (r?.submission_code ?? "").trim())
+    .filter(s => s.length > 0);
+
+  dlog("[PSA billing] links", { count: subs.length, subs });
+} catch (e) {
+  console.error("[PSA billing] failed reading invoice links:", e?.message || e);
+}
+
+let updatedSubs = 0;
+if (subs.length) {
+  // Probe: verify what will match before updating
+  try {
+    const { data: before, error: beforeErr } = await supabase
+      .from("psa_submissions")
+      .select("submission_id,status")
+      .in("submission_id", subs);
+
+    if (beforeErr) {
+      console.error("[PSA billing] pre-update match error:", beforeErr);
+    } else {
+      dlog("[PSA billing] pre-update match", { count: before?.length || 0, before });
+    }
+  } catch (e) {
+    console.error("[PSA billing] pre-update probe failed:", e?.message || e);
+  }
+
+  // Build the update payload
+  const upd = { status: "paid", paid_at_iso: nowIso };
+  if (SAVE_PSA_ORDER_KEYS) {
+    if (orderIdStr) upd.shopify_order_id = orderIdStr;
+    if (orderNumber != null) upd.shopify_order_number = orderNumber;
+    if (orderName != null) upd.shopify_order_name = orderName;
+    if (shopDomain) upd.shop_domain = shopDomain;
+  }
+
+  // Do the update
+  try {
+    const { data: updRows, error: updErr } = await supabase
+      .from("psa_submissions")
+      .update(upd)
+      .in("submission_id", subs)
+      .select("submission_id,status,paid_at_iso");
+
+    if (updErr) {
+      console.error("[PSA billing] failed updating psa_submissions:", updErr);
     }
 
-    let updatedSubs = 0;
-    if (subs.length) {
-      const upd = {
-        status: "paid",
-        paid_at_iso: nowIso
-      };
-      if (SAVE_PSA_ORDER_KEYS) {
-        if (orderIdStr) upd.shopify_order_id = orderIdStr;
-        if (orderNumber != null) upd.shopify_order_number = orderNumber;
-        if (orderName != null) upd.shopify_order_name = orderName;
-        if (shopDomain) upd.shop_domain = shopDomain;
-      }
-      try {
-        const { data: updRows } = await supabase
-          .from("psa_submissions")
-          .update(upd)
-          .in("submission_id", subs)
-          .select("submission_id");
-        updatedSubs = Array.isArray(updRows) ? updRows.length : 0;
-      } catch (e) {
-        console.error("[PSA billing] failed updating psa_submissions:", e?.message || e);
-      }
-    }
+    updatedSubs = Array.isArray(updRows) ? updRows.length : 0;
+    dlog("[PSA billing] post-update", { updated: updatedSubs, updRows });
+  } catch (e) {
+    console.error("[PSA billing] update threw:", e?.message || e);
+  }
+}
 
     dlog("[PSA billing] invoice paid", { invoiceId, updatedSubs, order: order?.name });
     return res.status(200).json({ ok: true, billing_paid: true, invoice_id: invoiceId, updated_submissions: updatedSubs });
