@@ -9,8 +9,8 @@
 </head>
 <body>
 
-  <!-- APP SHELL (hidden until auth confirmed) -->
-  <div id="shell" class="hide">
+  <!-- APP SHELL -->
+  <div id="shell">
     <div class="admin-shell">
       <!-- Sidebar -->
       <aside class="admin-sidebar">
@@ -68,12 +68,19 @@
     </div>
   </div>
 
-  <!-- Auth check (shared session). If not authed, redirect to /admin to sign in once. -->
+  <!-- Simple boot (no auth logic here; APIs enforce auth) -->
   <script>
     const $ = (id) => document.getElementById(id);
 
-    function boot() {
-      $('shell')?.classList.remove('hide');
+    document.addEventListener('DOMContentLoaded', () => {
+      // Sign out (same behavior as other pages)
+      $('sidebar-signout')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+        window.location.replace('/admin');
+      });
+
+      // Load billing module
       import('/admin/js/billing.app.js')
         .then(mod => mod.showBillingView?.())
         .catch(err => {
@@ -83,28 +90,6 @@
             '<tr><td colspan="8" class="error">Failed to load billing module.</td></tr>'
           );
         });
-    }
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      // wire sign out (same behavior as other pages)
-      const signout = $('sidebar-signout');
-      if (signout) {
-        signout.addEventListener('click', async (e) => {
-          e.preventDefault();
-          try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'include' }); } catch {}
-          window.location.replace('/admin');
-        });
-      }
-
-      // shared auth check
-      try {
-        const r = await fetch('/api/ok', { credentials: 'include' });
-        const j = await r.json().catch(() => ({}));
-        if (j && j.ok) boot();
-        else window.location.replace('/admin'); // centralize login
-      } catch {
-        window.location.replace('/admin');
-      }
     });
   </script>
 </body>
