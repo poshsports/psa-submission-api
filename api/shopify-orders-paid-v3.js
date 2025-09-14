@@ -3,7 +3,8 @@
 // - Fallback: read psa_submission_id / psa_payload_b64 from line_items[].properties when note_attributes are missing.
 // - Optional: SAVE_PSA_PAID_AMOUNT=1 -> write paid_amount (whole order total).
 // - Optional: SAVE_PSA_EVAL_SUBTOTAL=1 -> write eval_line_subtotal (eval SKU subtotal after discounts).
-// - Optional: SAVE_PSA_ORDER_KEYS=1 -> write shopify_order_id, shopify_order_number, shopify_order_name, shop_domain.
+// - Optional: SAVE_PSA_ORDER_KEYS=1 -> write order keys for EVAL flow.
+// - Optional: SAVE_PSA_ORDER_KEYS_BILLING=1 -> write order keys for BILLING flow (usually 0).
 // - Optional: ENABLE_PSA_IDEMPOTENCY=1 -> skip duplicate orders/paid for same submission already marked submitted_paid.
 // - Keeps v3.1 behavior: raw HMAC, early eval-SKU gate, preserve cards, update→insert, same table/columns.
 
