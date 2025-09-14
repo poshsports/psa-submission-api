@@ -184,13 +184,39 @@ export default async function handler(req, res) {
   }
   dlog("attrs", attrs);
 
-  // ---------- PSA BILLING FLOW ----------
-  // If this order came from our Draft (billing) it carries psa_invoice_id. When paid, mark invoice+subs as paid.
-  const invoiceId = (attrs["psa_invoice_id"] || "").trim();
+  // ---------- PSA BILLING FLOW (runs FIRST) ----------
+  // Primary: use psa_invoice_id from attrs/properties.
+  // Fallback: derive group code from attrs or order.tags ("...GRP-0002..."),
+  //           then pick the latest not-paid invoice for that group without order_id.
+  let invoiceId = (attrs["psa_invoice_id"] || "").trim();
+
+  if (!invoiceId) {
+    const tagsStr = String(order?.tags || "");                 // comma-separated tags on the Order
+    const matchGrp = (tagsStr.match(/GRP-\d{4}/i) || [])[0] || "";
+    const groupCode = (attrs["psa_group_code"] || matchGrp).toUpperCase().trim();
+
+    if (groupCode) {
+      try {
+        const { data: inv } = await supabase
+          .from("billing_invoices")
+          .select("id")
+          .eq("group_code", groupCode)
+          .in("status", ["sent", "draft", "pending"])          // open invoices only
+          .is("order_id", null)                                // not yet attached to an order
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (inv?.id) invoiceId = inv.id;
+      } catch (e) {
+        console.error("[PSA billing] fallback lookup failed:", e?.message || e);
+      }
+    }
+  }
+
   if (invoiceId) {
     const nowIso = new Date().toISOString();
 
-    // 4.a) Mark billing_invoices as paid and store Shopify order id
+    // 4.a) Mark invoice as paid and store Shopify order keys (if enabled)
     try {
       await supabase
         .from("billing_invoices")
@@ -239,6 +265,7 @@ export default async function handler(req, res) {
     dlog("[PSA billing] invoice paid", { invoiceId, updatedSubs, order: order?.name });
     return res.status(200).json({ ok: true, billing_paid: true, invoice_id: invoiceId, updated_submissions: updatedSubs });
   }
+
 
   // ---------- ORIGINAL EVAL FLOW (unchanged) ----------
   // Only proceed if the evaluation SKU is present.
