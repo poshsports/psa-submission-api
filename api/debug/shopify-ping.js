@@ -47,6 +47,11 @@ export default async function handler(req, res) {
 
     return json(res, 200, {
       env: { store: STORE, api_version: API_VERSION },
+      token_fingerprint: {
+        starts_with: TOKEN ? TOKEN.slice(0, 6) : null,   // e.g., "shpat_"
+        ends_with:   TOKEN ? TOKEN.slice(-4)   : null,   // last 4 chars only
+        length:      TOKEN ? TOKEN.length      : null
+      },
       shop: {
         ok: shop.ok, status: shop.status,
         domain: shop.data?.shop?.domain || null,
