@@ -201,6 +201,11 @@ export function renderTable(visibleKeys){
   const end = Math.min(start + pageSize, viewRows.length);
   const rows = viewRows.slice(start, end);
 
+  // SAFE FALLBACK: if header-derived keys are missing, use all defined columns
+  const keys = (Array.isArray(visibleKeys) && visibleKeys.length)
+    ? visibleKeys
+    : COLUMNS.map(c => c.key);
+
   body.innerHTML = rows.map(r => {
     const id = String(r.id || r.customer_email || '').trim();
     return `
@@ -208,7 +213,7 @@ export function renderTable(visibleKeys){
         <td class="__selcol" style="text-align:center;vertical-align:middle">
           <input class="__selrow" type="checkbox" aria-label="Select row">
         </td>
-        ${visibleKeys.map(key => {
+        ${keys.map(key => {
           const col = colMap.get(key); if (!col) return '';
           const val = r[key];
           const out = col?.format ? col.format(val, r) : escapeHtml(String(val ?? ''));
@@ -217,6 +222,8 @@ export function renderTable(visibleKeys){
         }).join('')}
       </tr>`;
   }).join('');
+}
+
 
   // attach row open handlers after every render
   wireRowOpenHandlers(body);
