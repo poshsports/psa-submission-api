@@ -33,12 +33,12 @@ export default async function handler(req, res) {
   // 1) Pull candidate submissions from the admin view (keeps parity with Active UI)
   //    We only want submissions that are back from PSA and not yet invoiced.
   //    Columns chosen to avoid over-fetching.
-  const { data: subs, error: subsErr } = await supabase
-    .from("admin_submissions_v")
-    .select("submission_id, status, email, customer_email, customer_name, group_code, cards, created_at, updated_at")
-    .eq("status", "received_from_psa")
-    .order("updated_at", { ascending: false })
-    .limit(limit);
+const { data: subs, error: subsErr } = await supabase
+  .from("admin_submissions_v")
+  .select("submission_id, status, email, customer_email, customer_name, group_code, cards, created_at")
+  .eq("status", "received_from_psa")
+  .order("created_at", { ascending: false })
+  .limit(limit);
 
   if (subsErr) {
     console.error("[to-bill] subsErr:", subsErr);
@@ -68,15 +68,15 @@ export default async function handler(req, res) {
       String(r.group_code || "").toLowerCase().includes(groupFilter)
     );
   }
-  if (fromMs != null || toMs != null) {
-    filtered = filtered.filter((r) => {
-      const t = ts(r.updated_at) ?? ts(r.created_at);
-      if (t == null) return false;
-      if (fromMs != null && t < fromMs) return false;
-      if (toMs   != null && t > toMs)   return false;
-      return true;
-    });
-  }
+if (fromMs != null || toMs != null) {
+  filtered = filtered.filter((r) => {
+    const t = ts(r.created_at);
+    if (t == null) return false;
+    if (fromMs != null && t < fromMs) return false;
+    if (toMs   != null && t > toMs)   return false;
+    return true;
+  });
+}
 
   // 2) Exclude submissions already linked to invoices with status in ('draft','sent','paid')
   const ids = Array.from(new Set(filtered.map((r) => r.submission_id))).filter(Boolean);
@@ -119,42 +119,42 @@ export default async function handler(req, res) {
 
   // 3) Bundle by customer (combine across groups by default)
   const bundles = new Map(); // key = customer_email (lower)
-  for (const r of eligible) {
-    const email = (r.customer_email || r.email || "").trim().toLowerCase();
-    if (!email) continue; // skip rows without an email anchor
+for (const r of eligible) {
+  const email = (r.customer_email || r.email || "").trim().toLowerCase();
+  if (!email) continue; // need an anchor to invoice
 
-    const name = r.customer_name || ""; // may be blank
-    const returnedAt = r.updated_at || r.created_at || null;
+  const name = r.customer_name || "";
+  const receivedAt = r.created_at || null;
 
-    let b = bundles.get(email);
-    if (!b) {
-      b = {
-        customer_email: email,
-        customer_name: name,
-        submissions: [],
-        groups: new Set(),
-        cards: 0,
-        _newest: null,
-        _oldest: null,
-      };
-      bundles.set(email, b);
-    }
-
-    b.submissions.push({
-      submission_id: r.submission_id,
-      group_code: r.group_code || null,
-      cards: Number(r.cards) || 0,
-      returned_at: returnedAt,
-    });
-    if (r.group_code) b.groups.add(r.group_code);
-    b.cards += Number(r.cards) || 0;
-
-    const t = ts(returnedAt);
-    if (t != null) {
-      if (b._newest == null || t > b._newest) b._newest = t;
-      if (b._oldest == null || t < b._oldest) b._oldest = t;
-    }
+  let b = bundles.get(email);
+  if (!b) {
+    b = {
+      customer_email: email,
+      customer_name: name,
+      submissions: [],
+      groups: new Set(),
+      cards: 0,
+      _newest: null,
+      _oldest: null,
+    };
+    bundles.set(email, b);
   }
+
+  b.submissions.push({
+    submission_id: r.submission_id,
+    group_code: r.group_code || null,
+    cards: Number(r.cards) || 0,
+    returned_at: receivedAt,
+  });
+  if (r.group_code) b.groups.add(r.group_code);
+  b.cards += Number(r.cards) || 0;
+
+  const t = ts(receivedAt);
+  if (t != null) {
+    if (b._newest == null || t > b._newest) b._newest = t;
+    if (b._oldest == null || t < b._oldest) b._oldest = t;
+  }
+}
 
   // 4) Shape output
   const items = Array.from(bundles.values()).map((b) => ({
