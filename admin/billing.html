@@ -191,33 +191,52 @@
     if (wrap) wrap.classList.add('hide');
   }
 
-  function populate(bundle){
-    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
-    const groups = Array.isArray(bundle?.groups) ? bundle.groups : (Array.isArray(bundle?.group_codes) ? bundle.group_codes : []);
+function populate(bundle){
+  const subs = Array.isArray(bundle && bundle.submissions) ? bundle.submissions : [];
+  const groups = Array.isArray(bundle && bundle.groups)
+    ? bundle.groups
+    : (Array.isArray(bundle && bundle.group_codes) ? bundle.group_codes : []);
 
-    // header bits
-    document.querySelector('.js-cust-email')!.textContent = bundle?.customer_email || '';
-    document.querySelector('.js-sub-count')!.textContent = String(subs.length);
-    document.querySelector('.js-card-count')!.textContent = String(bundle?.cards ?? subs.reduce((a,s)=>a+(Number(s.cards)||0),0));
+  // header bits (guard each selector)
+  const elEmail = document.querySelector('.js-cust-email');
+  if (elEmail) elEmail.textContent = (bundle && bundle.customer_email) || '';
 
-    // lists
-    const subIds = subs.map(s => s.submission_id).filter(Boolean);
-    const grpCodes = [...new Set(groups.filter(Boolean))];
-    setList(document.querySelector('.js-sub-list'), subIds);
-    setList(document.querySelector('.js-group-list'), grpCodes);
+  const elSubCount = document.querySelector('.js-sub-count');
+  if (elSubCount) elSubCount.textContent = String(subs.length);
 
-    // received range
-    const oldest = bundle?.returned_oldest || subs.map(s=>s.returned_at).filter(Boolean).sort()[0] || null;
-    const newest = bundle?.returned_newest || subs.map(s=>s.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
-    const rangeEl = document.querySelector('.js-range');
-    rangeEl.textContent = oldest || newest ? `Oldest: ${oldest ?? '—'}  •  Newest: ${newest ?? '—'}` : '—';
-
-    // naive placeholder math for now (read-only preview): subtotal unknown, shipping fixed $5
-    // We'll replace this with server-computed values in the next step.
-    document.querySelector('.js-subtotal').textContent = '$—';
-    document.querySelector('.js-ship').textContent = '$5.00';
-    document.querySelector('.js-total').textContent = '$—';
+  const elCardCount = document.querySelector('.js-card-count');
+  if (elCardCount) {
+    const computedCards = subs.reduce((a, s) => a + (Number(s && s.cards) || 0), 0);
+    elCardCount.textContent = String(
+      (bundle && bundle.cards != null) ? bundle.cards : computedCards
+    );
   }
+
+  // lists
+  const subIds  = subs.map(s => s && s.submission_id).filter(Boolean);
+  const grpCodes = Array.from(new Set((groups || []).filter(Boolean)));
+  const elSubList = document.querySelector('.js-sub-list');
+  const elGrpList = document.querySelector('.js-group-list');
+  if (elSubList) setList(elSubList, subIds);
+  if (elGrpList) setList(elGrpList, grpCodes);
+
+  // received range
+  const oldest = (bundle && bundle.returned_oldest) ||
+                 subs.map(s => s && s.returned_at).filter(Boolean).sort()[0] || null;
+  const newest = (bundle && bundle.returned_newest) ||
+                 subs.map(s => s && s.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
+  const rangeEl = document.querySelector('.js-range');
+  if (rangeEl) {
+    rangeEl.textContent = (oldest || newest)
+      ? ('Oldest: ' + (oldest || '—') + '  •  Newest: ' + (newest || '—'))
+      : '—';
+  }
+
+  // placeholder totals (will be replaced by server-computed numbers later)
+  const elSubtotal = document.querySelector('.js-subtotal'); if (elSubtotal) elSubtotal.textContent = '$—';
+  const elShip     = document.querySelector('.js-ship');     if (elShip)     elShip.textContent     = '$5.00';
+  const elTotal    = document.querySelector('.js-total');    if (elTotal)    elTotal.textContent    = '$—';
+}
 
   // Public API (global for now; we’ll wire calls in the next step)
   window.psaOpenDraftPreview = function(bundle){
