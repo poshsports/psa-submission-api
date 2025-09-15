@@ -316,17 +316,11 @@
     openOverlay();
   };
 
-  // NEW: trigger builder open from preview
+  // REPLACE your current openBuilderFromPreview with this:
   function openBuilderFromPreview(){
-    const payload = { bundle: lastBundle };
-    try {
-      const evt = new CustomEvent('psa:open-builder', { detail: payload });
-      window.dispatchEvent(evt);
-    } catch (e) {
-      console.error('Failed to dispatch psa:open-builder', e);
-    }
-    // You can also navigate here if/when the builder page exists.
-    // example: window.location.href = `/admin/invoice-builder.html`;
+    if (!lastBundle) return;
+    try { sessionStorage.setItem('psa:builder:bundle', JSON.stringify(lastBundle)); } catch {}
+    window.location.href = '/admin/invoice-builder.html';
   }
 
   $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
