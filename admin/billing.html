@@ -42,12 +42,12 @@
         <!-- Toolbar -->
         <div class="toolbar">
           <input id="q" type="search" placeholder="Search customer or submission…" />
-          <div class="filters"><!-- reserved for future filters (group/date) --></div>
+          <div class="filters"></div>
           <span class="spacer"></span>
           <span id="countPill" class="pill">0</span>
         </div>
 
-        <!-- Table (match Active submissions layout exactly) -->
+        <!-- Table -->
         <div class="table-wrap">
           <div class="table-scroller">
             <table class="table" id="subsTable">
@@ -68,19 +68,16 @@
     </div>
   </div>
 
-  <!-- Simple boot (no auth logic here; APIs enforce auth) -->
   <script>
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
-      // Sign out (same behavior as other pages)
       $('sidebar-signout')?.addEventListener('click', async (e) => {
         e.preventDefault();
         try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
         window.location.replace('/admin');
       });
 
-      // Load billing module
       import('/admin/js/billing.app.js')
         .then(mod => mod.showBillingView?.())
         .catch(err => {
@@ -93,12 +90,10 @@
     });
   </script>
 
-  <!-- ===== Draft Builder Overlay (read-only preview for now) ===== -->
+  <!-- ===== Draft Builder Overlay (with Builder button) ===== -->
   <div id="draftOverlay" class="hide" style="position:fixed;inset:0;z-index:1000;">
-    <!-- backdrop -->
     <div id="draftBackdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.35);"></div>
 
-    <!-- panel -->
     <div id="draftPanel" role="dialog" aria-modal="true"
          style="position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);
                 width:min(960px,92vw);max-height:82vh;overflow:hidden;border-radius:16px;
@@ -113,13 +108,14 @@
             <span class="js-card-count">0</span> cards
           </div>
         </div>
+        <!-- NEW: Open Builder -->
+        <button type="button" id="btnDraftBuild" class="btn primary" style="min-width:140px;">Open Builder</button>
         <button type="button" id="btnDraftClose" class="btn" style="min-width:72px;">Close</button>
       </div>
 
       <!-- body -->
       <div id="draftBody" style="padding:12px 16px;overflow:auto;">
         <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;">
-          <!-- left: lists -->
           <div>
             <div style="font-weight:600;margin-bottom:6px;">Submissions</div>
             <div class="muted" style="margin-bottom:10px;">(read-only preview)</div>
@@ -132,7 +128,6 @@
             <div class="js-range muted"></div>
           </div>
 
-          <!-- right: summary -->
           <div>
             <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
               <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
@@ -152,7 +147,6 @@
           </div>
         </div>
 
-        <!-- Cards (read-only for this step) -->
         <div style="margin-top:16px;">
           <div style="font-weight:600;margin-bottom:6px;">Cards</div>
           <div class="muted" style="font-size:12px;margin-bottom:8px;">
@@ -161,11 +155,11 @@
           <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;overflow:auto;max-height:44vh;">
             <table class="cards-table" style="width:100%;min-width:760px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
               <colgroup>
-                <col style="width:140px;">   <!-- Submission -->
-                <col style="width:120px;">   <!-- Date of break -->
-                <col style="width:160px;">   <!-- Break channel -->
-                <col style="width:110px;">   <!-- Break # -->
-                <col style="width:auto;">    <!-- Card description -->
+                <col style="width:140px;">
+                <col style="width:120px;">
+                <col style="width:160px;">
+                <col style="width:110px;">
+                <col style="width:auto;">
               </colgroup>
               <thead>
                 <tr style="background:#f8fafc;">
@@ -188,23 +182,9 @@
 (function () {
   const $ = (id) => document.getElementById(id);
 
-  // currency + html-escape helpers (no HTML comments anywhere in JS)
-  function money(n) {
-    const num = Number(n);
-    return Number.isFinite(num)
-      ? num.toLocaleString(undefined, { style: "currency", currency: "USD" })
-      : "$—";
-  }
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-      switch (c) {
-        case "&": return "&amp;";
-        case "<": return "&lt;";
-        case ">": return "&gt;";
-        case '"': return "&quot;";
-        case "'": return "&#39;";
-        default: return c;
-      }
+      switch (c) { case "&": return "&amp;"; case "<": return "&lt;"; case ">": return "&gt;"; case '"': return "&quot;"; case "'": return "&#39;"; default: return c; }
     });
   }
   function pill(text) {
@@ -224,78 +204,75 @@
     (arr || []).forEach((v) => el.appendChild(pill(v)));
   }
 
-function fmtDateISOish(v){
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) {
-    const s = String(v); return s.length >= 10 ? s.slice(0,10) : s;
-  }
-  return d.toISOString().slice(0,10);
-}
-
-function normalizeCardRow(r) {
-  return {
-    submission : r.submission_id || r.submission_code || r.submission || "",
-    date       : r.break_date || r.break_at || r.date_of_break || null,
-    channel    : r.break_channel || r.channel || r.break || "",
-    breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || "",
-    desc       : r.card_description || r.description || r.card || r.title || ""
-  };
-}
-
-async function fetchCardsForSubs(subIds){
-  if (!subIds.length) return [];
-  const qs = new URLSearchParams({ subs: subIds.join(",") }).toString();
-  try {
-    const r = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials: "same-origin" });
-    const j = await r.json().catch(() => ({ rows: [] }));
-    const rows = Array.isArray(j.rows) ? j.rows : [];
-    return rows.map(normalizeCardRow);
-  } catch {
-    return [];
-  }
-}
-
-async function fillCardsTable(subIds, subsFallback){
-  const tb = document.getElementById("cardsTbody");
-  if (!tb) return;
-  tb.innerHTML = "";
-
-  let rows = await fetchCardsForSubs(subIds);
-
-  // If we got nothing, fall back to 1..N per submission (same as before)
-  if (!rows.length && Array.isArray(subsFallback)) {
-    rows = subsFallback.flatMap(s => {
-      const sid = s?.submission_id || s?.submission_code || "";
-      const count = Number(s?.cards) || 0;
-      return Array.from({ length: count }, (_, i) => ({
-        submission: sid,
-        date: null,
-        channel: "",
-        breakNo: (i + 1),
-        desc: ""
-      }));
-    });
+  function fmtDateISOish(v){
+    if (!v) return "—";
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) {
+      const s = String(v); return s.length >= 10 ? s.slice(0,10) : s;
+    }
+    return d.toISOString().slice(0,10);
   }
 
-  if (!rows.length) {
-    tb.innerHTML = '<tr><td colspan="5" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show.</td></tr>';
-    return;
+  function normalizeCardRow(r) {
+    return {
+      submission : r.submission_id || r.submission_code || r.submission || "",
+      date       : r.break_date || r.break_at || r.date_of_break || null,
+      channel    : r.break_channel || r.channel || r.break || "",
+      breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || "",
+      desc       : r.card_description || r.description || r.card || r.title || ""
+    };
   }
 
-  tb.innerHTML = rows.map(r => `
-    <tr>
-      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
-      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
-      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || "—")}</td>
-      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || "—"))}</td>
-      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || "—")}</td>
-    </tr>
-  `).join("");
-}
+  async function fetchCardsForSubs(subIds){
+    if (!subIds.length) return [];
+    const qs = new URLSearchParams({ subs: subIds.join(",") }).toString();
+    try {
+      const r = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials: "same-origin" });
+      const j = await r.json().catch(() => ({ rows: [] }));
+      const rows = Array.isArray(j.rows) ? j.rows : [];
+      return rows.map(normalizeCardRow);
+    } catch {
+      return [];
+    }
+  }
+
+  async function fillCardsTable(subIds, subsFallback){
+    const tb = document.getElementById("cardsTbody");
+    if (!tb) return;
+    tb.innerHTML = "";
+
+    let rows = await fetchCardsForSubs(subIds);
+
+    if (!rows.length && Array.isArray(subsFallback)) {
+      rows = subsFallback.flatMap(s => {
+        const sid = s?.submission_id || s?.submission_code || "";
+        const count = Number(s?.cards) || 0;
+        return Array.from({ length: count }, (_, i) => ({
+          submission: sid, date: null, channel: "", breakNo: (i + 1), desc: ""
+        }));
+      });
+    }
+
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show.</td></tr>';
+      return;
+    }
+
+    tb.innerHTML = rows.map(r => `
+      <tr>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || "—")}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || "—"))}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || "—")}</td>
+      </tr>
+    `).join("");
+  }
 
   function openOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.remove("hide"); }
   function closeOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.add("hide"); }
+
+  let lastBundle = null;
 
   function populate(bundle) {
     const subs = Array.isArray(bundle && bundle.submissions) ? bundle.submissions : [];
@@ -328,17 +305,31 @@ async function fillCardsTable(subIds, subsFallback){
     const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
     fillCardsTable(subIds, subs);
 
-
     const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
     const shipEl = document.querySelector(".js-ship");     if (shipEl) shipEl.textContent = "$5.00";
-    const totEl = document.querySelector(".js-total");     if (totEl) totEl.textContent = "$—";
+    const totEl  = document.querySelector(".js-total");    if (totEl)  totEl.textContent  = "$—";
   }
 
-  // public API
-  window.psaOpenDraftPreview = function (bundle) { populate(bundle || {}); openOverlay(); };
-  window.psaCloseDraftPreview = closeOverlay;
+  window.psaOpenDraftPreview = function (bundle) {
+    lastBundle = bundle || {};
+    populate(lastBundle);
+    openOverlay();
+  };
 
-  // close handlers
+  // NEW: trigger builder open from preview
+  function openBuilderFromPreview(){
+    const payload = { bundle: lastBundle };
+    try {
+      const evt = new CustomEvent('psa:open-builder', { detail: payload });
+      window.dispatchEvent(evt);
+    } catch (e) {
+      console.error('Failed to dispatch psa:open-builder', e);
+    }
+    // You can also navigate here if/when the builder page exists.
+    // example: window.location.href = `/admin/invoice-builder.html`;
+  }
+
+  $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
   $("btnDraftClose") && $("btnDraftClose").addEventListener("click", closeOverlay);
   $("draftBackdrop") && $("draftBackdrop").addEventListener("click", closeOverlay);
   window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
