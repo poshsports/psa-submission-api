@@ -224,34 +224,75 @@
     (arr || []).forEach((v) => el.appendChild(pill(v)));
   }
 
-  // read-only cards (fallback rows per card count)
-  function renderCardsTable(subs) {
-    const tb = document.getElementById("cardsTbody");
-    if (!tb) return;
-    tb.innerHTML = "";
-
-    (subs || []).forEach((s) => {
-      const sid = s && s.submission_id ? String(s.submission_id) : "";
-      const n = Number(s && s.cards) || 0;
-      for (let i = 1; i <= n; i++) {
-        const tr = document.createElement("tr");
-        tr.innerHTML =
-          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(sid) + "</td>" +
-          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">—</td>' +
-          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</td>' +
-          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">' + i + "</td>" +
-          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">—</td>';
-        tb.appendChild(tr);
-      }
-    });
-
-    if (!tb.children.length) {
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        '<td colspan="5" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show yet.</td>';
-      tb.appendChild(tr);
-    }
+function fmtDateISOish(v){
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) {
+    const s = String(v); return s.length >= 10 ? s.slice(0,10) : s;
   }
+  return d.toISOString().slice(0,10);
+}
+
+function normalizeCardRow(r) {
+  return {
+    submission : r.submission_id || r.submission_code || r.submission || "",
+    date       : r.break_date || r.break_at || r.date_of_break || null,
+    channel    : r.break_channel || r.channel || r.break || "",
+    breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || "",
+    desc       : r.card_description || r.description || r.card || r.title || ""
+  };
+}
+
+async function fetchCardsForSubs(subIds){
+  if (!subIds.length) return [];
+  const qs = new URLSearchParams({ subs: subIds.join(",") }).toString();
+  try {
+    const r = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => ({ rows: [] }));
+    const rows = Array.isArray(j.rows) ? j.rows : [];
+    return rows.map(normalizeCardRow);
+  } catch {
+    return [];
+  }
+}
+
+async function fillCardsTable(subIds, subsFallback){
+  const tb = document.getElementById("cardsTbody");
+  if (!tb) return;
+  tb.innerHTML = "";
+
+  let rows = await fetchCardsForSubs(subIds);
+
+  // If we got nothing, fall back to 1..N per submission (same as before)
+  if (!rows.length && Array.isArray(subsFallback)) {
+    rows = subsFallback.flatMap(s => {
+      const sid = s?.submission_id || s?.submission_code || "";
+      const count = Number(s?.cards) || 0;
+      return Array.from({ length: count }, (_, i) => ({
+        submission: sid,
+        date: null,
+        channel: "",
+        breakNo: (i + 1),
+        desc: ""
+      }));
+    });
+  }
+
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="5" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show.</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = rows.map(r => `
+    <tr>
+      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
+      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
+      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || "—")}</td>
+      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || "—"))}</td>
+      <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || "—")}</td>
+    </tr>
+  `).join("");
+}
 
   function openOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.remove("hide"); }
   function closeOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.add("hide"); }
@@ -284,7 +325,9 @@
     const rangeEl = document.querySelector(".js-range");
     if (rangeEl) rangeEl.textContent = (oldest || newest) ? ("Oldest: " + (oldest || "—") + " • Newest: " + (newest || "—")) : "—";
 
-    renderCardsTable(subs);
+    const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
+    fillCardsTable(subIds, subs);
+
 
     const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
     const shipEl = document.querySelector(".js-ship");     if (shipEl) shipEl.textContent = "$5.00";
