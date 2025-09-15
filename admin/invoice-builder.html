@@ -109,14 +109,27 @@
       document.body.insertAdjacentHTML('beforeend','<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
     }
 
-    (function renderHeader(){
-      $('#b-email').textContent = bundle.customer_email || '';
-      const subs = (bundle.submissions||[]).map(s=>s?.submission_id).filter(Boolean);
-      const groups = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
-      const sWrap = $('#b-subs'); sWrap.innerHTML=''; subs.forEach(x=>sWrap.appendChild(pill(x)));
-      const gWrap = $('#b-groups'); gWrap.innerHTML=''; groups.forEach(x=>gWrap.appendChild(pill(x)));
-    })();
+ (function renderHeader(){
+    let b = {};
+    try { b = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch {}
+    const subs   = (b.submissions || []).map(s=>s?.submission_id).filter(Boolean);
+    const groups = Array.from(new Set((b.groups || b.group_codes || []).filter(Boolean)));
 
+    const emailEl = document.getElementById('b-email');
+    if (emailEl) emailEl.textContent = b.customer_email || '—';
+
+    const sWrap = document.getElementById('b-subs');
+    if (sWrap) {
+      sWrap.innerHTML = '';
+      subs.forEach(x => { const sp = document.createElement('span'); sp.className='pill'; sp.textContent = x; sWrap.appendChild(sp); });
+    }
+
+    const gWrap = document.getElementById('b-groups');
+    if (gWrap) {
+      gWrap.innerHTML = '';
+      groups.forEach(x => { const sp = document.createElement('span'); sp.className='pill'; sp.textContent = x; gWrap.appendChild(sp); });
+    }
+  })();
     async function fetchCardsForSubs(subIds){
       if (!subIds.length) return [];
       const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
