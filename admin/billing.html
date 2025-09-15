@@ -92,5 +92,146 @@
         });
     });
   </script>
+<!-- ===== Draft Builder Overlay (read-only preview for now) ===== -->
+<div id="draftOverlay" class="hide" style="position:fixed;inset:0;z-index:1000;">
+  <!-- backdrop -->
+  <div id="draftBackdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.35);"></div>
+
+  <!-- panel -->
+  <div id="draftPanel" role="dialog" aria-modal="true"
+       style="position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);
+              width:min(960px,92vw);max-height:82vh;overflow:hidden;border-radius:16px;
+              background:#fff;box-shadow:0 20px 50px rgba(0,0,0,0.25);display:flex;flex-direction:column;">
+    <!-- header -->
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #eee;">
+      <div style="flex:1 1 auto;">
+        <div style="font-weight:700;">Draft Invoice Preview</div>
+        <div class="muted" style="font-size:12px;">
+          <span class="js-cust-email"></span> ·
+          <span class="js-sub-count">0</span> submissions ·
+          <span class="js-card-count">0</span> cards
+        </div>
+      </div>
+      <button type="button" id="btnDraftClose" class="btn" style="min-width:72px;">Close</button>
+    </div>
+
+    <!-- body -->
+    <div id="draftBody" style="padding:12px 16px;overflow:auto;">
+      <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;">
+        <!-- left: lists -->
+        <div>
+          <div style="font-weight:600;margin-bottom:6px;">Submissions</div>
+          <div class="muted" style="margin-bottom:10px;">(read-only preview)</div>
+          <div class="js-sub-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+
+          <div style="font-weight:600;margin:16px 0 6px;">Groups</div>
+          <div class="js-group-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+
+          <div style="font-weight:600;margin:16px 0 6px;">Received range</div>
+          <div class="js-range muted"></div>
+        </div>
+
+        <!-- right: summary -->
+        <div>
+          <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+              <div>Subtotal (est.)</div>
+              <div class="js-subtotal">$—</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+              <div>Shipping (flat)</div>
+              <div class="js-ship">$5.00</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #eee;font-weight:700;">
+              <div>Total (est.)</div>
+              <div class="js-total">$—</div>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+// Minimal, read-only preview to open/close the overlay.
+// Call window.psaOpenDraftPreview(bundle) with the bundle object from /api/admin/billing/to-bill.
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => {
+    const num = Number(n);
+    return Number.isFinite(num) ? num.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—';
+  };
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function pill(text){
+    const span = document.createElement('span');
+    span.textContent = text;
+    span.style.display = 'inline-block';
+    span.style.padding = '4px 8px';
+    span.style.border = '1px solid #e5e7eb';
+    span.style.borderRadius = '999px';
+    span.style.fontSize = '12px';
+    span.style.background = '#f8fafc';
+    return span;
+  }
+
+  function setList(el, arr){
+    el.innerHTML = '';
+    (arr || []).forEach(v => el.appendChild(pill(v)));
+  }
+
+  function openOverlay(){
+    const wrap = $('draftOverlay');
+    if (wrap) wrap.classList.remove('hide');
+  }
+  function closeOverlay(){
+    const wrap = $('draftOverlay');
+    if (wrap) wrap.classList.add('hide');
+  }
+
+  function populate(bundle){
+    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
+    const groups = Array.isArray(bundle?.groups) ? bundle.groups : (Array.isArray(bundle?.group_codes) ? bundle.group_codes : []);
+
+    // header bits
+    document.querySelector('.js-cust-email')!.textContent = bundle?.customer_email || '';
+    document.querySelector('.js-sub-count')!.textContent = String(subs.length);
+    document.querySelector('.js-card-count')!.textContent = String(bundle?.cards ?? subs.reduce((a,s)=>a+(Number(s.cards)||0),0));
+
+    // lists
+    const subIds = subs.map(s => s.submission_id).filter(Boolean);
+    const grpCodes = [...new Set(groups.filter(Boolean))];
+    setList(document.querySelector('.js-sub-list'), subIds);
+    setList(document.querySelector('.js-group-list'), grpCodes);
+
+    // received range
+    const oldest = bundle?.returned_oldest || subs.map(s=>s.returned_at).filter(Boolean).sort()[0] || null;
+    const newest = bundle?.returned_newest || subs.map(s=>s.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
+    const rangeEl = document.querySelector('.js-range');
+    rangeEl.textContent = oldest || newest ? `Oldest: ${oldest ?? '—'}  •  Newest: ${newest ?? '—'}` : '—';
+
+    // naive placeholder math for now (read-only preview): subtotal unknown, shipping fixed $5
+    // We'll replace this with server-computed values in the next step.
+    document.querySelector('.js-subtotal').textContent = '$—';
+    document.querySelector('.js-ship').textContent = '$5.00';
+    document.querySelector('.js-total').textContent = '$—';
+  }
+
+  // Public API (global for now; we’ll wire calls in the next step)
+  window.psaOpenDraftPreview = function(bundle){
+    populate(bundle || {});
+    openOverlay();
+  };
+  window.psaCloseDraftPreview = closeOverlay;
+
+  // Close interactions
+  $('btnDraftClose')?.addEventListener('click', closeOverlay);
+  $('draftBackdrop')?.addEventListener('click', closeOverlay);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay(); });
+})();
+</script>
+
 </body>
 </html>
