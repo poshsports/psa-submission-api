@@ -12,7 +12,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
   IMPORTANT: If your cards view/table name differs, change TABLE below to the one
   that backs the Group detail “Cards” grid (it typically includes these columns).
 */
-const TABLE = "admin_submission_cards_v"; // adjust if your view/table has a different name
+const TABLE = "admin_submissions_v"; // adjust if your view/table has a different name
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
