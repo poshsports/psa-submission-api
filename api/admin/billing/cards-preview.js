@@ -1,13 +1,8 @@
+// /api/admin/billing/cards-preview.js
 import { createClient } from "@supabase/supabase-js";
 import { requireAdmin } from "../../_util/adminAuth.js";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
-
-// Uses your table directly
-const CARD_TABLE = "submission_cards";
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -15,30 +10,38 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  // Admin gate
+  // Admin gate (same pattern as your other admin endpoints)
   const ok = await requireAdmin(req, res);
-  if (!ok) return;
+  if (!ok) return; // 401 already sent by requireAdmin
 
   // subs=psa-191,psa-205,...
-  const ids = String(req.query.subs || "")
+  const raw = String(req.query.subs || "").trim();
+  const ids = raw
     .split(",")
     .map(s => s.trim())
     .filter(Boolean);
 
-  if (!ids.length) return res.status(200).json({ rows: [] });
-
-  // Pull card rows; select * so we’re resilient to column name differences
-  const { data, error } = await supabase
-    .from(CARD_TABLE)
-    .select("*")
-    .in("submission_code", ids)   // if your column is submission_id, the fallback in the client handles it
-    .order("submission_code", { ascending: true })
-    .order("break_number", { ascending: true })  // harmless if column name differs
-
-  if (error) {
-    console.error("[cards-preview] error:", error);
-    return res.status(500).json({ error: "Failed to read cards", rows: [] });
+  if (!ids.length) {
+    // Nothing to fetch; return empty set to keep the client happy
+    return res.status(200).json({ rows: [] });
   }
 
+  // Pull per-card rows for those submissions.
+  // Using card_index (int4) for stable ordering inside each submission.
+  const { data, error } = await supabase
+    .from("submission_cards")
+    .select(
+      "submission_id, break_date, break_channel, break_number, card_description, card_index"
+    )
+    .in("submission_id", ids)
+    .order("submission_id", { ascending: true })
+    .order("card_index", { ascending: true }); // secondary, per-sub ordering
+
+  if (error) {
+    console.error("[cards-preview] supabase error:", error);
+    return res.status(500).json({ error: "Failed to read submission cards" });
+  }
+
+  // Return rows as-is; client normalizer already accepts these exact names
   return res.status(200).json({ rows: data || [] });
 }
