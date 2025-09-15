@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PSA Admin – Invoice Builder</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <div id="shell">
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a class="sidebar-item" href="/admin/index.html">Active submissions</a>
+        <a class="sidebar-item" href="/admin/groups.html">Groups</a>
+        <a class="sidebar-item" href="/admin/billing.html">Billing</a>
+        <a class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a class="sidebar-item" href="#" title="Coming soon">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
+
+      <main class="admin-main">
+        <div class="topbar">
+          <div class="brand">
+            <span class="dot"></span>
+            <strong>Invoice Builder</strong>
+          </div>
+          <div class="top-actions" style="display:flex;gap:8px;align-items:center;">
+            <a class="btn" href="/admin/billing.html">← Back to Billing</a>
+            <button id="btnSaveDraft" class="btn" type="button" title="Coming soon" disabled>Save Draft</button>
+            <button id="btnSend" class="btn primary" type="button" title="Coming soon" disabled>Send</button>
+          </div>
+        </div>
+
+        <div class="toolbar" style="gap:12px;align-items:flex-start;flex-wrap:wrap;">
+          <div style="min-width:280px;">
+            <div class="muted" style="font-size:12px;">Customer</div>
+            <div id="b-email" style="font-weight:600;">—</div>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div>
+              <div class="muted" style="font-size:12px;">Submissions</div>
+              <div id="b-subs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+            </div>
+            <div>
+              <div class="muted" style="font-size:12px;">Groups</div>
+              <div id="b-groups" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+            </div>
+          </div>
+          <div class="spacer"></div>
+          <div style="border:1px solid #eee;border-radius:12px;padding:12px;min-width:280px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div>Shipping</div>
+              <div>
+                <input id="shipInput" type="number" step="0.01" min="0" value="5.00" style="width:96px;text-align:right;" />
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #eee;font-weight:700;">
+              <div>Total (preview)</div>
+              <div id="grandTotal">$—</div>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="margin-top:8px;">
+          <div class="table-scroller">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Submission</th>
+                  <th>Date of break</th>
+                  <th>Break channel</th>
+                  <th>Break #</th>
+                  <th>Card description</th>
+                  <th style="text-align:right;">Upcharge ($)</th>
+                </tr>
+              </thead>
+              <tbody id="builderTbody"></tbody>
+            </table>
+          </div>
+          <div id="emptyMsg" class="empty hide">No card rows to show.</div>
+        </div>
+        <div class="pagination"></div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+      window.location.replace('/admin');
+    });
+
+    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function pill(text){ const el=document.createElement('span'); el.textContent=text; el.className='pill'; el.style.padding='4px 8px'; return el; }
+    function fmtDateISOish(v){ if(!v) return '—'; const d=new Date(v); if(Number.isNaN(d.getTime())){ const s=String(v); return s.length>=10?s.slice(0,10):s; } return d.toISOString().slice(0,10); }
+    function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
+
+    // Get bundle
+    let bundle={};
+    try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch { bundle = {}; }
+
+    if (!bundle || !Array.isArray(bundle.submissions) || !bundle.submissions.length) {
+      document.body.insertAdjacentHTML('beforeend','<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
+    }
+
+    (function renderHeader(){
+      $('#b-email').textContent = bundle.customer_email || '';
+      const subs = (bundle.submissions||[]).map(s=>s?.submission_id).filter(Boolean);
+      const groups = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
+      const sWrap = $('#b-subs'); sWrap.innerHTML=''; subs.forEach(x=>sWrap.appendChild(pill(x)));
+      const gWrap = $('#b-groups'); gWrap.innerHTML=''; groups.forEach(x=>gWrap.appendChild(pill(x)));
+    })();
+
+    async function fetchCardsForSubs(subIds){
+      if (!subIds.length) return [];
+      const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
+      try {
+        const r = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials:'same-origin' });
+        const j = await r.json().catch(()=>({ rows: [] }));
+        return Array.isArray(j.rows) ? j.rows : [];
+      } catch { return []; }
+    }
+
+    const state = { rows: [], ship: 5.00 };
+
+    function recompute(){
+      const upTotal = state.rows.reduce((a,r)=>a+(Number(r.__upcharge)||0),0);
+      const total = upTotal + (Number(state.ship)||0);
+      $('#grandTotal').textContent = money(total);
+    }
+
+    function renderRows(rows){
+      const tb = $('#builderTbody'); const empty=$('#emptyMsg');
+      tb.innerHTML=''; if(!rows.length){ empty.classList.remove('hide'); recompute(); return; }
+      empty.classList.add('hide');
+
+      tb.innerHTML = rows.map((r,i)=>`
+        <tr>
+          <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
+          <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
+          <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
+          <td style="text-align:right;">${esc(String(r.break_number || r.break_num || r.break_no || r.break_id || ''))}</td>
+          <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
+          <td style="text-align:right;"><input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0" value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" /></td>
+        </tr>
+      `).join('');
+
+      tb.querySelectorAll('.up-inp').forEach(inp=>{
+        inp.addEventListener('input',(e)=>{
+          const i=Number(e.currentTarget.dataset.idx);
+          const v=Number(e.currentTarget.value||0);
+          state.rows[i].__upcharge = Number.isFinite(v)?v:0;
+          recompute();
+        });
+      });
+
+      recompute();
+    }
+
+    (async function init(){
+      const shipEl = $('#shipInput');
+      if (shipEl) {
+        state.ship = Number(shipEl.value||5.00)||0;
+        shipEl.addEventListener('input', ()=>{ state.ship = Number(shipEl.value||0)||0; recompute(); });
+      }
+
+      const subs = (bundle.submissions||[]).map(s=>s?.submission_id).filter(Boolean);
+      const rows = await fetchCardsForSubs(subs);
+      state.rows = rows.map(r=>({ ...r, __upcharge: 0 }));
+      renderRows(state.rows);
+    })();
+  </script>
+</body>
+</html>
