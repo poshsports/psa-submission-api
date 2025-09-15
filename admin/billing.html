@@ -159,7 +159,11 @@
             Grouped by submission. Per-card details will be editable in the next step.
           </div>
           <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;overflow:auto;max-height:44vh;">
-            <table class="cards-table" style="width:100%;border-collapse:separate;border-spacing:0;">
+            <table class="cards-table" style="width:100%;min-width:460px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
+              <colgroup>
+                <col style="width:auto;">
+                <col style="width:140px;">
+              </colgroup>
               <thead>
                 <tr style="background:#f8fafc;">
                   <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;">Submission</th>
@@ -169,6 +173,7 @@
               <tbody id="cardsTbody"></tbody>
             </table>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -214,9 +219,9 @@
 
         for (let i = 1; i <= n; i++) {
           const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;">' + esc(sid) + '</td>' +
-            '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;">' + i + '</td>';
+tr.innerHTML =
+  '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(sid) + '</td>' +
+  '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">' + i + '</td>';
           tb.appendChild(tr);
         }
       });
