@@ -146,5 +146,48 @@ export async function showBillingView(){
   tbl.applyFilters();
   tbl.renderTable();
 
+  // Wire "Create Draft" buttons in the Billing table
+(function wireBillingDraftClicks(){
+  let wired = false;
+  window.addEventListener('psa:table-rendered', () => {
+    if (wired) return;
+    const tbody = document.getElementById('subsTbody');
+    if (!tbody) return;
+
+    tbody.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-action="draft"]');
+      if (!btn) return;
+
+      // Prefer data-email; otherwise try to read from the row id
+      const tr = btn.closest('tr');
+      let email = btn.getAttribute('data-email') || '';
+      if (!email && tr?.dataset?.id) {
+        const id = String(tr.dataset.id || '');
+        email = id.startsWith('cust:') ? id.slice(5) : id;
+      }
+      if (!email) return;
+
+      btn.disabled = true;
+      try {
+        const url = `/api/admin/billing/to-bill?q=${encodeURIComponent(email)}`;
+        const j = await fetch(url, { credentials: 'same-origin' }).then(r => r.json());
+        const item = j.items?.[0];
+        if (item) {
+          window.psaOpenDraftPreview(item);
+        } else {
+          alert('Nothing to bill for this customer yet.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Failed to load draft preview.');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    wired = true;
+  });
+})();
+
   wireCoreUI();
 }
