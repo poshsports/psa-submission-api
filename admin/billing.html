@@ -184,160 +184,139 @@
     </div>
   </div>
 
-  <script type="module">
-  // Minimal, read-only preview to open/close the overlay.
-  // Call window.psaOpenDraftPreview(bundle) with the bundle object from /api/admin/billing/to-bill.
-  (function(){
-    const $ = (id) => document.getElementById(id);
-    const fmt = (n) => {
-      const num = Number(n);
-      return Number.isFinite(num) ? num.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—';
-    };
-    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-    function pill(text){
-      const span = document.createElement('span');
-      span.textContent = text;
-      span.style.display = 'inline-block';
-      span.style.padding = '4px 8px';
-      span.style.border = '1px solid #e5e7eb';
-      span.style.borderRadius = '999px';
-      span.style.fontSize = '12px';
-      span.style.background = '#f8fafc';
-      return span;
+<script type="module">
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtDateISOish = (v) => {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) {
+      const s = String(v);
+      return s.length >= 10 ? s.slice(0, 10) : s;
     }
+    return d.toISOString().slice(0, 10);
+  };
 
-    function setList(el, arr){
-      el.innerHTML = '';
-      (arr || []).forEach(v => el.appendChild(pill(v)));
-    }
+  function openOverlay(){ $('draftOverlay')?.classList.remove('hide'); }
+  function closeOverlay(){ $('draftOverlay')?.classList.add('hide'); }
+  window.psaCloseDraftPreview = closeOverlay;
 
-    function openOverlay(){
-      const wrap = $('draftOverlay');
-      if (wrap) wrap.classList.remove('hide');
-    }
-    function closeOverlay(){
-      const wrap = $('draftOverlay');
-      if (wrap) wrap.classList.add('hide');
-    }
+  // -- existing helpers from your file (pill, setList, populate, renderCardsTable) remain as-is --
 
-    function populate(bundle){
-      const subs = Array.isArray(bundle && bundle.submissions) ? bundle.submissions : [];
-      const groups = Array.isArray(bundle && bundle.groups)
-        ? bundle.groups
-        : (Array.isArray(bundle && bundle.group_codes) ? bundle.group_codes : []);
+  function renderCardsTable(bundle){
+    const tbody = document.getElementById('cardsTbody');
+    if (!tbody) return;
 
-      // header bits (guard each selector)
-      const elEmail = document.querySelector('.js-cust-email');
-      if (elEmail) elEmail.textContent = (bundle && bundle.customer_email) || '';
+    const details =
+      (Array.isArray(bundle?.cards_detail) && bundle.cards_detail) ||
+      (Array.isArray(bundle?.cards) && bundle.cards) ||
+      null;
 
-      const elSubCount = document.querySelector('.js-sub-count');
-      if (elSubCount) elSubCount.textContent = String(subs.length);
+    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
 
-      const elCardCount = document.querySelector('.js-card-count');
-      if (elCardCount) {
-        const computedCards = subs.reduce((a, s) => a + (Number(s && s.cards) || 0), 0);
-        elCardCount.textContent = String(
-          (bundle && bundle.cards != null) ? bundle.cards : computedCards
-        );
-      }
-
-      // lists
-      const subIds  = subs.map(s => s && s.submission_id).filter(Boolean);
-      const grpCodes = Array.from(new Set((groups || []).filter(Boolean)));
-      const elSubList = document.querySelector('.js-sub-list');
-      const elGrpList = document.querySelector('.js-group-list');
-      if (elSubList) setList(elSubList, subIds);
-      if (elGrpList) setList(elGrpList, grpCodes);
-
-      // received range
-      const oldest = (bundle && bundle.returned_oldest) ||
-                     subs.map(s => s && s.returned_at).filter(Boolean).sort()[0] || null;
-      const newest = (bundle && bundle.returned_newest) ||
-                     subs.map(s => s && s.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
-      const rangeEl = document.querySelector('.js-range');
-      if (rangeEl) {
-        rangeEl.textContent = (oldest || newest)
-          ? ('Oldest: ' + (oldest || '—') + '  •  Newest: ' + (newest || '—'))
-          : '—';
-      }
-
-      // NOTE: no renderCardsTable() call here; we call it once from psaOpenDraftPreview.
-      // Totals (placeholder)
-      const elSubtotal = document.querySelector('.js-subtotal'); if (elSubtotal) elSubtotal.textContent = '$—';
-      const elShip     = document.querySelector('.js-ship');     if (elShip)     elShip.textContent     = '$5.00';
-      const elTotal    = document.querySelector('.js-total');    if (elTotal)    elTotal.textContent    = '$—';
-    }
-
-    function fmtDateISOish(v){
-      if (!v) return '—';
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) {
-        const s = String(v);
-        return s.length >= 10 ? s.slice(0, 10) : s;
-      }
-      return d.toISOString().slice(0, 10);
-    }
-
-    // Single cards table renderer — expects the full bundle
-    function renderCardsTable(bundle){
-      const tbody = document.getElementById('cardsTbody');
-      if (!tbody) return;
-
-      const details =
-        (Array.isArray(bundle?.cards) && bundle.cards) ||
-        (Array.isArray(bundle?.cards_detail) && bundle.cards_detail) ||
-        (Array.isArray(bundle?.card_items) && bundle.card_items) ||
-        null;
-
-      const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
-
-      let rows = [];
-      if (details && details.length) {
-        rows = details.map(c => ({
-          submission : c.submission_id || c.submission_code || c.submission || '',
-          date       : fmtDateISOish(c.break_date || c.break_date_iso || c.break_at || c.date_of_break),
-          channel    : c.break_channel || c.channel || c.break || '',
-          breakNo    : c.break_num || c.break_number || c.break_no || c.break_id || '',
-          desc       : c.card_description || c.description || c.card || c.title || ''
+    let rows = [];
+    if (details && details.length) {
+      rows = details.map(c => ({
+        submission : c.submission_id || c.submission_code || c.submission || '',
+        date       : fmtDateISOish(c.break_date),
+        channel    : c.break_channel || '',
+        breakNo    : c.break_num ?? '',
+        desc       : c.card_description || ''
+      }));
+    } else {
+      // fallback: show N placeholder rows per submission
+      rows = subs.flatMap(s => {
+        const count = Number(s?.cards) || 0;
+        const sid = s?.submission_id || s?.submission_code || '';
+        return Array.from({ length: count }, (_, i) => ({
+          submission: sid, date: '—', channel: '—', breakNo: i + 1, desc: '—'
         }));
-      } else {
-        // Fallback: one row per card per submission (unknown fields as —)
-        rows = subs.flatMap(s => {
-          const count = Number(s?.cards) || 0;
-          const sid = s?.submission_id || s?.submission_code || '';
-          return Array.from({ length: count }, (_, i) => ({
-            submission: sid, date: '—', channel: '—', breakNo: i + 1, desc: '—'
-          }));
-        });
-      }
-
-      tbody.innerHTML = rows.map(r => `
-        <tr>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(r.date)}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel)}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo ?? ''))}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc)}</td>
-        </tr>
-      `).join('');
+      });
     }
 
-    // Public API (global for now)
-    window.psaOpenDraftPreview = function(bundle){
-      const b = bundle || {};
-      populate(b);
-      renderCardsTable(b);
-      openOverlay();
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(r.date)}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel)}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo ?? ''))}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Call this to populate header & lists (keep your original implementation)
+  function populate(bundle){
+    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
+    const groups = Array.isArray(bundle?.groups) ? bundle.groups
+                  : (Array.isArray(bundle?.group_codes) ? bundle.group_codes : []);
+
+    document.querySelector('.js-cust-email')!.textContent = bundle?.customer_email || '';
+    document.querySelector('.js-sub-count')!.textContent = String(subs.length);
+    const computedCards = subs.reduce((a, s) => a + (Number(s?.cards) || 0), 0);
+    document.querySelector('.js-card-count')!.textContent = String(bundle?.cards ?? computedCards);
+
+    const pill = (t) => {
+      const s = document.createElement('span');
+      s.textContent = t;
+      s.style.cssText = 'display:inline-block;padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;font-size:12px;background:#f8fafc;';
+      return s;
     };
-    window.psaCloseDraftPreview = closeOverlay;
+    const setList = (el, arr) => { el.innerHTML = ''; (arr||[]).forEach(v => el.appendChild(pill(v))); };
 
-    // Close interactions
-    $('btnDraftClose')?.addEventListener('click', closeOverlay);
-    $('draftBackdrop')?.addEventListener('click', closeOverlay);
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay(); });
-  })();
-  </script>
+    const subIds = subs.map(s => s?.submission_id).filter(Boolean);
+    const grpCodes = Array.from(new Set((groups || []).filter(Boolean)));
+    const elSubList = document.querySelector('.js-sub-list');
+    const elGrpList = document.querySelector('.js-group-list');
+    if (elSubList) setList(elSubList, subIds);
+    if (elGrpList) setList(elGrpList, grpCodes);
 
+    const oldest = (bundle && bundle.returned_oldest) || subs.map(s => s?.returned_at).filter(Boolean).sort()[0] || null;
+    const newest = (bundle && bundle.returned_newest) || subs.map(s => s?.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
+    const rangeEl = document.querySelector('.js-range');
+    if (rangeEl) rangeEl.textContent = (oldest || newest) ? (`Oldest: ${oldest || '—'} • Newest: ${newest || '—'}`) : '—';
+
+    const elSubtotal = document.querySelector('.js-subtotal'); if (elSubtotal) elSubtotal.textContent = '$—';
+    const elShip     = document.querySelector('.js-ship');     if (elShip)     elShip.textContent     = '$5.00';
+    const elTotal    = document.querySelector('.js-total');    if (elTotal)    elTotal.textContent    = '$—';
+  }
+
+  // >>> REPLACEMENT: async version that fetches real card rows
+  window.psaOpenDraftPreview = async function(bundle){
+    const b = bundle || {};
+    populate(b);
+
+    // Clear table with a quick fallback (based on counts) while we fetch real rows
+    renderCardsTable({ submissions: b.submissions });
+
+    try {
+      const subIds = (Array.isArray(b.submissions) ? b.submissions : [])
+        .map(s => s?.submission_id)
+        .filter(Boolean);
+
+      if (subIds.length) {
+        const url = '/api/admin/billing/cards-for?subs=' + encodeURIComponent(subIds.join(','));
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          b.cards_detail = Array.isArray(j.items) ? j.items : [];
+        }
+      }
+    } catch (e) {
+      console.warn('[draft] cards-for fetch failed', e);
+    }
+
+    // Render again with the real details (if any)
+    renderCardsTable(b);
+    openOverlay();
+  };
+
+  // standard close hooks
+  $('btnDraftClose')?.addEventListener('click', () => window.psaCloseDraftPreview());
+  $('draftBackdrop')?.addEventListener('click', () => window.psaCloseDraftPreview());
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.psaCloseDraftPreview(); });
+})();
+</script>
 </body>
 </html>
