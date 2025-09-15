@@ -10,6 +10,7 @@
 <body>
   <div id="shell">
     <div class="admin-shell">
+      <!-- Sidebar -->
       <aside class="admin-sidebar">
         <div class="sidebar-title">PSA Admin</div>
         <a class="sidebar-item" href="/admin/index.html">Active submissions</a>
@@ -21,7 +22,9 @@
         <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
       </aside>
 
+      <!-- Main -->
       <main class="admin-main">
+        <!-- Top bar -->
         <div class="topbar">
           <div class="brand">
             <span class="dot"></span>
@@ -34,11 +37,13 @@
           </div>
         </div>
 
+        <!-- Header/controls -->
         <div class="toolbar" style="gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div style="min-width:280px;">
             <div class="muted" style="font-size:12px;">Customer</div>
             <div id="b-email" style="font-weight:600;">—</div>
           </div>
+
           <div style="display:flex;gap:12px;flex-wrap:wrap;">
             <div>
               <div class="muted" style="font-size:12px;">Submissions</div>
@@ -49,7 +54,9 @@
               <div id="b-groups" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
             </div>
           </div>
+
           <div class="spacer"></div>
+
           <div style="border:1px solid #eee;border-radius:12px;padding:12px;min-width:280px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
               <div>Shipping</div>
@@ -65,6 +72,7 @@
           </div>
         </div>
 
+        <!-- Cards table -->
         <div class="table-wrap" style="margin-top:8px;">
           <div class="table-scroller">
             <table class="table">
@@ -83,6 +91,7 @@
           </div>
           <div id="emptyMsg" class="empty hide">No card rows to show.</div>
         </div>
+
         <div class="pagination"></div>
       </main>
     </div>
@@ -90,46 +99,72 @@
 
   <script type="module">
     const $ = (id) => document.getElementById(id);
+
+    // Sign out
     document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
       e.preventDefault();
       try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
       window.location.replace('/admin');
     });
 
+    // Utils
     function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function pill(text){ const el=document.createElement('span'); el.textContent=text; el.className='pill'; el.style.padding='4px 8px'; return el; }
-    function fmtDateISOish(v){ if(!v) return '—'; const d=new Date(v); if(Number.isNaN(d.getTime())){ const s=String(v); return s.length>=10?s.slice(0,10):s; } return d.toISOString().slice(0,10); }
-    function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
+    function fmtDateISOish(v){
+      if (!v) return '—';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) {
+        const s = String(v);
+        return s.length >= 10 ? s.slice(0, 10) : s;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+    function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
 
-    // Get bundle
-    let bundle={};
+    // Load bundle from sessionStorage
+    let bundle = {};
     try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch { bundle = {}; }
 
+    // If no bundle, show message and stop
     if (!bundle || !Array.isArray(bundle.submissions) || !bundle.submissions.length) {
-      document.body.insertAdjacentHTML('beforeend','<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
+      document.body.insertAdjacentHTML('beforeend', '<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
+      // Stop running further script to avoid null references
+      // (Keep the sign-out handler active above)
+      throw new Error('No builder bundle present');
     }
 
- (function renderHeader(){
-    let b = {};
-    try { b = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch {}
-    const subs   = (b.submissions || []).map(s=>s?.submission_id).filter(Boolean);
-    const groups = Array.from(new Set((b.groups || b.group_codes || []).filter(Boolean)));
+    // Header render (email, chips)
+    (function renderHeader(){
+      const subs   = (bundle.submissions || []).map(s => s?.submission_id).filter(Boolean);
+      const groups = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
 
-    const emailEl = document.getElementById('b-email');
-    if (emailEl) emailEl.textContent = b.customer_email || '—';
+      const emailEl = $('#b-email'); if (emailEl) emailEl.textContent = bundle.customer_email || '—';
 
-    const sWrap = document.getElementById('b-subs');
-    if (sWrap) {
-      sWrap.innerHTML = '';
-      subs.forEach(x => { const sp = document.createElement('span'); sp.className='pill'; sp.textContent = x; sWrap.appendChild(sp); });
-    }
+      const sWrap = $('#b-subs');
+      if (sWrap) {
+        sWrap.innerHTML = '';
+        subs.forEach(x => {
+          const sp = document.createElement('span');
+          sp.className = 'pill';
+          sp.style.padding = '4px 8px';
+          sp.textContent = x;
+          sWrap.appendChild(sp);
+        });
+      }
 
-    const gWrap = document.getElementById('b-groups');
-    if (gWrap) {
-      gWrap.innerHTML = '';
-      groups.forEach(x => { const sp = document.createElement('span'); sp.className='pill'; sp.textContent = x; gWrap.appendChild(sp); });
-    }
-  })();
+      const gWrap = $('#b-groups');
+      if (gWrap) {
+        gWrap.innerHTML = '';
+        groups.forEach(x => {
+          const sp = document.createElement('span');
+          sp.className = 'pill';
+          sp.style.padding = '4px 8px';
+          sp.textContent = x;
+          gWrap.appendChild(sp);
+        });
+      }
+    })();
+
+    // Fetch rows for submissions
     async function fetchCardsForSubs(subIds){
       if (!subIds.length) return [];
       const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
@@ -140,17 +175,26 @@
       } catch { return []; }
     }
 
+    // Local state
     const state = { rows: [], ship: 5.00 };
 
     function recompute(){
-      const upTotal = state.rows.reduce((a,r)=>a+(Number(r.__upcharge)||0),0);
-      const total = upTotal + (Number(state.ship)||0);
-      $('#grandTotal').textContent = money(total);
+      const upTotal = state.rows.reduce((a,r)=>a + (Number(r.__upcharge)||0), 0);
+      const total = upTotal + (Number(state.ship) || 0);
+      const gt = $('#grandTotal'); if (gt) gt.textContent = money(total);
     }
 
     function renderRows(rows){
-      const tb = $('#builderTbody'); const empty=$('#emptyMsg');
-      tb.innerHTML=''; if(!rows.length){ empty.classList.remove('hide'); recompute(); return; }
+      const tb = $('#builderTbody');
+      const empty = $('#emptyMsg');
+      if (!tb || !empty) return;
+
+      tb.innerHTML = '';
+      if (!rows.length) {
+        empty.classList.remove('hide');
+        recompute();
+        return;
+      }
       empty.classList.add('hide');
 
       tb.innerHTML = rows.map((r,i)=>`
@@ -160,15 +204,17 @@
           <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
           <td style="text-align:right;">${esc(String(r.break_number || r.break_num || r.break_no || r.break_id || ''))}</td>
           <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
-          <td style="text-align:right;"><input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0" value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" /></td>
+          <td style="text-align:right;">
+            <input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0" value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" />
+          </td>
         </tr>
       `).join('');
 
       tb.querySelectorAll('.up-inp').forEach(inp=>{
         inp.addEventListener('input',(e)=>{
-          const i=Number(e.currentTarget.dataset.idx);
-          const v=Number(e.currentTarget.value||0);
-          state.rows[i].__upcharge = Number.isFinite(v)?v:0;
+          const i = Number(e.currentTarget.dataset.idx);
+          const v = Number(e.currentTarget.value || 0);
+          state.rows[i].__upcharge = Number.isFinite(v) ? v : 0;
           recompute();
         });
       });
@@ -176,16 +222,20 @@
       recompute();
     }
 
+    // Init
     (async function init(){
       const shipEl = $('#shipInput');
       if (shipEl) {
-        state.ship = Number(shipEl.value||5.00)||0;
-        shipEl.addEventListener('input', ()=>{ state.ship = Number(shipEl.value||0)||0; recompute(); });
+        state.ship = Number(shipEl.value || 5.00) || 0;
+        shipEl.addEventListener('input', ()=>{
+          state.ship = Number(shipEl.value || 0) || 0;
+          recompute();
+        });
       }
 
-      const subs = (bundle.submissions||[]).map(s=>s?.submission_id).filter(Boolean);
+      const subs = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
       const rows = await fetchCardsForSubs(subs);
-      state.rows = rows.map(r=>({ ...r, __upcharge: 0 }));
+      state.rows = rows.map(r => ({ ...r, __upcharge: 0 }));
       renderRows(state.rows);
     })();
   </script>
