@@ -185,137 +185,120 @@
   </div>
 
 <script type="module">
-(function(){
+(function () {
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const fmtDateISOish = (v) => {
-    if (!v) return '—';
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) {
-      const s = String(v);
-      return s.length >= 10 ? s.slice(0, 10) : s;
-    }
-    return d.toISOString().slice(0, 10);
-  };
 
-  function openOverlay(){ $('draftOverlay')?.classList.remove('hide'); }
-  function closeOverlay(){ $('draftOverlay')?.classList.add('hide'); }
+  // currency + html-escape helpers (no HTML comments anywhere in JS)
+  function money(n) {
+    const num = Number(n);
+    return Number.isFinite(num)
+      ? num.toLocaleString(undefined, { style: "currency", currency: "USD" })
+      : "$—";
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      switch (c) {
+        case "&": return "&amp;";
+        case "<": return "&lt;";
+        case ">": return "&gt;";
+        case '"': return "&quot;";
+        case "'": return "&#39;";
+        default: return c;
+      }
+    });
+  }
+  function pill(text) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    span.style.display = "inline-block";
+    span.style.padding = "4px 8px";
+    span.style.border = "1px solid #e5e7eb";
+    span.style.borderRadius = "999px";
+    span.style.fontSize = "12px";
+    span.style.background = "#f8fafc";
+    return span;
+  }
+  function setList(el, arr) {
+    if (!el) return;
+    el.innerHTML = "";
+    (arr || []).forEach((v) => el.appendChild(pill(v)));
+  }
+
+  // read-only cards (fallback rows per card count)
+  function renderCardsTable(subs) {
+    const tb = document.getElementById("cardsTbody");
+    if (!tb) return;
+    tb.innerHTML = "";
+
+    (subs || []).forEach((s) => {
+      const sid = s && s.submission_id ? String(s.submission_id) : "";
+      const n = Number(s && s.cards) || 0;
+      for (let i = 1; i <= n; i++) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(sid) + "</td>" +
+          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">—</td>' +
+          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</td>' +
+          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">' + i + "</td>" +
+          '<td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">—</td>';
+        tb.appendChild(tr);
+      }
+    });
+
+    if (!tb.children.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td colspan="5" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show yet.</td>';
+      tb.appendChild(tr);
+    }
+  }
+
+  function openOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.remove("hide"); }
+  function closeOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.add("hide"); }
+
+  function populate(bundle) {
+    const subs = Array.isArray(bundle && bundle.submissions) ? bundle.submissions : [];
+    const groups = Array.isArray(bundle && bundle.groups)
+      ? bundle.groups
+      : (Array.isArray(bundle && bundle.group_codes) ? bundle.group_codes : []);
+
+    const emailEl = document.querySelector(".js-cust-email");
+    if (emailEl) emailEl.textContent = (bundle && bundle.customer_email) || "";
+
+    const subCt = document.querySelector(".js-sub-count");
+    if (subCt) subCt.textContent = String(subs.length);
+
+    const cardCt = document.querySelector(".js-card-count");
+    if (cardCt) {
+      const counted = subs.reduce((a, s) => a + (Number(s && s.cards) || 0), 0);
+      cardCt.textContent = String((bundle && bundle.cards != null) ? bundle.cards : counted);
+    }
+
+    setList(document.querySelector(".js-sub-list"), subs.map(s => s && s.submission_id).filter(Boolean));
+    setList(document.querySelector(".js-group-list"), Array.from(new Set((groups || []).filter(Boolean))));
+
+    const oldest = (bundle && bundle.returned_oldest) ||
+                   subs.map(s => s && s.returned_at).filter(Boolean).sort()[0] || null;
+    const newest = (bundle && bundle.returned_newest) ||
+                   subs.map(s => s && s.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
+    const rangeEl = document.querySelector(".js-range");
+    if (rangeEl) rangeEl.textContent = (oldest || newest) ? ("Oldest: " + (oldest || "—") + " • Newest: " + (newest || "—")) : "—";
+
+    renderCardsTable(subs);
+
+    const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
+    const shipEl = document.querySelector(".js-ship");     if (shipEl) shipEl.textContent = "$5.00";
+    const totEl = document.querySelector(".js-total");     if (totEl) totEl.textContent = "$—";
+  }
+
+  // public API
+  window.psaOpenDraftPreview = function (bundle) { populate(bundle || {}); openOverlay(); };
   window.psaCloseDraftPreview = closeOverlay;
 
-  // -- existing helpers from your file (pill, setList, populate, renderCardsTable) remain as-is --
-
-  function renderCardsTable(bundle){
-    const tbody = document.getElementById('cardsTbody');
-    if (!tbody) return;
-
-    const details =
-      (Array.isArray(bundle?.cards_detail) && bundle.cards_detail) ||
-      (Array.isArray(bundle?.cards) && bundle.cards) ||
-      null;
-
-    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
-
-    let rows = [];
-    if (details && details.length) {
-      rows = details.map(c => ({
-        submission : c.submission_id || c.submission_code || c.submission || '',
-        date       : fmtDateISOish(c.break_date),
-        channel    : c.break_channel || '',
-        breakNo    : c.break_num ?? '',
-        desc       : c.card_description || ''
-      }));
-    } else {
-      // fallback: show N placeholder rows per submission
-      rows = subs.flatMap(s => {
-        const count = Number(s?.cards) || 0;
-        const sid = s?.submission_id || s?.submission_code || '';
-        return Array.from({ length: count }, (_, i) => ({
-          submission: sid, date: '—', channel: '—', breakNo: i + 1, desc: '—'
-        }));
-      });
-    }
-
-    tbody.innerHTML = rows.map(r => `
-      <tr>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(r.date)}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel)}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo ?? ''))}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc)}</td>
-      </tr>
-    `).join('');
-  }
-
-  // Call this to populate header & lists (keep your original implementation)
-  function populate(bundle){
-    const subs = Array.isArray(bundle?.submissions) ? bundle.submissions : [];
-    const groups = Array.isArray(bundle?.groups) ? bundle.groups
-                  : (Array.isArray(bundle?.group_codes) ? bundle.group_codes : []);
-
-    document.querySelector('.js-cust-email')!.textContent = bundle?.customer_email || '';
-    document.querySelector('.js-sub-count')!.textContent = String(subs.length);
-    const computedCards = subs.reduce((a, s) => a + (Number(s?.cards) || 0), 0);
-    document.querySelector('.js-card-count')!.textContent = String(bundle?.cards ?? computedCards);
-
-    const pill = (t) => {
-      const s = document.createElement('span');
-      s.textContent = t;
-      s.style.cssText = 'display:inline-block;padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;font-size:12px;background:#f8fafc;';
-      return s;
-    };
-    const setList = (el, arr) => { el.innerHTML = ''; (arr||[]).forEach(v => el.appendChild(pill(v))); };
-
-    const subIds = subs.map(s => s?.submission_id).filter(Boolean);
-    const grpCodes = Array.from(new Set((groups || []).filter(Boolean)));
-    const elSubList = document.querySelector('.js-sub-list');
-    const elGrpList = document.querySelector('.js-group-list');
-    if (elSubList) setList(elSubList, subIds);
-    if (elGrpList) setList(elGrpList, grpCodes);
-
-    const oldest = (bundle && bundle.returned_oldest) || subs.map(s => s?.returned_at).filter(Boolean).sort()[0] || null;
-    const newest = (bundle && bundle.returned_newest) || subs.map(s => s?.returned_at).filter(Boolean).sort().slice(-1)[0] || null;
-    const rangeEl = document.querySelector('.js-range');
-    if (rangeEl) rangeEl.textContent = (oldest || newest) ? (`Oldest: ${oldest || '—'} • Newest: ${newest || '—'}`) : '—';
-
-    const elSubtotal = document.querySelector('.js-subtotal'); if (elSubtotal) elSubtotal.textContent = '$—';
-    const elShip     = document.querySelector('.js-ship');     if (elShip)     elShip.textContent     = '$5.00';
-    const elTotal    = document.querySelector('.js-total');    if (elTotal)    elTotal.textContent    = '$—';
-  }
-
-  // >>> REPLACEMENT: async version that fetches real card rows
-  window.psaOpenDraftPreview = async function(bundle){
-    const b = bundle || {};
-    populate(b);
-
-    // Clear table with a quick fallback (based on counts) while we fetch real rows
-    renderCardsTable({ submissions: b.submissions });
-
-    try {
-      const subIds = (Array.isArray(b.submissions) ? b.submissions : [])
-        .map(s => s?.submission_id)
-        .filter(Boolean);
-
-      if (subIds.length) {
-        const url = '/api/admin/billing/cards-for?subs=' + encodeURIComponent(subIds.join(','));
-        const r = await fetch(url, { credentials: 'same-origin' });
-        if (r.ok) {
-          const j = await r.json().catch(() => ({}));
-          b.cards_detail = Array.isArray(j.items) ? j.items : [];
-        }
-      }
-    } catch (e) {
-      console.warn('[draft] cards-for fetch failed', e);
-    }
-
-    // Render again with the real details (if any)
-    renderCardsTable(b);
-    openOverlay();
-  };
-
-  // standard close hooks
-  $('btnDraftClose')?.addEventListener('click', () => window.psaCloseDraftPreview());
-  $('draftBackdrop')?.addEventListener('click', () => window.psaCloseDraftPreview());
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.psaCloseDraftPreview(); });
+  // close handlers
+  $("btnDraftClose") && $("btnDraftClose").addEventListener("click", closeOverlay);
+  $("draftBackdrop") && $("draftBackdrop").addEventListener("click", closeOverlay);
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
 })();
 </script>
 </body>
