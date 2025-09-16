@@ -108,6 +108,7 @@
             <span class="js-card-count">0</span> cards
           </div>
         </div>
+        <button type="button" id="btnDraftSave" class="btn" style="min-width:120px;" disabled>Save</button>
         <button type="button" id="btnDraftBuild" class="btn primary" style="min-width:140px;">Open Builder</button>
         <button type="button" id="btnDraftClose" class="btn" style="min-width:72px;">Close</button>
       </div>
@@ -159,9 +160,10 @@
         <!-- Cards (table is the only scroll area) -->
         <div style="margin-top:12px;">
           <div style="font-weight:600;margin-bottom:6px;">Cards</div>
-          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;overflow:auto;
-                                         /* fit under header within 92vh panel */
-                                         max-height:calc(92vh - 220px);">
+<div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;
+                               /* only the table scrolls, always visible */
+                               height:calc(92vh - 220px);
+                               overflow:auto;">
             <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
               <colgroup>
                 <col style="width:140px;">  <!-- Submission -->
@@ -199,6 +201,7 @@
   // --- Settings (dynamic with safe fallbacks) ---
   const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
   let SETTINGS = { ...DEFAULT_SETTINGS };
+  const SAVE_UPCHARGES_ENDPOINT = '/api/admin/billing/preview/save';
 
   async function loadSettings(){
     try {
@@ -250,15 +253,17 @@
     return d.toISOString().slice(0,10);
   }
 
-  function normalizeCardRow(r) {
-    return {
-      submission : r.submission_id || r.submission_code || r.submission || "",
-      date       : r.break_date || r.break_at || r.date_of_break || null,
-      channel    : r.break_channel || r.channel || r.break || "",
-      breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || "",
-      desc       : r.card_description || r.description || r.card || r.title || ""
-    };
-  }
+function normalizeCardRow(r) {
+  return {
+    id         : r.id || r.card_id || r.uuid || null, // <-- needs to come from your API
+    submission : r.submission_id || r.submission_code || r.submission || "",
+    date       : r.break_date || r.break_at || r.date_of_break || null,
+    channel    : r.break_channel || r.channel || r.break || "",
+    breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || "",
+    desc       : r.card_description || r.description || r.card || r.title || ""
+  };
+}
+
 
   async function fetchCardsForSubs(subIds){
     if (!subIds.length) return [];
@@ -300,6 +305,60 @@
     updateTotals(gradeSum, upchargeSum);
   }
 
+  function collectUpcharges() {
+  const items = [];
+  document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+    const cardId = inp.getAttribute('data-id');
+    const dollars = Number(inp.value || 0);
+    if (!cardId) return;               // skip rows without id
+    if (!Number.isFinite(dollars)) return;
+    items.push({
+      card_id: cardId,
+      upcharge_cents: Math.round(dollars * 100)
+    });
+  });
+  return items;
+}
+
+async function saveUpchargesToDB(silent = false) {
+  const email = (lastBundle?.customer_email || '').trim();
+  const items = collectUpcharges();
+
+  // Quiet short-circuits while typing
+  if (!email) { if (!silent) alert('Missing customer email.'); return; }
+  if (!items.length) { if (!silent) alert('Nothing to save.'); return; }
+
+  try {
+    const res = await fetch(SAVE_UPCHARGES_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ customer_email: email, items })
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(()=> '');
+      console.error('Save failed', t);
+      if (!silent) alert('Failed to save upcharges.');
+      return;
+    }
+
+    document.getElementById('btnDraftSave')?.setAttribute('disabled','');
+    if (!silent) alert('Upcharges saved.');
+  } catch (err) {
+    console.error(err);
+    if (!silent) alert('Failed to save upcharges.');
+  }
+}
+
+  function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+// ~0.6s after the last keystroke, save quietly
+const autoSaveDebounced = debounce(() => saveUpchargesToDB(true), 600);
+
   async function fillCardsTable(subIds, subsFallback){
     const tb = document.getElementById("cardsTbody");
     if (!tb) return;
@@ -323,24 +382,34 @@
       return;
     }
 
-    tb.innerHTML = rows.map((r, idx) => `
-      <tr data-row="${idx}">
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || "—")}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || "—"))}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || "—")}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;" class="js-grade">${money(SETTINGS.grade_fee)}</td>
-        <td style="padding:6px 12px;border-top:1px solid #f1f5f9;text-align:right;">
-          <input class="js-up" type="number" step="0.01" min="0" value="0.00" style="width:100px;text-align:right;" />
-        </td>
-      </tr>
-    `).join("");
+tb.innerHTML = rows.map((r, idx) => `
+  <tr data-row="${idx}" data-id="${esc(r.id || '')}">
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || "—")}</td>
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || "—"))}</td>
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || "—")}</td>
+    <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;" class="js-grade">${money(SETTINGS.grade_fee)}</td>
+    <td style="padding:6px 12px;border-top:1px solid #f1f5f9;text-align:right;">
+      <input class="js-up" data-id="${esc(r.id || '')}" type="number" step="0.01" min="0" value="0.00" style="width:100px;text-align:right;" />
+    </td>
+  </tr>
+`).join("");
 
     // wire upcharge inputs to totals
-    tb.querySelectorAll(".js-up").forEach(inp => {
-      inp.addEventListener("input", recalcFromDOM);
-    });
+function setSaveEnabled(on){
+  const b = document.getElementById('btnDraftSave');
+  if (b) b.disabled = !on;
+}
+
+tb.querySelectorAll(".js-up").forEach(inp => {
+  inp.addEventListener("input", () => {
+    recalcFromDOM();
+    setSaveEnabled(true);      // visually shows there are pending changes
+    autoSaveDebounced();       // auto-save quietly after a brief pause
+  });
+});
+
 
     recalcFromDOM();
   }
@@ -380,6 +449,7 @@
 
     const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
     fillCardsTable(subIds, subs);
+    document.getElementById('btnDraftSave')?.setAttribute('disabled','');
 
     const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
     const shipEl = document.querySelector(".js-ship");     if (shipEl) shipEl.textContent = money(SETTINGS.shipping);
@@ -401,6 +471,7 @@
     window.location.href = '/admin/invoice-builder.html';
   }
 
+  $("btnDraftSave") && $("btnDraftSave").addEventListener("click", saveUpchargesToDB);
   $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
   $("btnDraftClose") && $("btnDraftClose").addEventListener("click", closeOverlay);
   $("draftBackdrop") && $("draftBackdrop").addEventListener("click", closeOverlay);
