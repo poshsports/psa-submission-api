@@ -64,7 +64,6 @@ function ensureSelectionColumn() {
   const tbody = $('subsTbody'); if (!tbody) return;
   const header = document.getElementById('__selAll');
 
-  // guard so we don't rewire on every render
   if (!tbody.__selWired) {
     tbody.addEventListener('change', (e) => {
       if (!e.target.closest?.('input.__selrow')) return;
@@ -99,100 +98,107 @@ function ensureSelectionColumn() {
     const btn = $('btnBatchSend'); if (btn) btn.disabled = checkedCount === 0;
   }
 
-  // initial pass
-  // (slight delay to allow DOM to finish painting when table re-renders)
-  setTimeout(() => {
-    const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
-    const anyChecked = rows.some(tr => tr.querySelector('input.__selrow:checked'));
-    const btn = $('btnBatchSend'); if (btn) btn.disabled = !anyChecked;
-  }, 0);
+  setTimeout(updateSelAllUI, 0);
 }
 
-// ---------- UI wiring ----------
-function wireCoreUI() {
-  // search
-  const q = $('q');
-  if (q) q.addEventListener('input', debounce(() => tbl.applyFilters(), 150));
+// ---------- Robust click delegation (buttons & row) ----------
+function installGlobalDelegates() {
+  if (document.__psaBillingClicksWired) return;
+  document.__psaBillingClicksWired = true;
 
-  // pagination
-  $('prev-page')?.addEventListener('click', () => { tbl.prevPage(); tbl.renderTable(); ensureSelectionColumn(); });
-  $('next-page')?.addEventListener('click', () => { tbl.nextPage(); tbl.renderTable(); ensureSelectionColumn(); });
+  document.addEventListener('click', async (e) => {
+    const tbody = $('subsTbody');
+    if (!tbody) return;
+    const insideTable = e.target.closest('#subsTbody, #subsTbody *');
+    if (!insideTable) return;
 
-  // after each render, re-sync selection + (re)attach table event listeners
-  window.addEventListener('psa:table-rendered', () => {
-    ensureSelectionColumn();
-    delegateTableClicks();
-  });
-}
+    // Prefer explicit "Create Draft" button
+    const draftBtn =
+      e.target.closest('[data-action="draft"]') ||
+      e.target.closest('.js-open-draft'); // legacy
 
-// Delegate all clicks inside the table body once
-function delegateTableClicks() {
-  const tbody = $('subsTbody'); if (!tbody) return;
-  if (tbody.__clickWired) return;
+    if (draftBtn) {
+      // legacy button may carry a data-bundle with JSON
+      const bundleJson = draftBtn.getAttribute('data-bundle');
+      const explicitEmail = (draftBtn.getAttribute('data-email') || '').trim();
 
-  tbody.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-action="draft"]');
-    const tr = e.target.closest('tr[data-id]');
+      if (bundleJson) {
+        try {
+          // the attribute was HTML-escaped in markup; browser gives raw string back
+          const bundle = JSON.parse(bundleJson);
+          window.psaOpenDraftPreview?.(bundle);
+          return;
+        } catch {
+          // fallback to email fetch if JSON parse fails
+        }
+      }
 
-    // Prefer explicit button click
-    if (btn) {
-      const explicitEmail = (btn.getAttribute('data-email') || '').trim();
-      // fallback to the row id
+      const tr = draftBtn.closest('tr[data-id]');
       const email = explicitEmail || extractEmailFromRow(tr);
       if (!email) return;
-      btn.disabled = true;
-      try { await openPreviewForEmail(email); } finally { btn.disabled = false; }
+      draftBtn.disabled = true;
+      try { const item = await fetchDraftBundleByEmail(email); if (item) window.psaOpenDraftPreview?.(item); }
+      finally { draftBtn.disabled = false; }
       return;
     }
 
-    // Row click (ignore clicks on controls/links)
+    // Row click (ignore controls)
+    const tr = e.target.closest('tr[data-id]');
     if (tr) {
       const isInteractive = e.target.closest('button, a, input, select, textarea, label');
       if (isInteractive) return;
       const email = extractEmailFromRow(tr);
       if (!email) return;
-      await openPreviewForEmail(email);
+      const item = await fetchDraftBundleByEmail(email);
+      if (item) window.psaOpenDraftPreview?.(item);
     }
   });
-
-  tbody.__clickWired = true;
 }
 
 function extractEmailFromRow(tr) {
   if (!tr) return '';
-  // rows use id like "cust:someone@example.com"
   const id = String(tr.dataset.id || '');
   if (id.startsWith('cust:')) return id.slice(5);
-  // last resort: look for the Customer cell text
-  const emailCell = tr.querySelector('td[data-col="customer"]') || tr.cells?.[1];
-  return (emailCell?.textContent || '').trim();
+
+  // Fallbacks: try to find a "customer" cell or the second cell
+  const byDataCol = tr.querySelector('td[data-col="customer"]');
+  if (byDataCol) return (byDataCol.textContent || '').trim();
+
+  const cells = tr.querySelectorAll('td');
+  if (cells.length) return (cells[1]?.textContent || cells[0]?.textContent || '').trim();
+
+  return '';
 }
 
-async function openPreviewForEmail(email) {
-  const item = await fetchDraftBundleByEmail(email);
-  if (item) {
-    // global overlay helper from billing.html
-    window.psaOpenDraftPreview?.(item);
-  } else {
-    alert('Nothing to bill for this customer yet.');
-  }
+// ---------- Core UI wiring ----------
+function wireCoreUI() {
+  const q = $('q');
+  if (q) q.addEventListener('input', debounce(() => tbl.applyFilters(), 150));
+
+  $('prev-page')?.addEventListener('click', () => { tbl.prevPage(); tbl.renderTable(); ensureSelectionColumn(); });
+  $('next-page')?.addEventListener('click', () => { tbl.nextPage(); tbl.renderTable(); ensureSelectionColumn(); });
+
+  window.addEventListener('psa:table-rendered', () => {
+    ensureSelectionColumn();
+    // global delegate is already installed, no need to rewire
+  });
+
+  installGlobalDelegates();
 }
 
 // ---------- Entry ----------
 export async function showBillingView() {
-  // render header
+  // Header + initial render
   tbl.renderHead(COLUMNS.map(c => c.key), []);
 
-  // load data
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
 
-  // feed table
   tbl.setRows(normalized);
   tbl.applyFilters();
   tbl.renderTable();
+  ensureSelectionColumn();
 
-  // wire UI
   wireCoreUI();
 }
