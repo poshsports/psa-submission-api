@@ -13,13 +13,33 @@ const countPill = (count, title) =>
   `<span class="pill" title="${esc(title || '')}">${esc(String(count))}</span>`;
 const chip = (text) => `<span class="pill" title="${esc(text)}">${esc(text)}</span>`;
 
+/** Build the "Create Draft" button the table-click handler listens for */
+function actionsButton(row) {
+  const email = (row.customer_email || row.customer || '').trim().toLowerCase();
+  const ids = Array.isArray(row.submissions)
+    ? row.submissions.map(s => s?.submission_id).filter(Boolean)
+    : [];
+  // handler will decode this if needed; keep email plain
+  const subsCsv = ids.join(',');
+  const subsAttr = encodeURIComponent(subsCsv);
+
+  return `
+    <button type="button"
+            class="btn small"
+            data-action="draft"
+            data-email="${esc(email)}"
+            data-subs="${subsAttr}">
+      Create Draft
+    </button>
+  `;
+}
+
 /**
  * Columns for the Billing table
  * Keep columns that don't map to a real row property as non-sortable.
- * Sorting is handled by billing.table.js which expects actual keys on the row.
  */
 export const COLUMNS = [
-  // Customer (use email, single-line with tooltip)
+  // Customer - show email (not truncated unless very long) with full tooltip
   {
     key: 'customer',
     label: 'Customer',
@@ -32,7 +52,7 @@ export const COLUMNS = [
     },
   },
 
-  // Submissions: single chip if 1; otherwise count with hover list
+  // Submissions: 1 -> chip with id; many -> count pill with hover listing
   {
     key: 'submissions',
     label: 'Submissions',
@@ -47,7 +67,7 @@ export const COLUMNS = [
     },
   },
 
-  // Groups: single chip if 1; otherwise count with hover list
+  // Groups: 1 -> chip; many -> count pill with hover listing
   {
     key: 'groups',
     label: 'Groups',
@@ -60,11 +80,11 @@ export const COLUMNS = [
     },
   },
 
-  // Cards: total cards across all submissions (always single-line)
+  // Cards: total across submissions
   {
     key: 'cards',
     label: 'Cards',
-    sortable: true, // numeric sort is supported in billing.table.js
+    sortable: true,
     format: (_val, r) => {
       const total =
         Number(r.cards) ||
@@ -75,11 +95,11 @@ export const COLUMNS = [
     },
   },
 
-  // Returned: newest 'received_from_psa' timestamp
+  // Returned: newest 'received_from_psa'
   {
     key: 'returned',
     label: 'Returned',
-    sortable: true, // billing.table.js has special handling for 'returned'
+    sortable: true,
     format: (_val, r) => fmtDateTime(r.returned_newest || r.returned),
   },
 
@@ -87,11 +107,11 @@ export const COLUMNS = [
   {
     key: 'age_days',
     label: 'Age (days)',
-    sortable: true, // numeric
+    sortable: true,
     format: (_val, r) => (r.age_days == null ? '—' : String(r.age_days)),
   },
 
-  // Est. Total: placeholder (no inline preview button here)
+  // Est. Total: placeholder for now (no preview button here)
   {
     key: 'est_total',
     label: 'Est. Total',
@@ -99,26 +119,11 @@ export const COLUMNS = [
     format: () => '—',
   },
 
-  // Actions: only "Create Draft"
+  // Actions: single "Create Draft" button
   {
     key: 'actions',
     label: 'Actions',
     sortable: false,
-    format: (_val, r) => {
-      // Keep it simple for now; wiring to open the overlay happens elsewhere
-      // (e.g., click handler in billing.app.js using `.js-open-draft`).
-      const safeBundle = esc(
-        JSON.stringify({
-          customer_email: r.customer_email,
-          customer_name: r.customer_name,
-          submissions: r.submissions,
-          groups: r.groups,
-          cards: r.cards,
-          returned_newest: r.returned_newest,
-          returned_oldest: r.returned_oldest,
-        })
-      );
-      return `<button type="button" class="btn small js-open-draft" data-bundle="${safeBundle}">Create Draft</button>`;
-    },
+    format: (_val, r) => actionsButton(r),
   },
 ];
