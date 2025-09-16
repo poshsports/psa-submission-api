@@ -3,32 +3,50 @@ import { $, debounce } from './util.js';
 import * as tbl from './billing.table.js';
 import { COLUMNS } from './billing.columns.js';
 
-// minimal API helper (safe no-op if endpoint isn't there yet)
-async function fetchToBill(){
+// ---------- API ----------
+async function fetchToBill() {
   try {
     const r = await fetch('/api/admin/billing/to-bill', { credentials: 'same-origin' });
     if (!r.ok) return [];
     const j = await r.json().catch(() => ([]));
     return Array.isArray(j?.items) ? j.items : (Array.isArray(j) ? j : []);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
-function normalizeBundle(b){
+async function fetchDraftBundleByEmail(email) {
+  const url = `/api/admin/billing/to-bill?q=${encodeURIComponent(email)}`;
+  try {
+    const j = await fetch(url, { credentials: 'same-origin' }).then(r => r.json());
+    return j?.items?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- Normalization for table rows ----------
+function normalizeBundle(b) {
   const subs = Array.isArray(b.submissions) ? b.submissions : [];
   const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
-  const cards = subs.reduce((n, s) => n + (Number(s.cards)||0), 0);
+  const cards = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
+
   const returnedNewest = subs.reduce((acc, s) => {
-    const t = Date.parse(s.returned_at || s.returned || ''); if (Number.isNaN(t)) return acc;
+    const t = Date.parse(s.returned_at || s.returned || '');
+    if (Number.isNaN(t)) return acc;
     return (acc == null || t > acc) ? t : acc;
   }, null);
+
   const returnedOldest = subs.reduce((acc, s) => {
-    const t = Date.parse(s.returned_at || s.returned || ''); if (Number.isNaN(t)) return acc;
+    const t = Date.parse(s.returned_at || s.returned || '');
+    if (Number.isNaN(t)) return acc;
     return (acc == null || t < acc) ? t : acc;
   }, null);
-  const toIso = ms => (ms==null ? null : new Date(ms).toISOString());
+
+  const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
 
   return {
-    id: 'cust:' + String(b.customer_email||'').toLowerCase(),
+    id: 'cust:' + String(b.customer_email || '').toLowerCase(),
     customer_name: b.customer_name || '',
     customer_email: b.customer_email || '',
     submissions: subs,
@@ -41,12 +59,34 @@ function normalizeBundle(b){
   };
 }
 
-function ensureSelectionColumn(){
+// ---------- Selection (header checkbox + enabling batch button) ----------
+function ensureSelectionColumn() {
   const tbody = $('subsTbody'); if (!tbody) return;
   const header = document.getElementById('__selAll');
-  const getVisibleRows = () => Array.from(tbody.querySelectorAll('tr[data-id]'));
-  const updateSelAllUI = () => {
-    const rows = getVisibleRows();
+
+  // guard so we don't rewire on every render
+  if (!tbody.__selWired) {
+    tbody.addEventListener('change', (e) => {
+      if (!e.target.closest?.('input.__selrow')) return;
+      updateSelAllUI();
+    });
+    tbody.__selWired = true;
+  }
+
+  if (header && !header.__wired) {
+    header.addEventListener('change', () => {
+      const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+      rows.forEach(tr => {
+        const cb = tr.querySelector('input.__selrow');
+        if (cb) cb.checked = header.checked;
+      });
+      updateSelAllUI();
+    });
+    header.__wired = true;
+  }
+
+  function updateSelAllUI() {
+    const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
     const total = rows.length;
     const checkedCount = rows.reduce((n, tr) => {
       const cb = tr.querySelector('input.__selrow');
@@ -57,137 +97,102 @@ function ensureSelectionColumn(){
       header.checked = total > 0 && checkedCount === total;
     }
     const btn = $('btnBatchSend'); if (btn) btn.disabled = checkedCount === 0;
-  };
-
-  // wire per-row checkboxes
-  tbody.addEventListener('change', (e) => {
-    const cb = e.target.closest?.('input.__selrow');
-    if (!cb) return;
-    updateSelAllUI();
-  });
-
-  // wire header master checkbox
-  if (header && !header.__wired) {
-    header.addEventListener('change', () => {
-      const rows = getVisibleRows();
-      rows.forEach(tr => {
-        const cb = tr.querySelector('input.__selrow');
-        if (cb) cb.checked = header.checked;
-      });
-      updateSelAllUI();
-    });
-    header.__wired = true;
   }
 
-  // update initial
-  updateSelAllUI();
+  // initial pass
+  // (slight delay to allow DOM to finish painting when table re-renders)
+  setTimeout(() => {
+    const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+    const anyChecked = rows.some(tr => tr.querySelector('input.__selrow:checked'));
+    const btn = $('btnBatchSend'); if (btn) btn.disabled = !anyChecked;
+  }, 0);
 }
 
-function wireCoreUI(){
+// ---------- UI wiring ----------
+function wireCoreUI() {
   // search
-  const deb = debounce(() => tbl.applyFilters(), 150);
-  const q = $('q'); if (q) q.addEventListener('input', deb);
+  const q = $('q');
+  if (q) q.addEventListener('input', debounce(() => tbl.applyFilters(), 150));
 
   // pagination
   $('prev-page')?.addEventListener('click', () => { tbl.prevPage(); tbl.renderTable(); ensureSelectionColumn(); });
   $('next-page')?.addEventListener('click', () => { tbl.nextPage(); tbl.renderTable(); ensureSelectionColumn(); });
 
-  // table rendered hook → re-sync selection UI + wire action buttons
+  // after each render, re-sync selection + (re)attach table event listeners
   window.addEventListener('psa:table-rendered', () => {
     ensureSelectionColumn();
-    wireActionButtons();
+    delegateTableClicks();
   });
 }
 
-function wireActionButtons(){
+// Delegate all clicks inside the table body once
+function delegateTableClicks() {
   const tbody = $('subsTbody'); if (!tbody) return;
+  if (tbody.__clickWired) return;
 
-  tbody.querySelectorAll('button[data-act]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const act = btn.getAttribute('data-act');
-      const cid = decodeURIComponent(btn.getAttribute('data-cid') || '');
-      const subsCsv = decodeURIComponent(btn.getAttribute('data-subs') || '');
-      const submission_ids = subsCsv ? subsCsv.split(',').filter(Boolean) : [];
-      if (act === 'preview') return doPreview(submission_ids);
-      if (act === 'create')  return doCreateDraft(submission_ids);
-      if (act === 'send')    return doSend(btn);
-      if (act === 'snooze')  return doSnooze(submission_ids);
-    }, { once: true });
+  tbody.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action="draft"]');
+    const tr = e.target.closest('tr[data-id]');
+
+    // Prefer explicit button click
+    if (btn) {
+      const explicitEmail = (btn.getAttribute('data-email') || '').trim();
+      // fallback to the row id
+      const email = explicitEmail || extractEmailFromRow(tr);
+      if (!email) return;
+      btn.disabled = true;
+      try { await openPreviewForEmail(email); } finally { btn.disabled = false; }
+      return;
+    }
+
+    // Row click (ignore clicks on controls/links)
+    if (tr) {
+      const isInteractive = e.target.closest('button, a, input, select, textarea, label');
+      if (isInteractive) return;
+      const email = extractEmailFromRow(tr);
+      if (!email) return;
+      await openPreviewForEmail(email);
+    }
   });
+
+  tbody.__clickWired = true;
 }
 
-async function doPreview(submission_ids){
-  // Placeholder: call preview endpoint (to be implemented)
-  alert('Preview not wired yet. ' + submission_ids.join(', '));
+function extractEmailFromRow(tr) {
+  if (!tr) return '';
+  // rows use id like "cust:someone@example.com"
+  const id = String(tr.dataset.id || '');
+  if (id.startsWith('cust:')) return id.slice(5);
+  // last resort: look for the Customer cell text
+  const emailCell = tr.querySelector('td[data-col="customer"]') || tr.cells?.[1];
+  return (emailCell?.textContent || '').trim();
 }
 
-async function doCreateDraft(submission_ids){
-  alert('Create Draft not wired yet. ' + submission_ids.join(', '));
+async function openPreviewForEmail(email) {
+  const item = await fetchDraftBundleByEmail(email);
+  if (item) {
+    // global overlay helper from billing.html
+    window.psaOpenDraftPreview?.(item);
+  } else {
+    alert('Nothing to bill for this customer yet.');
+  }
 }
 
-async function doSend(btn){
-  alert('Send not wired yet.');
-}
-
-async function doSnooze(submission_ids){
-  alert('Snooze not wired yet.');
-}
-
-export async function showBillingView(){
-  // Render header
+// ---------- Entry ----------
+export async function showBillingView() {
+  // render header
   tbl.renderHead(COLUMNS.map(c => c.key), []);
 
-  // initial data fetch
+  // load data
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
 
+  // feed table
   tbl.setRows(normalized);
   tbl.applyFilters();
   tbl.renderTable();
 
-  // Wire "Create Draft" buttons in the Billing table
-(function wireBillingDraftClicks(){
-  let wired = false;
-  window.addEventListener('psa:table-rendered', () => {
-    if (wired) return;
-    const tbody = document.getElementById('subsTbody');
-    if (!tbody) return;
-
-    tbody.addEventListener('click', async (e) => {
-      const btn = e.target.closest('[data-action="draft"]');
-      if (!btn) return;
-
-      // Prefer data-email; otherwise try to read from the row id
-      const tr = btn.closest('tr');
-      let email = btn.getAttribute('data-email') || '';
-      if (!email && tr?.dataset?.id) {
-        const id = String(tr.dataset.id || '');
-        email = id.startsWith('cust:') ? id.slice(5) : id;
-      }
-      if (!email) return;
-
-      btn.disabled = true;
-      try {
-        const url = `/api/admin/billing/to-bill?q=${encodeURIComponent(email)}`;
-        const j = await fetch(url, { credentials: 'same-origin' }).then(r => r.json());
-        const item = j.items?.[0];
-        if (item) {
-          window.psaOpenDraftPreview(item);
-        } else {
-          alert('Nothing to bill for this customer yet.');
-        }
-      } catch (err) {
-        console.error(err);
-        alert('Failed to load draft preview.');
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    wired = true;
-  });
-})();
-
+  // wire UI
   wireCoreUI();
 }
