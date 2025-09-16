@@ -90,7 +90,7 @@
     });
   </script>
 
-  <!-- ===== Draft Builder Overlay (with Builder button) ===== -->
+  <!-- ===== Draft Builder Overlay (compact header, single scroller) ===== -->
   <div id="draftOverlay" class="hide" style="position:fixed;inset:0;z-index:1000;">
     <div id="draftBackdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.35);"></div>
 
@@ -108,26 +108,35 @@
             <span class="js-card-count">0</span> cards
           </div>
         </div>
-        <!-- Open Builder -->
         <button type="button" id="btnDraftBuild" class="btn primary" style="min-width:140px;">Open Builder</button>
         <button type="button" id="btnDraftClose" class="btn" style="min-width:72px;">Close</button>
       </div>
 
       <!-- body -->
-      <div id="draftBody" style="padding:12px 16px;overflow:auto;">
-        <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;">
+      <!-- NOTE: no scrolling here; only the table below will scroll -->
+      <div id="draftBody" style="padding:12px 16px;overflow:visible;">
+        <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start;">
+          <!-- left: compact info boxes -->
           <div>
-            <div style="font-weight:600;margin-bottom:6px;">Submissions</div>
-            <div class="muted" style="margin-bottom:10px;">(read-only preview)</div>
-            <div class="js-sub-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <!-- Submissions box -->
+              <div style="border:1px solid #eee;border-radius:12px;padding:10px;">
+                <div style="font-weight:600;margin-bottom:6px;">Submissions</div>
+                <div class="js-sub-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              </div>
 
-            <div style="font-weight:600;margin:16px 0 6px;">Groups</div>
-            <div class="js-group-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              <!-- Groups box -->
+              <div style="border:1px solid #eee;border-radius:12px;padding:10px;">
+                <div style="font-weight:600;margin-bottom:6px;">Groups</div>
+                <div class="js-group-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              </div>
+            </div>
 
-            <div style="font-weight:600;margin:16px 0 6px;">Received range</div>
-            <div class="js-range muted"></div>
+            <!-- Received range (small, under the boxes) -->
+            <div class="js-range muted" style="margin-top:8px;font-size:12px;"></div>
           </div>
 
+          <!-- right: summary -->
           <div>
             <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
               <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
@@ -147,12 +156,12 @@
           </div>
         </div>
 
-        <div style="margin-top:16px;">
+        <!-- Cards (table is the only scroll area) -->
+        <div style="margin-top:12px;">
           <div style="font-weight:600;margin-bottom:6px;">Cards</div>
-          <div class="muted" style="font-size:12px;margin-bottom:8px;">
-            Grouped by submission. Per-card details will be editable in the next step.
-          </div>
-          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;overflow:auto;max-height:calc(92vh - 260px);">
+          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;overflow:auto;
+                                         /* fit under header within 92vh panel */
+                                         max-height:calc(92vh - 220px);">
             <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
               <colgroup>
                 <col style="width:140px;">  <!-- Submission -->
@@ -181,6 +190,7 @@
       </div>
     </div>
   </div>
+
 
 <script type="module">
 (function () {
