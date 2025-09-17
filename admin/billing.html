@@ -278,6 +278,31 @@ function normalizeCardRow(r) {
     }
   }
 
+  // --- Prefill helpers (reads saved values back into the inputs) ---
+let draftInvoiceId = null; // reused across saves
+
+async function loadPrefillForSubs(submissionIds) {
+  if (!submissionIds?.length) return { invoice_id: null, items: [] };
+  const qs = encodeURIComponent(submissionIds.join(','));
+  const r = await fetch(`/api/admin/billing/preview/prefill?subs=${qs}`, { credentials: 'same-origin' });
+  if (!r.ok) return { invoice_id: null, items: [] };
+  return r.json();
+}
+
+function applyPrefillToUI(prefill) {
+  if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
+  const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
+  document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+    const id = String(inp.getAttribute('data-id') || '');
+    const it = map.get(id);
+    if (!it) return;
+    const dollars = (Number(it.upcharge_cents || 0) / 100).toFixed(2);
+    inp.value = dollars;
+  });
+  draftInvoiceId = prefill.invoice_id || null;
+  recalcFromDOM();
+}
+
   // --- Totals helpers ---
   function updateTotals(gradeSum, upchargeSum){
     const ship = SETTINGS.shipping;
@@ -333,17 +358,19 @@ async function saveUpchargesToDB(silent = false) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ customer_email: email, items })
+      body: JSON.stringify({ customer_email: email, items, invoice_id: draftInvoiceId || null })
     });
 
-    if (!res.ok) {
-      const t = await res.text().catch(()=> '');
-      console.error('Save failed', t);
-      if (!silent) alert('Failed to save upcharges.');
-      return;
-    }
+if (!res.ok) {
+    const t = await res.text().catch(()=> '');
+    console.error('Save failed', t);
+    if (!silent) alert('Failed to save upcharges.');
+    return;
+  }
 
-    document.getElementById('btnDraftSave')?.setAttribute('disabled','');
+   const j = await res.json().catch(()=> ({}));
+ if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
+ document.getElementById('btnDraftSave')?.setAttribute('disabled','');
     if (!silent) alert('Upcharges saved.');
   } catch (err) {
     console.error(err);
@@ -419,7 +446,7 @@ tb.querySelectorAll(".js-up").forEach(inp => {
 
   let lastBundle = null;
 
-  function populate(bundle) {
+  async function populate(bundle) {
     const subs = Array.isArray(bundle && bundle.submissions) ? bundle.submissions : [];
     const groups = Array.isArray(bundle && bundle.groups)
       ? bundle.groups
@@ -448,7 +475,13 @@ tb.querySelectorAll(".js-up").forEach(inp => {
     if (rangeEl) rangeEl.textContent = (oldest || newest) ? ("Oldest: " + (oldest || "—") + " • Newest: " + (newest || "—")) : "—";
 
     const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
-    fillCardsTable(subIds, subs);
+    await fillCardsTable(subIds, subs);
+    // Prefill any saved values for these submissions (if a draft exists)
+try {
+  const pre = await loadPrefillForSubs(subIds);
+  applyPrefillToUI(pre);
+} catch {}
+
     document.getElementById('btnDraftSave')?.setAttribute('disabled','');
 
     const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
@@ -460,7 +493,7 @@ tb.querySelectorAll(".js-up").forEach(inp => {
   window.psaOpenDraftPreview = async function (bundle) {
     lastBundle = bundle || {};
     await loadSettings();
-    populate(lastBundle);
+    await populate(lastBundle);
     openOverlay();
   };
 
