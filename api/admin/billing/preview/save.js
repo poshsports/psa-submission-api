@@ -55,19 +55,40 @@ export default async function handler(req, res) {
     const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
     if (!subCodes.length) return json(res, 400, { error: 'Cards missing submission codes' });
 
-    // Submissions -> group_code & shopify_customer_id (both required on invoice)
-    const { data: subs, error: subsErr } = await client
-      .from('psa_submissions')
-      .select('submission_id, group_code, shopify_customer_id, customer_email')
-      .in('submission_id', subCodes);
-    if (subsErr) return json(res, 500, { error: 'Failed to fetch submissions', details: subsErr.message });
-    if (!subs?.length) return json(res, 400, { error: 'Submissions not found for cards' });
+// Submissions -> shopify_customer_id (from psa_submissions)
+const { data: subs, error: subsErr } = await client
+  .from('psa_submissions')
+  .select('submission_id, shopify_customer_id, customer_email')
+  .in('submission_id', subCodes);
+if (subsErr) return json(res, 500, { error: 'Failed to fetch submissions', details: subsErr.message });
+if (!subs?.length) return json(res, 400, { error: 'Submissions not found for cards' });
 
-    const groupCodes = uniq(subs.map(s => s.group_code).filter(Boolean));
-    const shopIds    = uniq(subs.map(s => s.shopify_customer_id).filter(Boolean));
-    const group_code = groupCodes[0] || 'MULTI';
-    const shopify_customer_id = shopIds[0] || null;
-    if (!shopify_customer_id) return json(res, 400, { error: 'Missing shopify_customer_id on submissions' });
+const shopIds = uniq(subs.map(s => s.shopify_customer_id).filter(Boolean));
+const shopify_customer_id = shopIds[0] || null;
+if (!shopify_customer_id) return json(res, 400, { error: 'Missing shopify_customer_id on submissions' });
+
+// Derive group_code via group_submissions -> groups(code).
+// If multiple different groups are present, use 'MULTI'.
+let group_code = 'MULTI';
+const { data: gs, error: gsErr } = await client
+  .from('group_submissions')
+  .select('group_id, submission_id')
+  .in('submission_id', subCodes);
+if (gsErr) return json(res, 500, { error: 'Failed to fetch group_submissions', details: gsErr.message });
+
+if (gs?.length) {
+  const groupIds = uniq(gs.map(g => g.group_id).filter(Boolean));
+  if (groupIds.length) {
+    const { data: grps, error: gErr } = await client
+      .from('groups')
+      .select('id, code')
+      .in('id', groupIds);
+    if (gErr) return json(res, 500, { error: 'Failed to fetch groups', details: gErr.message });
+
+    const codes = uniq((grps || []).map(g => g.code).filter(Boolean));
+    if (codes.length === 1) group_code = codes[0];
+  }
+}
 
     // Resolve or create invoice (re-use open one if linked)
     let invoice_id = String(incomingInvoiceId || '').trim();
