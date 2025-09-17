@@ -143,7 +143,7 @@ if (gs?.length) {
       .delete()
       .eq('invoice_id', invoice_id)
       .in('submission_card_uuid', ids)
-      .in('kind', ['grading','upcharge']);
+      .in('kind', ['service','upcharge'])
     if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
 
     // Insert grading + upcharge
@@ -153,7 +153,7 @@ if (gs?.length) {
       invoice_id,
       submission_card_uuid: cid,
       submission_code: codeByCard.get(cid),
-      kind: 'grading',
+      kind: 'service',
       title: 'Grading Fee',
       qty: 1,
       unit_cents: DEFAULTS.grade_fee_cents,
