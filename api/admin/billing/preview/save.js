@@ -181,7 +181,7 @@ if (!invoice_id) {
       .delete()
       .eq('invoice_id', invoice_id)
       .in('submission_card_uuid', ids)
-      .in('kind', ['service','upcharge'])
+      .in('kind', ['service','upcharge']);
     if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
 
     // Insert grading + upcharge
