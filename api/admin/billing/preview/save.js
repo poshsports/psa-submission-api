@@ -90,53 +90,91 @@ if (gs?.length) {
   }
 }
 
-    // Resolve or create invoice (re-use open one if linked)
-    let invoice_id = String(incomingInvoiceId || '').trim();
-    if (!invoice_id) {
-      const { data: links, error: linkErr } = await client
-        .from('billing_invoice_submissions')
-        .select('invoice_id')
-        .in('submission_code', subCodes);
-      if (linkErr) return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
+// ===== Resolve or create invoice (reuse open per customer+group) =====
+let invoice_id = String(incomingInvoiceId || '').trim();
 
-      const invIds = uniq((links || []).map(l => l.invoice_id));
-      let existing = null;
-      if (invIds.length) {
-        const { data: invs, error: invErr } = await client
-          .from('billing_invoices')
-          .select('id, status, updated_at')
-          .in('id', invIds)
-          .in('status', ['pending','draft']);
-        if (invErr) return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
-        if (invs?.length) invs.sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)), existing = invs[0];
-      }
-      if (existing) {
-        invoice_id = existing.id;
-      } else {
-        const now = new Date().toISOString();
-        const { data: inserted, error: insErr } = await client
-          .from('billing_invoices')
-          .insert([{
-            group_code,
-            shopify_customer_id,
-            status: 'pending',
-            currency: 'USD',
-            shipping_cents: DEFAULTS.shipping_cents,
-            subtotal_cents: 0,
-            total_cents: 0,
-            created_at: now,
-            updated_at: now
-          }])
-          .select('id')
-          .single();
-        if (insErr) return json(res, 500, { error: 'Failed to create invoice', details: insErr.message });
-        invoice_id = inserted.id;
-      }
+if (!invoice_id) {
+  // A) Try to reuse via existing links (any of the submissions already linked to an open invoice)
+  const { data: links, error: linkErr } = await client
+    .from('billing_invoice_submissions')
+    .select('invoice_id')
+    .in('submission_code', subCodes);
+  if (linkErr) return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
+
+  let existing = null;
+  if (links?.length) {
+    const invIds = uniq(links.map(l => l.invoice_id));
+    const { data: invs, error: invErr } = await client
+      .from('billing_invoices')
+      .select('id, status, updated_at')
+      .in('id', invIds)
+      .in('status', ['pending','draft']);
+    if (invErr) return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
+    if (invs?.length) invs.sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)), existing = invs[0];
+  }
+
+  // B) Fallback: reuse by (shopify_customer_id, group_code) unique-open rule
+  if (!existing) {
+    const { data: invs2, error: inv2Err } = await client
+      .from('billing_invoices')
+      .select('id, updated_at')
+      .eq('shopify_customer_id', shopify_customer_id)
+      .eq('group_code', group_code)
+      .in('status', ['pending','draft'])
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (inv2Err) return json(res, 500, { error: 'Failed to read open invoice by customer/group', details: inv2Err.message });
+    if (invs2 && invs2.length) existing = invs2[0];
+  }
+
+  if (existing) {
+    invoice_id = existing.id;
+  } else {
+    // C) Create new (handle race with unique index by catching 23505)
+    const now = new Date().toISOString();
+    const { data: inserted, error: insErr } = await client
+      .from('billing_invoices')
+      .insert([{
+        group_code,
+        shopify_customer_id,
+        status: 'pending',
+        currency: 'USD',
+        shipping_cents: DEFAULTS.shipping_cents,
+        subtotal_cents: 0,
+        total_cents: 0,
+        created_at: now,
+        updated_at: now
+      }])
+      .select('id')
+      .single();
+
+    if (insErr && insErr.code === '23505') {
+      // Someone else created the open invoice first — reuse it
+      const { data: invs3, error: inv3Err } = await client
+        .from('billing_invoices')
+        .select('id')
+        .eq('shopify_customer_id', shopify_customer_id)
+        .eq('group_code', group_code)
+        .in('status', ['pending','draft'])
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      if (inv3Err || !invs3?.length) return json(res, 500, { error: 'Race on create but no invoice found' });
+      invoice_id = invs3[0].id;
+    } else if (insErr) {
+      return json(res, 500, { error: 'Failed to create invoice', details: insErr.message });
     } else {
-      const { data: inv, error: invErr } = await client.from('billing_invoices').select('id').eq('id', invoice_id).single();
-      if (invErr || !inv) return json(res, 404, { error: 'invoice_id not found' });
+      invoice_id = inserted.id;
     }
-
+  }
+} else {
+  const { data: inv, error: invErr } = await client
+    .from('billing_invoices')
+    .select('id')
+    .eq('id', invoice_id)
+    .single();
+  if (invErr || !inv) return json(res, 404, { error: 'invoice_id not found' });
+}
+    
     // Idempotent clear for these cards (requires submission_card_uuid column)
     const { error: delErr } = await client
       .from('billing_invoice_items')
