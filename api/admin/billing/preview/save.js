@@ -1,156 +1,196 @@
-// api/admin/billing/preview/save.js
-import express from 'express';
-import { Pool } from 'pg';
+// /api/admin/billing/preview/save.js  (ESM, Vercel serverless)
+import { sb } from '../../../_util/supabase.js';
+import { requireAdmin } from '../../../_util/adminAuth.js';
 
-const router = express.Router();
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const DEFAULTS = { grade_fee_cents: 2000, shipping_cents: 500 };
 
-// optional: centralize settings if you store them in DB
-async function getSettings(client) {
-  // Replace with your real settings store; hard-coded fallback:
-  return { grade_fee_cents: 2000, shipping_cents: 500 };
+function json(res, status, payload) {
+  res.status(status).setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
 }
+async function readBody(req) {
+  const chunks = [];
+  for await (const ch of req) chunks.push(Buffer.from(ch));
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return {}; }
+}
+const uniq = (arr) => Array.from(new Set(arr));
 
-router.post('/api/admin/billing/preview/save', async (req, res) => {
-  // TODO: your admin auth here
-  const { customer_email, items, invoice_id: incomingInvoiceId } = req.body || {};
-  if (!customer_email || !Array.isArray(items)) {
-    return res.status(400).json({ error: 'Bad payload' });
-  }
-
-  // Filter + coerce payload
-  const cardIds = [];
-  const upCents = [];
-  for (const it of items) {
-    if (!it || !it.card_id) continue;
-    const cents = Math.max(0, Math.round(Number(it.upcharge_cents || 0)));
-    cardIds.push(it.card_id);
-    upCents.push(cents);
-  }
-  if (!cardIds.length) return res.json({ saved: 0 });
-
-  const client = await pool.connect();
+export default async function handler(req, res) {
   try {
-    await client.query('begin');
+    if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return json(res, 405, { error:'Method not allowed' }); }
+    if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
 
-    const settings = await getSettings(client); // {grade_fee_cents, shipping_cents}
+    const { customer_email, items, invoice_id: incomingInvoiceId } = await readBody(req);
+    const email = String(customer_email || '').trim().toLowerCase();
+    const list = Array.isArray(items) ? items : [];
+    if (!email) return json(res, 400, { error: 'customer_email is required' });
+    if (!list.length) return json(res, 400, { error: 'No items to save' });
 
-    // 1) Ensure a draft invoice
-    let invoiceId = incomingInvoiceId || null;
-    if (!invoiceId) {
-      // Try existing draft (unique by customer via the partial index)
-      const got = await client.query(
-        `select id from billing_invoices
-         where customer_email = $1 and status = 'draft'
-         limit 1`,
-        [customer_email]
-      );
-      if (got.rowCount) {
-        invoiceId = got.rows[0].id;
-      } else {
-        const ins = await client.query(
-          `insert into billing_invoices (customer_email, status, currency, shipping_cents, subtotal_cents, total_cents)
-           values ($1, 'draft', 'USD', $2, 0, $2)
-           returning id`,
-          [customer_email, settings.shipping_cents]
-        );
-        invoiceId = ins.rows[0].id;
-      }
+    // Normalize -> map card_id => upcharge_cents
+    const upMap = new Map();
+    const cardIds = [];
+    for (const it of list) {
+      const id = String(it?.card_id || '').trim();
+      if (!id) continue;
+      const cents = Math.max(0, Math.round(Number(it?.upcharge_cents || 0)));
+      upMap.set(id, cents);
+      cardIds.push(id);
+    }
+    const ids = uniq(cardIds);
+    if (!ids.length) return json(res, 400, { error: 'No valid card ids' });
+
+    const client = sb();
+
+    // Cards -> submission codes
+    const { data: cards, error: cardsErr } = await client
+      .from('submission_cards')
+      .select('id, submission_id')
+      .in('id', ids);
+    if (cardsErr) return json(res, 500, { error: 'Failed to fetch cards', details: cardsErr.message });
+    if (!cards || cards.length !== ids.length) {
+      const got = new Set((cards || []).map(r => r.id));
+      return json(res, 400, { error: 'Some cards not found', missing: ids.filter(x => !got.has(x)) });
     }
 
-    // 2) Ensure there's a grading item per card
-    await client.query(
-      `
-      insert into billing_invoice_items
-        (invoice_id, submission_code, submission_card_id, kind, title, qty, unit_cents, amount_cents, meta)
-      select
-        $1 as invoice_id,
-        sc.submission_id,
-        sc.id,
-        'grading' as kind,
-        coalesce(nullif(sc.card_description,''), 'Grading Fee'),
-        1 as qty,
-        $2 as unit_cents,
-        $2 as amount_cents,
-        jsonb_build_object('break_number', sc.break_number, 'break_channel', sc.break_channel)
-      from submission_cards sc
-      where sc.id = any($3::uuid[])
-      on conflict (invoice_id, submission_card_id, kind)
-      do update set unit_cents = excluded.unit_cents,
-                    amount_cents = excluded.amount_cents
-      `,
-      [invoiceId, settings.grade_fee_cents, cardIds]
-    );
+    const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
+    if (!subCodes.length) return json(res, 400, { error: 'Cards missing submission codes' });
 
-    // 3) Upsert upcharge item per card
-    await client.query(
-      `
-      with up(card_id, upcharge_cents) as (
-        select * from unnest($2::uuid[], $3::int[])
-      )
-      insert into billing_invoice_items
-        (invoice_id, submission_code, submission_card_id, kind, title, qty, unit_cents, amount_cents, meta)
-      select
-        $1 as invoice_id,
-        sc.submission_id,
-        sc.id,
-        'upcharge' as kind,
-        coalesce(nullif(sc.card_description,''), 'Upcharge'),
-        1,
-        up.upcharge_cents,
-        up.upcharge_cents,
-        jsonb_build_object('source','preview')
-      from up
-      join submission_cards sc on sc.id = up.card_id
-      on conflict (invoice_id, submission_card_id, kind)
-      do update set unit_cents = excluded.unit_cents,
-                    amount_cents = excluded.amount_cents;
-      `,
-      [invoiceId, cardIds, upCents]
-    );
+    // Submissions -> group_code & shopify_customer_id (both required on invoice)
+    const { data: subs, error: subsErr } = await client
+      .from('psa_submissions')
+      .select('submission_id, group_code, shopify_customer_id, customer_email')
+      .in('submission_id', subCodes);
+    if (subsErr) return json(res, 500, { error: 'Failed to fetch submissions', details: subsErr.message });
+    if (!subs?.length) return json(res, 400, { error: 'Submissions not found for cards' });
 
-    // 4) Link submissions to invoice (safe if repeated)
-    await client.query(
-      `
-      insert into billing_invoice_submissions (invoice_id, submission_code)
-      select distinct $1, sc.submission_id
-      from submission_cards sc
-      where sc.id = any($2::uuid[])
-      on conflict do nothing;
-      `,
-      [invoiceId, cardIds]
-    );
+    const groupCodes = uniq(subs.map(s => s.group_code).filter(Boolean));
+    const shopIds    = uniq(subs.map(s => s.shopify_customer_id).filter(Boolean));
+    const group_code = groupCodes[0] || 'MULTI';
+    const shopify_customer_id = shopIds[0] || null;
+    if (!shopify_customer_id) return json(res, 400, { error: 'Missing shopify_customer_id on submissions' });
 
-    // 5) Recompute invoice totals
-    await client.query(
-      `
-      update billing_invoices i
-      set subtotal_cents = coalesce((
-            select sum(amount_cents)
-            from billing_invoice_items x
-            where x.invoice_id = i.id
-          ), 0),
-          shipping_cents = $2,
-          total_cents = coalesce((
-            select sum(amount_cents)
-            from billing_invoice_items x
-            where x.invoice_id = i.id
-          ), 0) + $2,
-          updated_at = now()
-      where i.id = $1;
-      `,
-      [invoiceId, settings.shipping_cents]
-    );
+    // Resolve or create invoice (re-use open one if linked)
+    let invoice_id = String(incomingInvoiceId || '').trim();
+    if (!invoice_id) {
+      const { data: links, error: linkErr } = await client
+        .from('billing_invoice_submissions')
+        .select('invoice_id')
+        .in('submission_code', subCodes);
+      if (linkErr) return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
 
-    await client.query('commit');
-    return res.json({ saved: cardIds.length, invoice_id: invoiceId });
+      const invIds = uniq((links || []).map(l => l.invoice_id));
+      let existing = null;
+      if (invIds.length) {
+        const { data: invs, error: invErr } = await client
+          .from('billing_invoices')
+          .select('id, status, updated_at')
+          .in('id', invIds)
+          .in('status', ['pending','draft']);
+        if (invErr) return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
+        if (invs?.length) invs.sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)), existing = invs[0];
+      }
+      if (existing) {
+        invoice_id = existing.id;
+      } else {
+        const now = new Date().toISOString();
+        const { data: inserted, error: insErr } = await client
+          .from('billing_invoices')
+          .insert([{
+            group_code,
+            shopify_customer_id,
+            status: 'pending',
+            currency: 'USD',
+            shipping_cents: DEFAULTS.shipping_cents,
+            subtotal_cents: 0,
+            total_cents: 0,
+            created_at: now,
+            updated_at: now
+          }])
+          .select('id')
+          .single();
+        if (insErr) return json(res, 500, { error: 'Failed to create invoice', details: insErr.message });
+        invoice_id = inserted.id;
+      }
+    } else {
+      const { data: inv, error: invErr } = await client.from('billing_invoices').select('id').eq('id', invoice_id).single();
+      if (invErr || !inv) return json(res, 404, { error: 'invoice_id not found' });
+    }
+
+    // Idempotent clear for these cards (requires submission_card_uuid column)
+    const { error: delErr } = await client
+      .from('billing_invoice_items')
+      .delete()
+      .eq('invoice_id', invoice_id)
+      .in('submission_card_uuid', ids)
+      .in('kind', ['grading','upcharge']);
+    if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
+
+    // Insert grading + upcharge
+    const now = new Date().toISOString();
+    const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
+    const gradingRows = ids.map(cid => ({
+      invoice_id,
+      submission_card_uuid: cid,
+      submission_code: codeByCard.get(cid),
+      kind: 'grading',
+      title: 'Grading Fee',
+      qty: 1,
+      unit_cents: DEFAULTS.grade_fee_cents,
+      amount_cents: DEFAULTS.grade_fee_cents,
+      created_at: now
+    }));
+    const upchargeRows = ids.map(cid => {
+      const cents = upMap.get(cid) ?? 0;
+      return {
+        invoice_id,
+        submission_card_uuid: cid,
+        submission_code: codeByCard.get(cid),
+        kind: 'upcharge',
+        title: 'Upcharge',
+        qty: 1,
+        unit_cents: cents,
+        amount_cents: cents,
+        created_at: now
+      };
+    });
+
+    const { error: insG } = await client.from('billing_invoice_items').insert(gradingRows);
+    if (insG) return json(res, 500, { error: 'Failed to insert grading items', details: insG.message });
+    const { error: insU } = await client.from('billing_invoice_items').insert(upchargeRows);
+    if (insU) return json(res, 500, { error: 'Failed to insert upcharge items', details: insU.message });
+
+    // Rebuild invoice<->submission links
+    const { error: delLinks } = await client.from('billing_invoice_submissions').delete().eq('invoice_id', invoice_id);
+    if (delLinks) return json(res, 500, { error: 'Failed to clear invoice links', details: delLinks.message });
+    const linkRows = uniq(subCodes).map(code => ({ invoice_id, submission_code: code }));
+    const { error: insLinks } = await client.from('billing_invoice_submissions').insert(linkRows);
+    if (insLinks) return json(res, 500, { error: 'Failed to insert invoice links', details: insLinks.message });
+
+    // Recompute totals
+    const { data: sums, error: sumErr } = await client
+      .from('billing_invoice_items')
+      .select('amount_cents')
+      .eq('invoice_id', invoice_id);
+    if (sumErr) return json(res, 500, { error: 'Failed to load items for totals', details: sumErr.message });
+    const subtotal = (sums || []).reduce((a, r) => a + (Number(r.amount_cents) || 0), 0);
+
+    const { data: invShip, error: shipErr } = await client
+      .from('billing_invoices')
+      .select('shipping_cents')
+      .eq('id', invoice_id)
+      .single();
+    if (shipErr) return json(res, 500, { error: 'Failed to read shipping', details: shipErr.message });
+    const shipping = Number(invShip?.shipping_cents ?? DEFAULTS.shipping_cents) || 0;
+
+    const { error: upInv } = await client
+      .from('billing_invoices')
+      .update({ subtotal_cents: subtotal, total_cents: subtotal + shipping, updated_at: new Date().toISOString() })
+      .eq('id', invoice_id);
+    if (upInv) return json(res, 500, { error: 'Failed to update invoice totals', details: upInv.message });
+
+    return json(res, 200, { saved: gradingRows.length + upchargeRows.length, invoice_id });
   } catch (err) {
-    await client.query('rollback');
-    console.error(err);
-    return res.status(500).json({ error: 'server_error' });
-  } finally {
-    client.release();
+    console.error('[preview/save] error', err);
+    return json(res, 500, { error: err?.message || String(err) });
   }
-});
-
-export default router;
+}
