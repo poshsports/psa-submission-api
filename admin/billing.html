@@ -154,16 +154,16 @@
               </div>
               <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
             </div>
-          </div>
-        </div>
+          </div> <!-- end right summary column -->
+        </div>   <!-- end grid (left+right) -->
 
         <!-- Cards (table is the only scroll area) -->
         <div style="margin-top:12px;">
           <div style="font-weight:600;margin-bottom:6px;">Cards</div>
-<div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;
-                               /* only the table scrolls, always visible */
-                               height:calc(92vh - 220px);
-                               overflow:auto;">
+          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;
+                                         /* only the table scrolls, always visible */
+                                         height:calc(92vh - 220px);
+                                         overflow:auto;">
             <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
               <colgroup>
                 <col style="width:140px;">  <!-- Submission -->
@@ -189,10 +189,28 @@
             </table>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
+      </div> <!-- end #draftBody -->
 
+      <!-- Confirm Close Modal (direct child of #draftPanel) -->
+      <div id="confirmCloseModal" class="hide"
+           style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                  background:rgba(0,0,0,0.35);">
+        <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);
+                    padding:18px;">
+          <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
+          <div class="muted" style="font-size:13px;margin-bottom:14px;">
+            Do you want to save your changes before closing?
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button type="button" id="btnConfirmCancel" class="btn">Cancel</button>
+            <button type="button" id="btnConfirmDiscard" class="btn" style="background:#f1f5f9;">Discard</button>
+            <button type="button" id="btnConfirmSave" class="btn primary">Save &amp; Close</button>
+          </div>
+        </div>
+      </div>
+
+    </div> <!-- end #draftPanel -->
+  </div>   <!-- end #draftOverlay -->
 
 <script type="module">
 (function () {
@@ -280,6 +298,8 @@ function normalizeCardRow(r) {
 
   // --- Prefill helpers (reads saved values back into the inputs) ---
 let draftInvoiceId = null; // reused across saves
+let hasUnsavedChanges = false;
+
 
 async function loadPrefillForSubs(submissionIds) {
   if (!submissionIds?.length) return { invoice_id: null, items: [] };
@@ -301,6 +321,37 @@ function applyPrefillToUI(prefill) {
   });
   draftInvoiceId = prefill.invoice_id || null;
   recalcFromDOM();
+}
+
+  function showConfirmClose(show) {
+  const m = document.getElementById('confirmCloseModal');
+  if (!m) return;
+  m.classList.toggle('hide', !show);
+}
+
+async function handleAttemptClose() {
+  if (!hasUnsavedChanges) { closeOverlay(); return; }
+  showConfirmClose(true);
+}
+
+function wireConfirmModal() {
+  const bSave = document.getElementById('btnConfirmSave');
+  const bDiscard = document.getElementById('btnConfirmDiscard');
+  const bCancel = document.getElementById('btnConfirmCancel');
+
+  bCancel?.addEventListener('click', () => showConfirmClose(false));
+  bDiscard?.addEventListener('click', () => {
+    hasUnsavedChanges = false;
+    showConfirmClose(false);
+    closeOverlay();
+  });
+  bSave?.addEventListener('click', async () => {
+    await saveUpchargesToDB(false);
+    if (!hasUnsavedChanges) {
+      showConfirmClose(false);
+      closeOverlay();
+    }
+  });
 }
 
   // --- Totals helpers ---
@@ -354,6 +405,8 @@ async function saveUpchargesToDB(silent = false) {
   if (!items.length) { if (!silent) alert('Nothing to save.'); return; }
 
   try {
+    const btn = document.getElementById('btnDraftSave');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     const res = await fetch(SAVE_UPCHARGES_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -362,17 +415,25 @@ async function saveUpchargesToDB(silent = false) {
     });
 
 if (!res.ok) {
-    const t = await res.text().catch(()=> '');
-    console.error('Save failed', t);
-    if (!silent) alert('Failed to save upcharges.');
-    return;
-  }
+  const t = await res.text().catch(()=> '');
+  console.error('Save failed', t);
+  if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  if (!silent) alert('Failed to save upcharges.');
+  return;
+}
 
-   const j = await res.json().catch(()=> ({}));
- if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
- document.getElementById('btnDraftSave')?.setAttribute('disabled','');
-    if (!silent) alert('Upcharges saved.');
+const j = await res.json().catch(()=> ({}));
+if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
+hasUnsavedChanges = false;
+if (btn) {
+  btn.disabled = true;
+  btn.textContent = 'Saved ✓';
+  setTimeout(() => { btn.textContent = 'Save'; }, 1200);
+}
+// (no alert needed on explicit save; keep if you want)
   } catch (err) {
+    const btn = document.getElementById('btnDraftSave');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
     console.error(err);
     if (!silent) alert('Failed to save upcharges.');
   }
@@ -382,9 +443,6 @@ if (!res.ok) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
-
-// ~0.6s after the last keystroke, save quietly
-const autoSaveDebounced = debounce(() => saveUpchargesToDB(true), 600);
 
   async function fillCardsTable(subIds, subsFallback){
     const tb = document.getElementById("cardsTbody");
@@ -432,10 +490,11 @@ function setSaveEnabled(on){
 tb.querySelectorAll(".js-up").forEach(inp => {
   inp.addEventListener("input", () => {
     recalcFromDOM();
-    setSaveEnabled(true);      // visually shows there are pending changes
-    autoSaveDebounced();       // auto-save quietly after a brief pause
+    setSaveEnabled(true);
+    hasUnsavedChanges = true;
   });
 });
+
 
 
     recalcFromDOM();
@@ -506,9 +565,11 @@ try {
 
   $("btnDraftSave") && $("btnDraftSave").addEventListener("click", saveUpchargesToDB);
   $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
-  $("btnDraftClose") && $("btnDraftClose").addEventListener("click", closeOverlay);
-  $("draftBackdrop") && $("draftBackdrop").addEventListener("click", closeOverlay);
-  window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
+  $("btnDraftClose") && $("btnDraftClose").addEventListener("click", handleAttemptClose);
+  $("draftBackdrop") && $("draftBackdrop").addEventListener("click", handleAttemptClose);
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape") handleAttemptClose(); });
+  wireConfirmModal();
+
 })();
 </script>
 </body>
