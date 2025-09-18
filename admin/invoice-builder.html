@@ -376,7 +376,20 @@ const subs = (bundle.submissions || [])
 const rows = await fetchCardsForSubs(subs);
 console.log('[builder] fetched rows:', Array.isArray(rows) ? rows.length : '(not array)');
 
-state.rows = Array.isArray(rows) ? rows.map(r => ({ ...r, __upcharge: 0 })) : [];
+state.rows = rows.map(r => {
+  // prefer dollars if provided; else fall back to cents fields
+  const cents =
+    r.upcharge_cents ??
+    r.suggested_upcharge_cents ??
+    r.prefill_upcharge_cents ??
+    null;
+
+  const dollars = r.upcharge != null
+    ? Number(r.upcharge)
+    : (cents != null ? Number(cents) / 100 : 0);
+
+  return { ...r, __upcharge: Number.isFinite(dollars) ? dollars : 0 };
+});
 
 // then hydrate from DB (safe)
 const pre = await loadPrefillForBuilder(subs);
