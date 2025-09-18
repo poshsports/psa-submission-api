@@ -190,6 +190,10 @@ async function loadPrefillForBuilder(subIds){
   if (draftInvoiceId) qs.set('invoice_id', String(draftInvoiceId));
   else if (Array.isArray(subIds) && subIds.length) qs.set('subs', subIds.join(','));
 
+  // ✅ add this so prefill can locate the correct draft
+  const em = (bundle.customer_email || '').trim();
+  if (em) qs.set('email', em);
+
   if (![...qs.keys()].length) return { invoice_id: null, items: [] };
 
   try {
@@ -200,6 +204,7 @@ async function loadPrefillForBuilder(subIds){
     return { invoice_id: null, items: [] };
   }
 }
+
 
 // Merge saved values into state.rows (match on card_id/id)
 function applyPrefillToState(prefill){
