@@ -3,6 +3,21 @@ import { $, debounce } from './util.js';
 import * as tbl from './billing.table.js';
 import { COLUMNS } from './billing.columns.js';
 
+function openBuilder(bundle) {
+  if (!bundle) return;
+
+  const subs = (bundle.submissions || []).map(s => s.submission_id).filter(Boolean);
+  const email = (bundle.customer_email || '').trim();
+  const groups = (bundle.groups || bundle.group_codes || []).filter(Boolean);
+
+  const qp = new URLSearchParams();
+  if (subs.length) qp.set('subs', subs.join(','));
+  if (email) qp.set('email', email);
+  if (groups.length) qp.set('groups', groups.join(','));
+
+  window.location.href = `/admin/invoice-builder.html?${qp.toString()}`;
+}
+
 // ---------- API ----------
 async function fetchToBill() {
   try {
@@ -126,7 +141,7 @@ function installGlobalDelegates() {
         try {
           // the attribute was HTML-escaped in markup; browser gives raw string back
           const bundle = JSON.parse(bundleJson);
-          window.psaOpenDraftPreview?.(bundle);
+          openBuilder(bundle);
           return;
         } catch {
           // fallback to email fetch if JSON parse fails
@@ -137,7 +152,7 @@ function installGlobalDelegates() {
       const email = explicitEmail || extractEmailFromRow(tr);
       if (!email) return;
       draftBtn.disabled = true;
-      try { const item = await fetchDraftBundleByEmail(email); if (item) window.psaOpenDraftPreview?.(item); }
+      try { const item = await fetchDraftBundleByEmail(email); if (item) openBuilder(item); }
       finally { draftBtn.disabled = false; }
       return;
     }
@@ -150,7 +165,7 @@ function installGlobalDelegates() {
       const email = extractEmailFromRow(tr);
       if (!email) return;
       const item = await fetchDraftBundleByEmail(email);
-      if (item) window.psaOpenDraftPreview?.(item);
+      if (item) openBuilder(item);
     }
   });
 }
