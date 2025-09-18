@@ -303,16 +303,16 @@ body: JSON.stringify({
 
 function renderRows(rows){
   const tb = $('#builderTbody');
-  const empty = $('#emptyMsg');
-  if (!tb || !empty) return;
+  const empty = $('#emptyMsg'); // may be null, that’s fine
+  if (!tb) return;
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    empty.classList.remove('hide');
+    if (empty) empty.classList.remove('hide');
     tb.innerHTML = '';
     recompute();
     return;
   }
-  empty.classList.add('hide');
+  if (empty) empty.classList.add('hide');
 
   tb.innerHTML = rows.map((r,i)=>`
     <tr>
