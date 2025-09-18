@@ -227,6 +227,67 @@ function applyPrefillToState(prefill){
     // Local state
     const state = { rows: [], ship: 5.00 };
 
+    let isDirty = false;
+
+function setDirty(on = true){
+  isDirty = !!on;
+  const b = $('#btnSaveDraft');
+  if (b) b.disabled = !isDirty;
+}
+
+function collectItemsFromState(){
+  // Only rows with a resolvable card id are saved
+  return state.rows
+    .map(r => {
+      const id = r.id || r.card_id || r.uuid || r.cardId;
+      if (!id) return null;
+      const dollars = Number(r.__upcharge || 0);
+      return {
+        card_id: String(id),
+        upcharge_cents: Math.round((Number.isFinite(dollars) ? dollars : 0) * 100)
+      };
+    })
+    .filter(Boolean);
+}
+
+async function saveBuilderToDB(){
+  const email = (bundle.customer_email || '').trim();
+  const items = collectItemsFromState();
+
+  if (!email) { alert('Missing customer email.'); return; }
+  if (!items.length) { alert('Nothing to save.'); return; }
+
+  const btn = $('#btnSaveDraft');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    const res = await fetch('/api/admin/billing/preview/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        customer_email: email,
+        items,
+        invoice_id: draftInvoiceId || null
+      })
+    });
+
+    if (!res.ok) throw new Error(await res.text().catch(()=> 'Save failed'));
+
+    const j = await res.json().catch(()=> ({}));
+    if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
+
+    setDirty(false);
+    if (btn) {
+      btn.textContent = 'Saved ✓';
+      setTimeout(() => { btn.textContent = 'Save Draft'; btn.disabled = true; }, 900);
+    }
+  } catch (err) {
+    console.error(err);
+    if (btn) { btn.textContent = 'Save Draft'; btn.disabled = false; }
+    alert('Failed to save draft.');
+  }
+}
     function recompute(){
       const upTotal = state.rows.reduce((a,r)=>a + (Number(r.__upcharge)||0), 0);
       const total = upTotal + (Number(state.ship) || 0);
@@ -264,7 +325,9 @@ function applyPrefillToState(prefill){
           const i = Number(e.currentTarget.dataset.idx);
           const v = Number(e.currentTarget.value || 0);
           state.rows[i].__upcharge = Number.isFinite(v) ? v : 0;
+          setDirty(true);
           recompute();
+          
         });
       });
 
@@ -298,7 +361,11 @@ function applyPrefillToState(prefill){
   // finally render
   renderRows(state.rows);
 })();
-
+const saveBtn = $('#btnSaveDraft');
+if (saveBtn) {
+  saveBtn.addEventListener('click', saveBuilderToDB);
+  saveBtn.disabled = true; // stays disabled until something changes
+}
   </script>
 </body>
 </html>
