@@ -150,7 +150,7 @@
     const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
     let SETTINGS = { ...DEFAULT_SETTINGS };
     const SAVE_ENDPOINT = '/api/admin/billing/preview/save';
-    const SEND_ENDPOINT = '/api/admin/billing/preview/send';
+    const SEND_ENDPOINT = '/api/admin/billing/send-invoice';
     let draftInvoiceId = null;
     let hasUnsavedChanges = false;
     let lastBundle = null;
