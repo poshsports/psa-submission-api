@@ -55,7 +55,11 @@
                 </div>
               </div>
               <!-- Email (added) -->
-              <div class="js-email muted" style="margin-top:8px;font-size:12px;"></div>
+              <div class="email-row" style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+  <div class="muted" style="font-size:12px;">Customer</div>
+  <div class="js-email" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+</div>
+
               <!-- Received range -->
               <div class="js-range muted" style="margin-top:4px;font-size:12px;"></div>
             </div>
@@ -148,7 +152,26 @@
 
     function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
     function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function pill(text){const span=document.createElement("span");span.textContent=text;span.style.display="inline-block";span.style.padding="4px 8px";span.style.border="1px solid #e5e7eb";span.style.borderRadius="999px";span.style.fontSize="12px";span.style.background="#f8fafc";return span;}
+    function pill(text){
+  const span=document.createElement("span");
+  span.textContent=text;
+  span.style.display="inline-block";
+  span.style.padding="4px 8px";
+  span.style.border="1px solid #e5e7eb";
+  span.style.borderRadius="999px";
+  span.style.fontSize="12px";
+  span.style.background="#f8fafc";
+  return span;
+}
+
+// more visible pill for email
+function emailPill(text){
+  const span=pill(text);
+  span.style.background = "#eef2ff";   // subtle indigo tint
+  span.style.border     = "1px solid #c7d2fe";
+  span.style.fontWeight = "600";
+  return span;
+}
 
     function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
@@ -244,9 +267,12 @@
       grpEl.innerHTML='';
       groups.forEach(code=>grpEl.appendChild(pill(code)));
 
-      // Email line (added)
-      const emailEl=document.querySelector(".js-email");
-      if(emailEl) emailEl.textContent = email ? `Customer: ${email}` : 'Customer: —';
+// Email line (pill)
+const emailEl=document.querySelector(".js-email");
+if (emailEl) {
+  emailEl.innerHTML = "";
+  emailEl.appendChild(email ? emailPill(email) : pill("—"));
+}
 
       const subIds=subs.map(s=>s.submission_id);
       const rows=await fetchCardsForSubs(subIds);
