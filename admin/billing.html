@@ -542,7 +542,6 @@ tb.querySelectorAll(".js-up").forEach(inp => {
     if (rangeEl) rangeEl.textContent = (oldest || newest) ? ("Oldest: " + (oldest || "—") + " • Newest: " + (newest || "—")) : "—";
 
     const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
-   const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
 
 // show shipping immediately
 {
@@ -562,9 +561,6 @@ tb.querySelectorAll(".js-up").forEach(inp => {
 }
 
 await fillCardsTable(subIds, subs);
-
-
-    await fillCardsTable(subIds, subs);
     // Prefill any saved values for these submissions (if a draft exists)
 try {
   const pre = await loadPrefillForSubs(subIds);
