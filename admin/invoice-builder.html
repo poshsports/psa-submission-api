@@ -131,6 +131,7 @@ if (qSubs) {
   const subs = qSubs.split(',').map(s => s.trim()).filter(Boolean)
                     .map(id => ({ submission_id: id }));
   bundle = {
+    customer_email: qEmail || '',
     submissions   : subs,
     groups        : [],
     group_codes   : [],
