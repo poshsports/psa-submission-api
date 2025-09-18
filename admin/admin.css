@@ -488,3 +488,7 @@ tr.drop-below { box-shadow: 0  2px 0 0 var(--primary, #2563eb) inset; }
 .pill[role="button"] { cursor: pointer; user-select: none; }
 .pill.locked { cursor: not-allowed; opacity: .7; }
 
+/* Confirm-close modal visibility control */
+#confirmCloseModal { display: none; }
+#confirmCloseModal.open { display: flex; }
+
