@@ -269,6 +269,7 @@ async function saveBuilderToDB(){
         customer_email: email,
         items,
         invoice_id: draftInvoiceId || null
+        shipping_cents: Math.round((Number(state.ship) || 0) * 100)
       })
     });
 
@@ -342,6 +343,7 @@ async function saveBuilderToDB(){
     recompute();
     shipEl.addEventListener('input', ()=>{
       state.ship = Number(shipEl.value || 0) || 0;
+      setDirty(true);
       recompute();
     });
   }
@@ -357,6 +359,12 @@ async function saveBuilderToDB(){
   // then hydrate from DB (by invoice_id if present, else by subs)
   const pre = await loadPrefillForBuilder(subs);
   applyPrefillToState(pre);
+  if (pre && pre.shipping_cents != null) {
+  state.ship = Number(pre.shipping_cents) / 100;
+  const s = $('#shipInput');
+  if (s) s.value = state.ship.toFixed(2);
+  recompute();
+}
 
   // finally render
   renderRows(state.rows);
