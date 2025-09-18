@@ -115,7 +115,7 @@
 
       <!-- body -->
       <!-- NOTE: no scrolling here; only the table below will scroll -->
-      <div id="draftBody" style="padding:12px 16px;overflow:visible;">
+      <div id="draftBody" style="padding:12px 16px; display:flex; flex-direction:column; gap:12px; overflow:hidden; flex:1 1 auto; min-height:0;">
         <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start;">
           <!-- left: compact info boxes -->
           <div>
@@ -160,10 +160,7 @@
         <!-- Cards (table is the only scroll area) -->
         <div style="margin-top:12px;">
           <div style="font-weight:600;margin-bottom:6px;">Cards</div>
-          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px;
-                                         /* only the table scrolls, always visible */
-                                         height:calc(92vh - 220px);
-                                         overflow:auto;">
+ <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px; flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;">
             <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
               <colgroup>
                 <col style="width:140px;">  <!-- Submission -->
