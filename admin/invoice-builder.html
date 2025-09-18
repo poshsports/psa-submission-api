@@ -301,46 +301,46 @@ body: JSON.stringify({
       const gt = $('#grandTotal'); if (gt) gt.textContent = money(total);
     }
 
-    function renderRows(rows){
-      const tb = $('#builderTbody');
-      const empty = $('#emptyMsg');
-      if (!tb || !empty) return;
+function renderRows(rows){
+  const tb = $('#builderTbody');
+  const empty = $('#emptyMsg');
+  if (!tb || !empty) return;
 
-      tb.innerHTML = '';
-      if (!rows.length) {
-        empty.classList.remove('hide');
-        recompute();
-        return;
-      }
-      empty.classList.add('hide');
+  if (!Array.isArray(rows) || rows.length === 0) {
+    empty.classList.remove('hide');
+    tb.innerHTML = '';
+    recompute();
+    return;
+  }
+  empty.classList.add('hide');
 
-      tb.innerHTML = rows.map((r,i)=>`
-      console.log('tbody rows after render:', tb.querySelectorAll('tr').length);
-        <tr>
-          <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
-          <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
-          <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
-          <td style="text-align:right;">${esc(String(r.break_number || r.break_num || r.break_no || r.break_id || ''))}</td>
-          <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
-          <td style="text-align:right;">
-            <input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0" value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" />
-          </td>
-        </tr>
-      `).join('');
+  tb.innerHTML = rows.map((r,i)=>`
+    <tr>
+      <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
+      <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
+      <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
+      <td style="text-align:right;">${esc(String(r.break_number || r.break_num || r.break_no || r.break_id || ''))}</td>
+      <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
+      <td style="text-align:right;">
+        <input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0"
+               value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" />
+      </td>
+    </tr>
+  `).join('');
 
-      tb.querySelectorAll('.up-inp').forEach(inp=>{
-        inp.addEventListener('input',(e)=>{
-          const i = Number(e.currentTarget.dataset.idx);
-          const v = Number(e.currentTarget.value || 0);
-          state.rows[i].__upcharge = Number.isFinite(v) ? v : 0;
-          setDirty(true);
-          recompute();
-          
-        });
-      });
-
+  // wire inputs to state + totals
+  tb.querySelectorAll('.up-inp').forEach(inp=>{
+    inp.addEventListener('input', (e)=>{
+      const idx = Number(e.currentTarget.dataset.idx);
+      const v = Number(e.currentTarget.value || 0);
+      state.rows[idx].__upcharge = Number.isFinite(v) ? v : 0;
+      setDirty(true);
       recompute();
-    }
+    });
+  });
+
+  recompute();
+}
 
 // Init
 (async function init(){
