@@ -582,12 +582,33 @@ try {
     openOverlay();
   };
 
-  // Open Builder page with the same bundle
-  function openBuilderFromPreview(){
-    if (!lastBundle) return;
-    try { sessionStorage.setItem('psa:builder:bundle', JSON.stringify(lastBundle)); } catch {}
-    window.location.href = '/admin/invoice-builder.html';
+function openBuilderFromPreview(){
+  if (!lastBundle) return;
+
+  // Which submissions are we building?
+  const subIds = (Array.isArray(lastBundle.submissions) ? lastBundle.submissions : [])
+    .map(s => s && s.submission_id)
+    .filter(Boolean);
+
+  const email = (lastBundle.customer_email || '').trim();
+
+  // Build the builder URL with explicit context (no sessionStorage)
+  const go = () => {
+    const qp = new URLSearchParams();
+    if (subIds.length) qp.set('subs', subIds.join(','));   // e.g. psa-205,psa-206
+    if (email) qp.set('email', email);
+    if (draftInvoiceId) qp.set('invoice_id', String(draftInvoiceId)); // if a draft already exists
+
+    window.location.href = `/admin/invoice-builder.html?${qp.toString()}`;
+  };
+
+  // If there are unsaved edits, quietly save them to DB first
+  if (hasUnsavedChanges) {
+    saveUpchargesToDB(true).finally(go);
+  } else {
+    go();
   }
+}
 
   $("btnDraftSave") && $("btnDraftSave").addEventListener("click", saveUpchargesToDB);
   $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
