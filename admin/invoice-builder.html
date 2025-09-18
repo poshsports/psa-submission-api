@@ -127,12 +127,30 @@
     </div>
   </div>
 
+  <!-- Send Confirmation Modal -->
+<div id="sendConfirmModal" role="dialog" aria-modal="true"
+     style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);z-index:1100;">
+  <div style="width:min(520px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
+    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Send invoice?</div>
+    <div class="muted" style="font-size:13px;margin-bottom:12px;">
+      <div><strong>Customer:</strong> <span id="sendEmailTarget">—</span></div>
+      <div><strong>Cards:</strong> <span id="sendCardCount">0</span></div>
+      <div><strong>Estimated total:</strong> <span id="sendEstTotal">$—</span></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" id="btnSendCancel" class="btn">Cancel</button>
+      <button type="button" id="btnSendConfirm" class="btn primary">Confirm &amp; Send</button>
+    </div>
+  </div>
+</div>
+
   <!-- Script -->
   <script type="module">
     const $ = (id) => document.getElementById(id);
     const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
     let SETTINGS = { ...DEFAULT_SETTINGS };
     const SAVE_ENDPOINT = '/api/admin/billing/preview/save';
+    const SEND_ENDPOINT = '/api/admin/billing/preview/send';
     let draftInvoiceId = null;
     let hasUnsavedChanges = false;
     let lastBundle = null;
@@ -256,6 +274,60 @@
       } else {btn.disabled=false;btn.textContent='Save';}
     }
 
+    async function sendInvoice(){
+  const email = (lastBundle?.customer_email || '').trim();
+  const btn = $("btnDraftSend");
+
+  if (!email) { alert('Missing customer email.'); return; }
+
+  // Ensure latest changes are saved first
+  if (hasUnsavedChanges) {
+    await save(true);              // run silent save
+    if (hasUnsavedChanges) return; // bail if save failed
+  }
+
+  // If we still don't have an invoice id, try once to create it
+  if (!draftInvoiceId) {
+    await save(true);
+    if (!draftInvoiceId) { alert('Could not determine invoice id.'); return; }
+  }
+
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    const res = await fetch(SEND_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        invoice_id: draftInvoiceId,
+        customer_email: email
+      })
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(()=>'');
+      console.error('Send failed', t);
+      alert('Failed to send invoice.');
+      btn.disabled = false;
+      btn.textContent = 'Send';
+      return;
+    }
+
+    // Optional: read response (e.g., a URL) if your API returns it
+    // const j = await res.json().catch(()=>({}));
+
+    hasUnsavedChanges = false; // prevent dirty-leave prompts
+    // Go back to Billing after successful send
+    window.location.href = '/admin/billing.html';
+  } catch (err) {
+    console.error(err);
+    alert('Failed to send invoice.');
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
     function showConfirm(show) {
       const m = document.getElementById('confirmCloseModal');
       if (!m) return;
@@ -265,6 +337,23 @@
          document.getElementById('btnConfirmCancel') || m).focus();
       }
     }
+
+    function showSendConfirm(show){
+  const m = document.getElementById('sendConfirmModal');
+  if (!m) return;
+  m.style.display = show ? 'flex' : 'none';
+  if (show) {
+    const email = (lastBundle?.customer_email || '').trim() || '—';
+    const rows = [...document.querySelectorAll("#cardsTbody tr[data-row]")];
+    const gradeSum = rows.length * SETTINGS.grade_fee;
+    const upchargeSum = rows.reduce((s,tr)=> s + Number(tr.querySelector(".js-up")?.value || 0), 0);
+    const total = gradeSum + upchargeSum + SETTINGS.shipping;
+
+    $("sendEmailTarget").textContent = email;
+    $("sendCardCount").textContent = String(rows.length);
+    $("sendEstTotal").textContent = money(total);
+  }
+}
 
     function navigateToPending() {
       const href = pendingNavHref;
@@ -288,6 +377,7 @@
         if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
         if (!hasUnsavedChanges) return;
         e.preventDefault();
+        e.stopImmediatePropagation();
         pendingNavHref = href;
         showConfirm(true);
       });
@@ -386,6 +476,13 @@
       await populate(bundle);
       $("btnDraftSave")?.addEventListener("click",()=>save(false));
       $("btnConfirmSave")?.addEventListener("click",()=>save(false));
+      $("btnDraftSend")?.addEventListener("click", () => showSendConfirm(true));
+$("btnSendCancel")?.addEventListener("click", () => showSendConfirm(false));
+$("btnSendConfirm")?.addEventListener("click", async () => {
+  showSendConfirm(false);
+  await sendInvoice();
+});
+
 
       // Enable dirty-leave protection
       installDirtyLeaveGuards();
