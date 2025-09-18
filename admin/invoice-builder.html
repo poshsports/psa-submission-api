@@ -302,20 +302,24 @@ body: JSON.stringify({
     }
 
 function renderRows(rows){
-  const tb = $('#builderTbody');
-  const empty = $('#emptyMsg'); // may be null, that’s fine
+  const tb = document.getElementById('builderTbody');
+  const empty = document.getElementById('emptyMsg');
   if (!tb) return;
 
+  // Empty-state
   if (!Array.isArray(rows) || rows.length === 0) {
     if (empty) empty.classList.remove('hide');
-    tb.innerHTML = '';
+    tb.replaceChildren();
     recompute();
     return;
   }
   if (empty) empty.classList.add('hide');
 
-  tb.innerHTML = rows.map((r,i)=>`
-    <tr>
+  // Build rows as real DOM nodes
+  const frag = document.createDocumentFragment();
+  rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
       <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
       <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
       <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
@@ -323,17 +327,21 @@ function renderRows(rows){
       <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
       <td style="text-align:right;">
         <input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0"
-               value="${Number(r.__upcharge||0).toFixed(2)}" style="width:96px;text-align:right;" />
+               value="${Number(r.__upcharge || 0).toFixed(2)}"
+               style="width:96px;text-align:right;" />
       </td>
-    </tr>
-  `).join('');
+    `;
+    frag.appendChild(tr);
+  });
 
-  // wire inputs to state + totals
-  tb.querySelectorAll('.up-inp').forEach(inp=>{
-    inp.addEventListener('input', (e)=>{
+  tb.replaceChildren(frag);
+
+  // Wire inputs
+  tb.querySelectorAll('.up-inp').forEach(inp => {
+    inp.addEventListener('input', (e) => {
       const idx = Number(e.currentTarget.dataset.idx);
       const v = Number(e.currentTarget.value || 0);
-      state.rows[idx].__upcharge = Number.isFinite(v) ? v : 0;
+      window.__builderState.rows[idx].__upcharge = Number.isFinite(v) ? v : 0;
       setDirty(true);
       recompute();
     });
