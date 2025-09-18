@@ -313,8 +313,10 @@ function applyPrefillToState(prefill){
 
 function setDirty(on = true){
   isDirty = !!on;
-  const b = $('#btnSaveDraft');
-  if (b) b.disabled = !isDirty;
+  ['btnDraftSave','btnSaveDraft'].forEach(id=>{
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !isDirty;
+  });
 }
 
     window.addEventListener('beforeunload', (e) => {
@@ -345,7 +347,8 @@ async function saveBuilderToDB(){
   if (!email) { alert('Missing customer email.'); return; }
   if (!items.length) { alert('Nothing to save.'); return; }
 
-  const btn = $('#btnSaveDraft');
+  // prefer the preview Save button; fall back to topbar save if present
+  const btn = document.getElementById('btnDraftSave') || document.getElementById('btnSaveDraft');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
   try {
@@ -369,28 +372,31 @@ body: JSON.stringify({
     setDirty(false);
     if (btn) {
       btn.textContent = 'Saved ✓';
-      setTimeout(() => { btn.textContent = 'Save Draft'; btn.disabled = true; }, 900);
+      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 900);
     }
+
   } catch (err) {
     console.error(err);
-    if (btn) { btn.textContent = 'Save Draft'; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
     alert('Failed to save draft.');
   }
 }
 function recompute(){
-  const upTotal = state.rows.reduce((a,r)=> a + (Number(r.__upcharge)||0), 0);
-  const ship    = Number(state.ship) || 0;
-  const total   = upTotal + ship;
+const upTotal = state.rows.reduce((a,r)=> a + (Number(r.__upcharge)||0), 0);
+const ship    = Number(state.ship) || 0;
+const total   = upTotal + ship;
 
-  const st = document.getElementById('subTotal');
-  const gt = document.getElementById('grandTotal');
+const st = document.querySelector('.js-subtotal');
+const sh = document.querySelector('.js-ship');
+const gt = document.querySelector('.js-total');
 
-  if (st) st.textContent = money(upTotal);
-  if (gt) gt.textContent = money(total);
+if (st) st.textContent = money(upTotal);
+if (sh) sh.textContent = money(ship);
+if (gt) gt.textContent = money(total);
 }
 
 function renderRows(rows){
-  const tb = document.getElementById('builderTbody');
+  const tb = document.getElementById('cardsTbody');
   const empty = document.getElementById('emptyMsg');
   if (!tb) return;
 
@@ -436,6 +442,59 @@ function renderRows(rows){
   });
 
   recompute();
+}
+
+    function updateHeader(){
+  const email   = bundle.customer_email || '—';
+  const subIds  = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
+  const groups  = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
+
+  // Header counts
+  const emailEl = document.querySelector('.js-cust-email');
+  const subCtEl = document.querySelector('.js-sub-count');
+  const cardCtEl= document.querySelector('.js-card-count');
+  if (emailEl)  emailEl.textContent  = email;
+  if (subCtEl)  subCtEl.textContent  = String(subIds.length);
+  if (cardCtEl) cardCtEl.textContent = String(state.rows.length);
+
+  // Chips
+  const subList = document.querySelector('.js-sub-list');
+  const grpList = document.querySelector('.js-group-list');
+  if (subList){
+    subList.innerHTML = '';
+    subIds.forEach(id=>{
+      const sp = document.createElement('span');
+      sp.className = 'pill';
+      sp.style.padding = '4px 8px';
+      sp.textContent = id;
+      subList.appendChild(sp);
+    });
+  }
+  if (grpList){
+    grpList.innerHTML = '';
+    groups.forEach(g=>{
+      const sp = document.createElement('span');
+      sp.className = 'pill';
+      sp.style.padding = '4px 8px';
+      sp.textContent = g;
+      grpList.appendChild(sp);
+    });
+  }
+
+  // Optional: Received range under the boxes, based on break dates if present
+  const rngEl = document.querySelector('.js-range');
+  if (rngEl){
+    const ds = state.rows
+      .map(r => new Date(r.break_date || r.break_at || r.date_of_break))
+      .filter(d => !Number.isNaN(d.getTime()));
+    if (ds.length){
+      const minD = new Date(Math.min(...ds));
+      const maxD = new Date(Math.max(...ds));
+      rngEl.textContent = `Received ${fmtDateISOish(minD)} – ${fmtDateISOish(maxD)}`;
+    } else {
+      rngEl.textContent = '';
+    }
+  }
 }
 
 // Init
@@ -485,9 +544,10 @@ if (pre && pre.shipping_cents != null) {
 
 // render
 renderRows(state.rows);
+updateHeader();
 
 // HARD CHECK: if nothing painted, drop a small debug row so we know this code path ran
-const tb = document.getElementById('builderTbody');
+const tb = document.getElementById('cardsTbody');
 if (tb && !tb.querySelector('tr')) {
   tb.innerHTML = `<tr><td colspan="6" style="padding:12px;text-align:center;color:#6b7280;">
     debug (init): cards-preview returned ${state.rows.length} rows
@@ -495,11 +555,9 @@ if (tb && !tb.querySelector('tr')) {
 }
 
 })();
-const saveBtn = $('#btnSaveDraft');
-if (saveBtn) {
-  saveBtn.addEventListener('click', saveBuilderToDB);
-  saveBtn.disabled = true; // stays disabled until something changes
-}
+// Hook up both Save buttons
+document.getElementById('btnDraftSave')?.addEventListener('click', saveBuilderToDB);
+document.getElementById('btnSaveDraft')?.addEventListener('click', saveBuilderToDB);
   </script>
 </body>
 </html>
