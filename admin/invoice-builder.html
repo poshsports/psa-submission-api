@@ -135,7 +135,7 @@
     // ===== Utilities =====
     const $ = (id) => document.getElementById(id);
     function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
-    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }
+    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function fmtDateISOish(v){
       if (!v) return '—';
       const d = new Date(v);
