@@ -120,17 +120,24 @@
     }
     function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
 
-    // Load bundle from sessionStorage
-    let bundle = {};
-    try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch { bundle = {}; }
+// === HYDRATE: Load the bundle handed off by the Preview overlay ===
+let bundle = {};
+try {
+  bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}');
+} catch {
+  bundle = {};
+}
 
-    // If no bundle, show message and stop
-    if (!bundle || !Array.isArray(bundle.submissions) || !bundle.submissions.length) {
-      document.body.insertAdjacentHTML('beforeend', '<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
-      // Stop running further script to avoid null references
-      // (Keep the sign-out handler active above)
-      throw new Error('No builder bundle present');
-    }
+// Hard stop if there’s nothing to build (prevents null refs below)
+if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length === 0) {
+  document.body.insertAdjacentHTML(
+    'beforeend',
+    '<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>'
+  );
+  throw new Error('No builder bundle present');
+}
+// === END HYDRATE ===
+
 
     // Header render (email, chips)
     (function renderHeader(){
