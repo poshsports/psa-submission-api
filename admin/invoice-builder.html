@@ -137,7 +137,7 @@ if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length =
   throw new Error('No builder bundle present');
 }
 // === END HYDRATE ===
-
+try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
 
     // Header render (email, chips)
     (function renderHeader(){
@@ -233,11 +233,13 @@ if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length =
     (async function init(){
       const shipEl = $('#shipInput');
       if (shipEl) {
-        state.ship = Number(shipEl.value || 5.00) || 0;
-        shipEl.addEventListener('input', ()=>{
-          state.ship = Number(shipEl.value || 0) || 0;
-          recompute();
-        });
+state.ship = Number(shipEl.value || 5.00) || 0;
+recompute(); // <-- add this line
+shipEl.addEventListener('input', ()=>{
+  state.ship = Number(shipEl.value || 0) || 0;
+  recompute();
+});
+
       }
 
       const subs = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
