@@ -131,7 +131,6 @@ if (qSubs) {
   const subs = qSubs.split(',').map(s => s.trim()).filter(Boolean)
                     .map(id => ({ submission_id: id }));
   bundle = {
-    customer_email: qEmail || '—',
     submissions   : subs,
     groups        : [],
     group_codes   : [],
@@ -235,6 +234,12 @@ function setDirty(on = true){
   if (b) b.disabled = !isDirty;
 }
 
+    window.addEventListener('beforeunload', (e) => {
+  if (!isDirty) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
 function collectItemsFromState(){
   // Only rows with a resolvable card id are saved
   return state.rows
@@ -265,12 +270,12 @@ async function saveBuilderToDB(){
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({
-        customer_email: email,
-        items,
-        invoice_id: draftInvoiceId || null
-        shipping_cents: Math.round((Number(state.ship) || 0) * 100)
-      })
+body: JSON.stringify({
+  customer_email: email,
+  items,
+  invoice_id: draftInvoiceId || null,
+  shipping_cents: Math.round((Number(state.ship) || 0) * 100)
+})
     });
 
     if (!res.ok) throw new Error(await res.text().catch(()=> 'Save failed'));
