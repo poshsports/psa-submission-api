@@ -191,24 +191,21 @@
         </div>
       </div> <!-- end #draftBody -->
 
-      <!-- Confirm Close Modal (direct child of #draftPanel) -->
-      <div id="confirmCloseModal" class="hide"
-           style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-                  background:rgba(0,0,0,0.35);">
-        <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);
-                    padding:18px;">
-          <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
-          <div class="muted" style="font-size:13px;margin-bottom:14px;">
-            Do you want to save your changes before closing?
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button type="button" id="btnConfirmCancel" class="btn">Cancel</button>
-            <button type="button" id="btnConfirmDiscard" class="btn" style="background:#f1f5f9;">Discard</button>
-            <button type="button" id="btnConfirmSave" class="btn primary">Save &amp; Close</button>
-          </div>
-        </div>
-      </div>
-
+<!-- Confirm Close Modal (direct child of #draftPanel) -->
+<div id="confirmCloseModal"
+     style="position:absolute;inset:0;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);">
+  <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
+    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
+    <div class="muted" style="font-size:13px;margin-bottom:14px;">
+      Do you want to save your changes before closing?
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" id="btnConfirmCancel" class="btn">Cancel</button>
+      <button type="button" id="btnConfirmDiscard" class="btn" style="background:#f1f5f9;">Discard</button>
+      <button type="button" id="btnConfirmSave" class="btn primary">Save &amp; Close</button>
+    </div>
+  </div>
+</div>
     </div> <!-- end #draftPanel -->
   </div>   <!-- end #draftOverlay -->
 
@@ -323,10 +320,11 @@ function applyPrefillToUI(prefill) {
   recalcFromDOM();
 }
 
-  function showConfirmClose(show) {
+function showConfirmClose(show) {
   const m = document.getElementById('confirmCloseModal');
   if (!m) return;
-  m.classList.toggle('hide', !show);
+  if (show) m.classList.add('open');
+  else m.classList.remove('open');
 }
 
 async function handleAttemptClose() {
