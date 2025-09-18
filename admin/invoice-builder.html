@@ -355,26 +355,36 @@ function renderRows(rows){
     });
   }
 
-  // load rows first
-  const subs = (bundle.submissions || [])
-    .map(s => s?.submission_id)
-    .filter(Boolean);
+// load rows first (defensive + instrumented)
+const subs = (bundle.submissions || [])
+  .map(s => s?.submission_id)
+  .filter(Boolean);
 
-  const rows = await fetchCardsForSubs(subs);
-  state.rows = rows.map(r => ({ ...r, __upcharge: 0 }));
+const rows = await fetchCardsForSubs(subs);
+console.log('[builder] fetched rows:', Array.isArray(rows) ? rows.length : '(not array)');
 
-  // then hydrate from DB (by invoice_id if present, else by subs)
-  const pre = await loadPrefillForBuilder(subs);
-  applyPrefillToState(pre);
-  if (pre && pre.shipping_cents != null) {
+state.rows = Array.isArray(rows) ? rows.map(r => ({ ...r, __upcharge: 0 })) : [];
+
+// then hydrate from DB (safe)
+const pre = await loadPrefillForBuilder(subs);
+applyPrefillToState(pre);
+if (pre && pre.shipping_cents != null) {
   state.ship = Number(pre.shipping_cents) / 100;
-  const s = $('#shipInput');
-  if (s) s.value = state.ship.toFixed(2);
+  const s = $('#shipInput'); if (s) s.value = state.ship.toFixed(2);
   recompute();
 }
 
-  // finally render
-  renderRows(state.rows);
+// render
+renderRows(state.rows);
+
+// HARD CHECK: if nothing painted, drop a small debug row so we know this code path ran
+const tb = document.getElementById('builderTbody');
+if (tb && !tb.querySelector('tr')) {
+  tb.innerHTML = `<tr><td colspan="6" style="padding:12px;text-align:center;color:#6b7280;">
+    debug (init): cards-preview returned ${state.rows.length} rows
+  </td></tr>`;
+}
+
 })();
 const saveBtn = $('#btnSaveDraft');
 if (saveBtn) {
