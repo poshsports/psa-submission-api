@@ -57,19 +57,29 @@
 
           <div class="spacer"></div>
 
-          <div style="border:1px solid #eee;border-radius:12px;padding:12px;min-width:280px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <div>Shipping</div>
-              <div>
-                <input id="shipInput" type="number" step="0.01" min="0" value="5.00" style="width:96px;text-align:right;" />
-              </div>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #eee;font-weight:700;">
-              <div>Total (preview)</div>
-              <div id="grandTotal">$—</div>
-            </div>
-            <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
-          </div>
+<div style="border:1px solid #eee;border-radius:12px;padding:12px;min-width:280px;">
+  <!-- Subtotal row -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <div>Subtotal (est.)</div>
+    <div id="subTotal">$—</div>
+  </div>
+
+  <!-- Existing Shipping row -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <div>Shipping</div>
+    <div>
+      <input id="shipInput" type="number" step="0.01" min="0" value="5.00" style="width:96px;text-align:right;" />
+    </div>
+  </div>
+
+  <!-- Existing Total row -->
+  <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #eee;font-weight:700;">
+    <div>Total (preview)</div>
+    <div id="grandTotal">$—</div>
+  </div>
+  <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
+</div>
+
         </div>
 
         <!-- Cards table -->
@@ -209,15 +219,33 @@ async function loadPrefillForBuilder(subIds){
 // Merge saved values into state.rows (match on card_id/id)
 function applyPrefillToState(prefill){
   if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
-  const m = new Map(prefill.items.map(it => [ String(it.card_id), Number(it.upcharge_cents || 0) / 100 ]));
+
+  // normalize cents → dollars and accept multiple possible field names
+  const toDollars = (c) => {
+    const n = Number(c);
+    return Number.isFinite(n) ? n / 100 : 0;
+  };
+
+  // Build a map of card_id -> upcharge dollars
+  const upMap = new Map(
+    prefill.items.map(it => {
+      const dollars =
+        toDollars(it.upcharge_cents ?? it.suggested_upcharge_cents ?? it.prefill_upcharge_cents) ||
+        (Number.isFinite(Number(it.upcharge)) ? Number(it.upcharge) : 0);
+      return [ String(it.card_id), dollars ];
+    })
+  );
+
+  // Apply to rows (cards-preview uses "id"; prefill uses "card_id")
   state.rows = state.rows.map(r => {
-    const key = String(r.id || r.card_id || r.uuid || r.cardId || '');
-    const saved = m.get(key);
+    const key = String(r.card_id || r.id || r.uuid || r.cardId || '');
+    const saved = upMap.get(key);
     return saved != null ? { ...r, __upcharge: saved } : r;
   });
+
   if (prefill.invoice_id) draftInvoiceId = prefill.invoice_id;
 }
-
+    
     // Fetch rows for submissions
     async function fetchCardsForSubs(subIds){
       if (!subIds.length) return [];
@@ -300,11 +328,17 @@ body: JSON.stringify({
     alert('Failed to save draft.');
   }
 }
-    function recompute(){
-      const upTotal = state.rows.reduce((a,r)=>a + (Number(r.__upcharge)||0), 0);
-      const total = upTotal + (Number(state.ship) || 0);
-      const gt = $('#grandTotal'); if (gt) gt.textContent = money(total);
-    }
+function recompute(){
+  const upTotal = state.rows.reduce((a,r)=> a + (Number(r.__upcharge)||0), 0);
+  const ship    = Number(state.ship) || 0;
+  const total   = upTotal + ship;
+
+  const st = document.getElementById('subTotal');
+  const gt = document.getElementById('grandTotal');
+
+  if (st) st.textContent = money(upTotal);
+  if (gt) gt.textContent = money(total);
+}
 
 function renderRows(rows){
   const tb = document.getElementById('builderTbody');
