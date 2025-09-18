@@ -54,11 +54,12 @@
                   <div class="js-group-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
                 </div>
               </div>
-              <!-- Email (added) -->
+
+              <!-- Email pill -->
               <div class="email-row" style="margin-top:8px;display:flex;align-items:center;gap:8px;">
-  <div class="muted" style="font-size:12px;">Customer</div>
-  <div class="js-email" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
-</div>
+                <div class="muted" style="font-size:12px;">Customer</div>
+                <div class="js-email" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+              </div>
 
               <!-- Received range -->
               <div class="js-range muted" style="margin-top:4px;font-size:12px;"></div>
@@ -136,6 +137,9 @@
     let hasUnsavedChanges = false;
     let lastBundle = null;
 
+    // pending navigation target for dirty-leave modal
+    let pendingNavHref = null;
+
     async function loadSettings() {
       try {
         const r = await fetch('/api/admin/settings', { credentials: 'same-origin' });
@@ -152,26 +156,27 @@
 
     function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
     function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function pill(text){
-  const span=document.createElement("span");
-  span.textContent=text;
-  span.style.display="inline-block";
-  span.style.padding="4px 8px";
-  span.style.border="1px solid #e5e7eb";
-  span.style.borderRadius="999px";
-  span.style.fontSize="12px";
-  span.style.background="#f8fafc";
-  return span;
-}
 
-// more visible pill for email
-function emailPill(text){
-  const span=pill(text);
-  span.style.background = "#eef2ff";   // subtle indigo tint
-  span.style.border     = "1px solid #c7d2fe";
-  span.style.fontWeight = "600";
-  return span;
-}
+    function pill(text){
+      const span=document.createElement("span");
+      span.textContent=text;
+      span.style.display="inline-block";
+      span.style.padding="4px 8px";
+      span.style.border="1px solid #e5e7eb";
+      span.style.borderRadius="999px";
+      span.style.fontSize="12px";
+      span.style.background="#f8fafc";
+      return span;
+    }
+
+    // more visible pill for email
+    function emailPill(text){
+      const span=pill(text);
+      span.style.background = "#eef2ff";   // subtle indigo tint
+      span.style.border     = "1px solid #c7d2fe";
+      span.style.fontWeight = "600";
+      return span;
+    }
 
     function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
@@ -251,6 +256,71 @@ function emailPill(text){
       } else {btn.disabled=false;btn.textContent='Save';}
     }
 
+    function showConfirm(show) {
+      const m = document.getElementById('confirmCloseModal');
+      if (!m) return;
+      m.style.display = show ? 'flex' : 'none';
+      if (show) {
+        (document.getElementById('btnConfirmSave') ||
+         document.getElementById('btnConfirmCancel') || m).focus();
+      }
+    }
+
+    function navigateToPending() {
+      const href = pendingNavHref;
+      pendingNavHref = null;
+      if (href) window.location.href = href;
+    }
+
+    function installDirtyLeaveGuards() {
+      // Tab close / reload
+      window.addEventListener('beforeunload', (e) => {
+        if (!hasUnsavedChanges) return;
+        e.preventDefault();
+        e.returnValue = ''; // required for Chrome to show a prompt
+      });
+
+      // Intercept anchor navigations
+      document.addEventListener('click', (e) => {
+        const a = e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        if (!hasUnsavedChanges) return;
+        e.preventDefault();
+        pendingNavHref = href;
+        showConfirm(true);
+      });
+
+      // Modal buttons
+      const bSave = document.getElementById('btnConfirmSave');
+      const bDiscard = document.getElementById('btnConfirmDiscard');
+      const bCancel = document.getElementById('btnConfirmCancel');
+
+      bCancel?.addEventListener('click', () => showConfirm(false));
+
+      bDiscard?.addEventListener('click', () => {
+        hasUnsavedChanges = false; // allow navigation
+        showConfirm(false);
+        navigateToPending();
+      });
+
+      bSave?.addEventListener('click', async () => {
+        await save(false);
+        if (!hasUnsavedChanges) {
+          showConfirm(false);
+          navigateToPending();
+        }
+      });
+
+      // ESC closes confirm
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('confirmCloseModal')?.style.display !== 'none') {
+          showConfirm(false);
+        }
+      });
+    }
+
     async function populate(bundle){
       lastBundle=bundle;
       const subs=bundle.submissions||[];
@@ -262,17 +332,17 @@ function emailPill(text){
       subEl.innerHTML='';
       subs.forEach(s=>subEl.appendChild(pill(s.submission_id)));
 
-      // Groups pills (added)
+      // Groups pills
       const grpEl=document.querySelector(".js-group-list");
       grpEl.innerHTML='';
       groups.forEach(code=>grpEl.appendChild(pill(code)));
 
-// Email line (pill)
-const emailEl=document.querySelector(".js-email");
-if (emailEl) {
-  emailEl.innerHTML = "";
-  emailEl.appendChild(email ? emailPill(email) : pill("—"));
-}
+      // Email pill
+      const emailEl=document.querySelector(".js-email");
+      if (emailEl) {
+        emailEl.innerHTML = "";
+        emailEl.appendChild(email ? emailPill(email) : pill("—"));
+      }
 
       const subIds=subs.map(s=>s.submission_id);
       const rows=await fetchCardsForSubs(subIds);
@@ -288,7 +358,11 @@ if (emailEl) {
         </tr>`).join("");
 
       // delegated input: totals + save enablement
-      $("cardsTbody").addEventListener("input",()=>{hasUnsavedChanges=true;$("btnDraftSave").disabled=false;recalc();});
+      $("cardsTbody").addEventListener("input",()=>{
+        hasUnsavedChanges=true;
+        $("btnDraftSave").disabled=false;
+        recalc();
+      });
       recalc();
 
       const pre=await loadPrefill(subIds);applyPrefill(pre);
@@ -297,11 +371,13 @@ if (emailEl) {
     // Boot
     (async function init(){
       $("sidebar-signout")?.addEventListener("click",async e=>{
-        e.preventDefault();try{await fetch('/api/admin-logout',{method:'POST',credentials:'same-origin'});}catch{}window.location.replace('/admin');
+        e.preventDefault();
+        try{await fetch('/api/admin-logout',{method:'POST',credentials:'same-origin'});}catch{}
+        window.location.replace('/admin');
       });
       await loadSettings();
 
-      // Read query params (now includes groups)
+      // Read query params (includes groups)
       const qs=new URLSearchParams(location.search);
       const subs=(qs.get("subs")||"").split(",").filter(Boolean).map(id=>({submission_id:id}));
       const groups=(qs.get("groups")||"").split(",").filter(Boolean);
@@ -310,6 +386,9 @@ if (emailEl) {
       await populate(bundle);
       $("btnDraftSave")?.addEventListener("click",()=>save(false));
       $("btnConfirmSave")?.addEventListener("click",()=>save(false));
+
+      // Enable dirty-leave protection
+      installDirtyLeaveGuards();
     })();
   </script>
 </body>
