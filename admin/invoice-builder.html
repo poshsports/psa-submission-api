@@ -37,7 +37,7 @@
           </div>
         </div>
 
-        <!-- Preview-as-a-page -->
+        <!-- Preview-as-page (same DOM as the overlay uses) -->
         <div id="previewPage">
           <!-- header -->
           <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #eee;">
@@ -53,7 +53,6 @@
           </div>
 
           <!-- body -->
-          <!-- NOTE: no scrolling here; only the table below will scroll -->
           <div id="draftBody" style="padding:12px 16px; display:flex; flex-direction:column; gap:12px; overflow:hidden; flex:1 1 auto; min-height:0;">
             <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start;">
               <!-- left: compact info boxes -->
@@ -83,15 +82,10 @@
                     <div>Subtotal (est.)</div>
                     <div class="js-subtotal">$—</div>
                   </div>
-
-                  <!-- Editable shipping to match builder behavior -->
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
                     <div>Shipping (flat)</div>
-                    <div>
-                      <input id="shipInput" type="number" step="0.01" min="0" value="5.00" style="width:96px;text-align:right;" />
-                    </div>
+                    <div class="js-ship">$5.00</div>
                   </div>
-
                   <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #eee;font-weight:700;">
                     <div>Total (est.)</div>
                     <div class="js-total">$—</div>
@@ -99,9 +93,9 @@
                   <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
                 </div>
               </div> <!-- end right summary column -->
-            </div>   <!-- end grid (left+right) -->
+            </div>
 
-            <!-- Cards (table is the only scroll area) -->
+            <!-- Cards -->
             <div style="margin-top:12px; display:flex; flex-direction:column; flex:1 1 auto; min-height:0;">
               <div style="font-weight:600;margin-bottom:6px;">Cards</div>
               <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px; flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;">
@@ -112,6 +106,7 @@
                     <col style="width:160px;">  <!-- Break channel -->
                     <col style="width:110px;">  <!-- Break # -->
                     <col style="width:auto;">   <!-- Card description -->
+                    <col style="width:120px;">  <!-- Grading ($) -->
                     <col style="width:140px;">  <!-- Upcharge ($) -->
                   </colgroup>
                   <thead>
@@ -121,205 +116,188 @@
                       <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Break channel</th>
                       <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Break #</th>
                       <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Card description</th>
+                      <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Grading ($)</th>
                       <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Upcharge ($)</th>
                     </tr>
                   </thead>
                   <tbody id="cardsTbody"></tbody>
                 </table>
               </div>
-              <div id="emptyMsg" class="empty hide" style="padding:12px;">No cards to show.</div>
-            </div>
-          </div> <!-- end #draftBody -->
-
-          <!-- (kept for parity; not currently used on this page) -->
-          <div id="confirmCloseModal" role="dialog" aria-modal="true"
-               style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);z-index:1100;">
-            <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
-              <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
-              <div class="muted" style="font-size:13px;margin-bottom:14px;">
-                Do you want to save your changes before closing?
-              </div>
-              <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button type="button" id="btnConfirmCancel" class="btn">Cancel</button>
-                <button type="button" id="btnConfirmDiscard" class="btn" style="background:#f1f5f9;">Discard</button>
-                <button type="button" id="btnConfirmSave" class="btn primary">Save &amp; Close</button>
-              </div>
+              <div id="cardsEmpty" class="empty hide" style="padding:12px;">No cards to show.</div>
             </div>
           </div>
-        </div> <!-- end #previewPage -->
+        </div>
       </main>
     </div>
   </div>
 
   <script type="module">
+    // ===== Utilities =====
     const $ = (id) => document.getElementById(id);
+    function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
+    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }
+    function fmtDateISOish(v){
+      if (!v) return '—';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) { const s = String(v); return s.length >= 10 ? s.slice(0,10) : s; }
+      return d.toISOString().slice(0,10);
+    }
+    function pill(text){ const span=document.createElement('span'); span.textContent=text; span.className='pill'; span.style.padding='4px 8px'; return span; }
+    function setList(el,arr){ if(!el) return; el.innerHTML=''; (arr||[]).forEach(v=>el.appendChild(pill(v))); }
 
-    // Sign out
-    document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
+    // ===== Sign out =====
+    $('sidebar-signout')?.addEventListener('click', async (e) => {
       e.preventDefault();
       try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
       window.location.replace('/admin');
     });
 
-    // Utils
-    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function fmtDateISOish(v){
-      if (!v) return '—';
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) {
-        const s = String(v);
-        return s.length >= 10 ? s.slice(0, 10) : s;
-      }
-      return d.toISOString().slice(0, 10);
-    }
-    function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
+    // ===== Settings & constants (identical to overlay) =====
+    const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
+    let SETTINGS = { ...DEFAULT_SETTINGS };
+    const SAVE_UPCHARGES_ENDPOINT = '/api/admin/billing/preview/save';
 
-    // === HYDRATE from URL (preferred), fallback to sessionStorage ===
+    async function loadSettings(){
+      try {
+        const r = await fetch('/api/admin/settings', { credentials: 'same-origin' });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          const s = j?.settings || j || {};
+          SETTINGS = {
+            grade_fee: Number(s.grade_fee) || DEFAULT_SETTINGS.grade_fee,
+            shipping : Number(s.shipping)  || DEFAULT_SETTINGS.shipping,
+          };
+        }
+      } catch {}
+      // paint shipping immediately
+      document.querySelector('.js-ship')?.replaceChildren(document.createTextNode(money(SETTINGS.shipping)));
+    }
+
+    // ===== Hydrate bundle from URL or session (matches overlay expectations) =====
     const params = new URLSearchParams(location.search);
-    const qSubs  = (params.get('subs') || '').trim();           // "psa-205,psa-206"
+    const qSubs  = (params.get('subs') || '').trim();
     const qEmail = (params.get('email') || '').trim();
     const qInvId = (params.get('invoice_id') || '').trim();
 
     let bundle = {};
     if (qSubs) {
-      const subs = qSubs.split(',').map(s => s.trim()).filter(Boolean)
-                        .map(id => ({ submission_id: id }));
-      bundle = {
-        customer_email: qEmail || '',
-        submissions   : subs,
-        groups        : [],
-        group_codes   : [],
-        invoice_id    : qInvId || null
-      };
+      const subs = qSubs.split(',').map(s => s.trim()).filter(Boolean).map(id => ({ submission_id: id }));
+      bundle = { customer_email: qEmail || '', submissions: subs, groups: [], group_codes: [], invoice_id: qInvId || null };
     } else {
-      // Fallback for older flows
-      try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); }
-      catch { bundle = {}; }
+      try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); } catch { bundle = {}; }
     }
+    try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
 
     if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length === 0) {
-      document.body.insertAdjacentHTML(
-        'beforeend',
-        '<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>'
-      );
+      document.body.insertAdjacentHTML('beforeend','<div class="empty" style="padding:24px;">Nothing to build. <a href="/admin/billing.html">Back to Billing</a></div>');
       throw new Error('No builder bundle present');
     }
-    // === END HYDRATE ===
-    try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
-    let draftInvoiceId = bundle.invoice_id || null;
 
-    async function loadPrefillForBuilder(subIds){
-      const qs = new URLSearchParams();
-      if (draftInvoiceId) qs.set('invoice_id', String(draftInvoiceId));
-      else if (Array.isArray(subIds) && subIds.length) qs.set('subs', subIds.join(','));
-
-      const em = (bundle.customer_email || '').trim();
-      if (em) qs.set('email', em);
-
-      if (![...qs.keys()].length) return { invoice_id: null, items: [] };
-
-      try {
-        const r = await fetch(`/api/admin/billing/preview/prefill?${qs}`, { credentials:'same-origin' });
-        if (!r.ok) return { invoice_id: null, items: [] };
-        return await r.json();
-      } catch {
-        return { invoice_id: null, items: [] };
-      }
-    }
-
-    // Merge saved values into state.rows (match on card_id/id)
-    function applyPrefillToState(prefill){
-      if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
-
-      const toDollars = (c) => {
-        const n = Number(c);
-        return Number.isFinite(n) ? n / 100 : 0;
+    // ===== Data helpers (copied from overlay) =====
+    function normalizeCardRow(r){
+      return {
+        id         : r.id || r.card_id || r.uuid || null,
+        submission : r.submission_id || r.submission_code || r.submission || '',
+        date       : r.break_date || r.break_at || r.date_of_break || null,
+        channel    : r.break_channel || r.channel || r.break || '',
+        breakNo    : r.break_num || r.break_number || r.break_no || r.break_id || '',
+        desc       : r.card_description || r.description || r.card || r.title || ''
       };
-
-      const upMap = new Map(
-        prefill.items.map(it => {
-          const dollars =
-            toDollars(it.upcharge_cents ?? it.suggested_upcharge_cents ?? it.prefill_upcharge_cents) ||
-            (Number.isFinite(Number(it.upcharge)) ? Number(it.upcharge) : 0);
-          return [ String(it.card_id), dollars ];
-        })
-      );
-
-      state.rows = state.rows.map(r => {
-        const key = String(r.card_id || r.id || r.uuid || r.cardId || '');
-        const saved = upMap.get(key);
-        return saved != null ? { ...r, __upcharge: saved } : r;
-      });
-
-      if (prefill.invoice_id) draftInvoiceId = prefill.invoice_id;
     }
 
-    // Fetch rows for submissions
     async function fetchCardsForSubs(subIds){
       if (!subIds.length) return [];
       const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
       try {
         const r = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials:'same-origin' });
         const j = await r.json().catch(()=>({ rows: [] }));
-        return Array.isArray(j.rows) ? j.rows : [];
+        const rows = Array.isArray(j.rows) ? j.rows : [];
+        return rows.map(normalizeCardRow);
       } catch { return []; }
     }
 
-    // Local state
-    const state = { rows: [], ship: 5.00 };
-    window.__builderState = state; // expose for console debugging
-    let isDirty = false;
+    let draftInvoiceId = bundle.invoice_id || null;
+    let hasUnsavedChanges = false;
 
-    function setDirty(on = true){
-      isDirty = !!on;
-      ['btnDraftSave','btnSaveDraft'].forEach(id=>{
-        const btn = document.getElementById(id);
-        if (btn) btn.disabled = !isDirty;
+    async function loadPrefillForSubs(submissionIds){
+      if (!submissionIds?.length) return { invoice_id: null, items: [] };
+      const qs = new URLSearchParams();
+      qs.set('subs', submissionIds.join(','));
+      const em = (bundle.customer_email || '').trim();
+      if (em) qs.set('email', em);              // ensures we grab the right draft
+      if (draftInvoiceId) qs.set('invoice_id', String(draftInvoiceId));
+      const r = await fetch(`/api/admin/billing/preview/prefill?${qs}`, { credentials:'same-origin' });
+      if (!r.ok) return { invoice_id: null, items: [] };
+      return r.json();
+    }
+
+    function applyPrefillToUI(prefill){
+      if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
+      const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
+      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+        const id = String(inp.getAttribute('data-id') || '');
+        const it = map.get(id);
+        if (!it) return;
+        const dollars = (Number(it.upcharge_cents || 0) / 100).toFixed(2);
+        inp.value = dollars;
       });
+      if (prefill.invoice_id) draftInvoiceId = prefill.invoice_id;
+      recalcFromDOM();
     }
 
-    window.addEventListener('beforeunload', (e) => {
-      if (!isDirty) return;
-      e.preventDefault();
-      e.returnValue = '';
-    });
-
-    function collectItemsFromState(){
-      // Only rows with a resolvable card id are saved
-      return state.rows
-        .map(r => {
-          const id = r.id || r.card_id || r.uuid || r.cardId;
-          if (!id) return null;
-          const dollars = Number(r.__upcharge || 0);
-          return {
-            card_id: String(id),
-            upcharge_cents: Math.round((Number.isFinite(dollars) ? dollars : 0) * 100)
-          };
-        })
-        .filter(Boolean);
+    // ===== Totals (identical to overlay) =====
+    function updateTotals(gradeSum, upchargeSum){
+      const ship = SETTINGS.shipping;
+      const subtotal = gradeSum + upchargeSum;
+      const total = subtotal + ship;
+      document.querySelector('.js-subtotal')?.replaceChildren(document.createTextNode(money(subtotal)));
+      document.querySelector('.js-total')?.replaceChildren(document.createTextNode(money(total)));
+      document.querySelector('.js-ship')?.replaceChildren(document.createTextNode(money(ship)));
     }
 
-    async function saveBuilderToDB(){
+    function recalcFromDOM(){
+      const tb = $('#cardsTbody'); if (!tb) return;
+      const rows = Array.from(tb.querySelectorAll('tr[data-row]'));
+      const gradeSum = rows.length * SETTINGS.grade_fee;
+      const upchargeSum = rows.reduce((sum, tr) => {
+        const v = Number(tr.querySelector('.js-up')?.value || 0);
+        return sum + (Number.isFinite(v) ? v : 0);
+      }, 0);
+      updateTotals(gradeSum, upchargeSum);
+    }
+
+    function setSaveEnabled(on){
+      const ids = ['btnDraftSave', 'btnSaveDraft'];
+      ids.forEach(id => { const b = $(id); if (b) b.disabled = !on; });
+    }
+
+    function collectUpcharges(){
+      const items = [];
+      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+        const cardId = inp.getAttribute('data-id');
+        const dollars = Number(inp.value || 0);
+        if (!cardId) return;
+        if (!Number.isFinite(dollars)) return;
+        items.push({ card_id: cardId, upcharge_cents: Math.round(dollars * 100) });
+      });
+      return items;
+    }
+
+    async function saveUpchargesToDB(){
       const email = (bundle.customer_email || '').trim();
-      const items = collectItemsFromState();
-
+      const items = collectUpcharges();
       if (!email) { alert('Missing customer email.'); return; }
       if (!items.length) { alert('Nothing to save.'); return; }
 
-      const btn = document.getElementById('btnDraftSave') || document.getElementById('btnSaveDraft');
+      const btn = $('#btnDraftSave') || $('#btnSaveDraft');
       if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
       try {
-        const res = await fetch('/api/admin/billing/preview/save', {
+        const res = await fetch(SAVE_UPCHARGES_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({
-            customer_email: email,
-            items,
-            invoice_id: draftInvoiceId || null,
-            shipping_cents: Math.round((Number(state.ship) || 0) * 100)
-          })
+          body: JSON.stringify({ customer_email: email, items, invoice_id: draftInvoiceId || null })
         });
 
         if (!res.ok) throw new Error(await res.text().catch(()=> 'Save failed'));
@@ -327,123 +305,82 @@
         const j = await res.json().catch(()=> ({}));
         if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
 
-        setDirty(false);
+        hasUnsavedChanges = false;
         if (btn) {
           btn.textContent = 'Saved ✓';
           setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 900);
         }
-
       } catch (err) {
         console.error(err);
         if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
-        alert('Failed to save draft.');
+        alert('Failed to save.');
       }
     }
 
-    function recompute(){
-      const upTotal = state.rows.reduce((a,r)=> a + (Number(r.__upcharge)||0), 0);
-      const ship    = Number(state.ship) || 0;
-      const total   = upTotal + ship;
-
-      const st = document.querySelector('.js-subtotal');
-      const gt = document.querySelector('.js-total');
-
-      if (st) st.textContent = money(upTotal);
-      if (gt) gt.textContent = money(total);
-    }
-
-    function renderRows(rows){
-      const tb = document.getElementById('cardsTbody');
-      const empty = document.getElementById('emptyMsg');
+    async function fillCardsTable(subIds, subsFallback){
+      const tb = $('#cardsTbody'); const empty = $('#cardsEmpty');
       if (!tb) return;
+      tb.innerHTML = '';
 
-      // Empty-state
-      if (!Array.isArray(rows) || rows.length === 0) {
+      let rows = await fetchCardsForSubs(subIds);
+
+      if (!rows.length && Array.isArray(subsFallback)) {
+        rows = subsFallback.flatMap(s => {
+          const sid = s?.submission_id || s?.submission_code || '';
+          const count = Number(s?.cards) || 0;
+          return Array.from({ length: count }, (_, i) => ({
+            id: null, submission: sid, date: null, channel: '', breakNo: (i+1), desc: ''
+          }));
+        });
+      }
+
+      if (!rows.length) {
         if (empty) empty.classList.remove('hide');
-        tb.replaceChildren();
-        recompute();
+        updateTotals(0, 0);
         return;
       }
       if (empty) empty.classList.add('hide');
 
-      // Build rows as real DOM nodes
-      const frag = document.createDocumentFragment();
-      rows.forEach((r, i) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
-          <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
-          <td>${esc(r.break_channel || r.channel || r.break || '')}</td>
-          <td style="text-align:right;">${esc(String(r.break_number || r.break_num || r.break_no || r.break_id || ''))}</td>
-          <td>${esc(r.card_description || r.description || r.card || r.title || '')}</td>
-          <td style="text-align:right;">
-            <input data-idx="${i}" class="up-inp" type="number" step="0.01" min="0"
-                   value="${Number(r.__upcharge || 0).toFixed(2)}"
-                   style="width:96px;text-align:right;" />
+      tb.innerHTML = rows.map((r, idx) => `
+        <tr data-row="${idx}" data-id="${esc(r.id || '')}">
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.date))}</td>
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || '—')}</td>
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.breakNo || '—'))}</td>
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || '—')}</td>
+          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;" class="js-grade">${money(SETTINGS.grade_fee)}</td>
+          <td style="padding:6px 12px;border-top:1px solid #f1f5f9;text-align:right;">
+            <input class="js-up" data-id="${esc(r.id || '')}" type="number" step="0.01" min="0" value="0.00" style="width:100px;text-align:right;" />
           </td>
-        `;
-        frag.appendChild(tr);
-      });
+        </tr>
+      `).join('');
 
-      tb.replaceChildren(frag);
-
-      // Wire inputs
-      tb.querySelectorAll('.up-inp').forEach(inp => {
-        inp.addEventListener('input', (e) => {
-          const idx = Number(e.currentTarget.dataset.idx);
-          const v = Number(e.currentTarget.value || 0);
-          window.__builderState.rows[idx].__upcharge = Number.isFinite(v) ? v : 0;
-          setDirty(true);
-          recompute();
+      // wire inputs
+      tb.querySelectorAll('.js-up').forEach(inp => {
+        inp.addEventListener('input', () => {
+          hasUnsavedChanges = true;
+          setSaveEnabled(true);
+          recalcFromDOM();
         });
       });
 
-      recompute();
+      // summary counts
+      document.querySelector('.js-card-count')?.replaceChildren(document.createTextNode(String(rows.length)));
+
+      recalcFromDOM();
     }
 
-    function updateHeader(){
-      const email   = bundle.customer_email || '—';
-      const subIds  = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
-      const groups  = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
+    function updateHeaderChips(rows){
+      const subs = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
+      const groups = Array.from(new Set((bundle.groups || bundle.group_codes || []).filter(Boolean)));
+      setList(document.querySelector('.js-sub-list'), subs);
+      setList(document.querySelector('.js-group-list'), groups);
+      document.querySelector('.js-cust-email')?.replaceChildren(document.createTextNode(bundle.customer_email || ''));
+      document.querySelector('.js-sub-count')?.replaceChildren(document.createTextNode(String(subs.length)));
 
-      // Header counts
-      const emailEl = document.querySelector('.js-cust-email');
-      const subCtEl = document.querySelector('.js-sub-count');
-      const cardCtEl= document.querySelector('.js-card-count');
-      if (emailEl)  emailEl.textContent  = email;
-      if (subCtEl)  subCtEl.textContent  = String(subIds.length);
-      if (cardCtEl) cardCtEl.textContent = String(state.rows.length);
-
-      // Chips
-      const subList = document.querySelector('.js-sub-list');
-      const grpList = document.querySelector('.js-group-list');
-      if (subList){
-        subList.innerHTML = '';
-        subIds.forEach(id=>{
-          const sp = document.createElement('span');
-          sp.className = 'pill';
-          sp.style.padding = '4px 8px';
-          sp.textContent = id;
-          subList.appendChild(sp);
-        });
-      }
-      if (grpList){
-        grpList.innerHTML = '';
-        groups.forEach(g=>{
-          const sp = document.createElement('span');
-          sp.className = 'pill';
-          sp.style.padding = '4px 8px';
-          sp.textContent = g;
-          grpList.appendChild(sp);
-        });
-      }
-
-      // Received range under the boxes, based on break dates if present
       const rngEl = document.querySelector('.js-range');
       if (rngEl){
-        const ds = state.rows
-          .map(r => new Date(r.break_date || r.break_at || r.date_of_break))
-          .filter(d => !Number.isNaN(d.getTime()));
+        const ds = rows.map(r => new Date(r.date)).filter(d => !Number.isNaN(d.getTime()));
         if (ds.length){
           const minD = new Date(Math.min(...ds));
           const maxD = new Date(Math.max(...ds));
@@ -454,67 +391,41 @@
       }
     }
 
-    // Init
+    // ===== Init (same flow as overlay, but as a page) =====
     (async function init(){
-      const shipEl = $('#shipInput');
-      if (shipEl) {
-        state.ship = Number(shipEl.value || 5.00) || 0;
-        recompute();
-        shipEl.addEventListener('input', ()=>{
-          state.ship = Number(shipEl.value || 0) || 0;
-          setDirty(true);
-          recompute();
-        });
-      }
+      await loadSettings();
 
-      // load rows first (defensive + instrumented)
-      const subs = (bundle.submissions || [])
-        .map(s => s?.submission_id)
-        .filter(Boolean);
+      const subs = (bundle.submissions || []).map(s => s?.submission_id).filter(Boolean);
+      updateHeaderChips([]); // paint static bits
 
+      // initial totals estimate based on known counts (like overlay)
+      const estCards =
+        (bundle.cards != null) ? Number(bundle.cards)
+        : (bundle.submissions || []).reduce((a,s)=>a+(Number(s?.cards)||0),0);
+      updateTotals(estCards * SETTINGS.grade_fee, 0);
+
+      // fetch rows + render
       const rows = await fetchCardsForSubs(subs);
-      console.log('[builder] fetched rows:', Array.isArray(rows) ? rows.length : '(not array)');
+      await fillCardsTable(subs, bundle.submissions);
+      updateHeaderChips(rows);
 
-      state.rows = rows.map(r => {
-        // prefer dollars if provided; else fall back to cents fields
-        const cents =
-          r.upcharge_cents ??
-          r.suggested_upcharge_cents ??
-          r.prefill_upcharge_cents ??
-          null;
+      // prefill saved upcharges (email + invoice guard)
+      try {
+        const pre = await loadPrefillForSubs(subs);
+        applyPrefillToUI(pre);
+      } catch {}
 
-        const dollars = r.upcharge != null
-          ? Number(r.upcharge)
-          : (cents != null ? Number(cents) / 100 : 0);
+      // hook Save buttons
+      $('#btnDraftSave')?.addEventListener('click', saveUpchargesToDB);
+      $('#btnSaveDraft')?.addEventListener('click', saveUpchargesToDB);
 
-        return { ...r, __upcharge: Number.isFinite(dollars) ? dollars : 0 };
+      // leave warning if dirty
+      window.addEventListener('beforeunload', (e) => {
+        if (!hasUnsavedChanges) return;
+        e.preventDefault();
+        e.returnValue = '';
       });
-
-      // then hydrate from DB (safe)
-      const pre = await loadPrefillForBuilder(subs);
-      applyPrefillToState(pre);
-      if (pre && pre.shipping_cents != null) {
-        state.ship = Number(pre.shipping_cents) / 100;
-        const s = $('#shipInput'); if (s) s.value = state.ship.toFixed(2);
-        recompute();
-      }
-
-      // render
-      renderRows(state.rows);
-      updateHeader();
-
-      // HARD CHECK: if nothing painted, drop a small debug row so we know this code path ran
-      const tb = document.getElementById('cardsTbody');
-      if (tb && !tb.querySelector('tr')) {
-        tb.innerHTML = `<tr><td colspan="6" style="padding:12px;text-align:center;color:#6b7280;">
-          debug (init): cards-preview returned ${state.rows.length} rows
-        </td></tr>`;
-      }
     })();
-
-    // Hook Save buttons
-    document.getElementById('btnDraftSave')?.addEventListener('click', saveBuilderToDB);
-    document.getElementById('btnSaveDraft')?.addEventListener('click', saveBuilderToDB);
   </script>
 </body>
 </html>
