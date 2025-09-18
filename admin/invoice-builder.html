@@ -120,15 +120,29 @@
     }
     function money(n){ const x = Number(n); return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—'; }
 
-// === HYDRATE: Load the bundle handed off by the Preview overlay ===
+// === HYDRATE from URL (preferred), fallback to sessionStorage ===
+const params = new URLSearchParams(location.search);
+const qSubs  = (params.get('subs') || '').trim();           // "psa-205,psa-206"
+const qEmail = (params.get('email') || '').trim();
+const qInvId = (params.get('invoice_id') || '').trim();
+
 let bundle = {};
-try {
-  bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}');
-} catch {
-  bundle = {};
+if (qSubs) {
+  const subs = qSubs.split(',').map(s => s.trim()).filter(Boolean)
+                    .map(id => ({ submission_id: id }));
+  bundle = {
+    customer_email: qEmail || '—',
+    submissions   : subs,
+    groups        : [],
+    group_codes   : [],
+    invoice_id    : qInvId || null
+  };
+} else {
+  // Fallback for older flows
+  try { bundle = JSON.parse(sessionStorage.getItem('psa:builder:bundle') || '{}'); }
+  catch { bundle = {}; }
 }
 
-// Hard stop if there’s nothing to build (prevents null refs below)
 if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length === 0) {
   document.body.insertAdjacentHTML(
     'beforeend',
@@ -138,6 +152,7 @@ if (!bundle || !Array.isArray(bundle.submissions) || bundle.submissions.length =
 }
 // === END HYDRATE ===
 try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
+let draftInvoiceId = bundle.invoice_id || null;
 
     // Header render (email, chips)
     (function renderHeader(){
@@ -170,6 +185,33 @@ try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
         });
       }
     })();
+async function loadPrefillForBuilder(subIds){
+  const qs = new URLSearchParams();
+  if (draftInvoiceId) qs.set('invoice_id', String(draftInvoiceId));
+  else if (Array.isArray(subIds) && subIds.length) qs.set('subs', subIds.join(','));
+
+  if (![...qs.keys()].length) return { invoice_id: null, items: [] };
+
+  try {
+    const r = await fetch(`/api/admin/billing/preview/prefill?${qs}`, { credentials:'same-origin' });
+    if (!r.ok) return { invoice_id: null, items: [] };
+    return await r.json();
+  } catch {
+    return { invoice_id: null, items: [] };
+  }
+}
+
+// Merge saved values into state.rows (match on card_id/id)
+function applyPrefillToState(prefill){
+  if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
+  const m = new Map(prefill.items.map(it => [ String(it.card_id), Number(it.upcharge_cents || 0) / 100 ]));
+  state.rows = state.rows.map(r => {
+    const key = String(r.id || r.card_id || r.uuid || r.cardId || '');
+    const saved = m.get(key);
+    return saved != null ? { ...r, __upcharge: saved } : r;
+  });
+  if (prefill.invoice_id) draftInvoiceId = prefill.invoice_id;
+}
 
     // Fetch rows for submissions
     async function fetchCardsForSubs(subIds){
@@ -229,24 +271,34 @@ try { sessionStorage.removeItem('psa:builder:bundle'); } catch {}
       recompute();
     }
 
-    // Init
-    (async function init(){
-      const shipEl = $('#shipInput');
-      if (shipEl) {
-state.ship = Number(shipEl.value || 5.00) || 0;
-recompute(); // <-- add this line
-shipEl.addEventListener('input', ()=>{
-  state.ship = Number(shipEl.value || 0) || 0;
-  recompute();
-});
+// Init
+(async function init(){
+  const shipEl = $('#shipInput');
+  if (shipEl) {
+    state.ship = Number(shipEl.value || 5.00) || 0;
+    recompute();
+    shipEl.addEventListener('input', ()=>{
+      state.ship = Number(shipEl.value || 0) || 0;
+      recompute();
+    });
+  }
 
-      }
+  // load rows first
+  const subs = (bundle.submissions || [])
+    .map(s => s?.submission_id)
+    .filter(Boolean);
 
-      const subs = (bundle.submissions || []).map(s=>s?.submission_id).filter(Boolean);
-      const rows = await fetchCardsForSubs(subs);
-      state.rows = rows.map(r => ({ ...r, __upcharge: 0 }));
-      renderRows(state.rows);
-    })();
+  const rows = await fetchCardsForSubs(subs);
+  state.rows = rows.map(r => ({ ...r, __upcharge: 0 }));
+
+  // then hydrate from DB (by invoice_id if present, else by subs)
+  const pre = await loadPrefillForBuilder(subs);
+  applyPrefillToState(pre);
+
+  // finally render
+  renderRows(state.rows);
+})();
+
   </script>
 </body>
 </html>
