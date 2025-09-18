@@ -226,7 +226,7 @@ function applyPrefillToState(prefill){
 
     // Local state
     const state = { rows: [], ship: 5.00 };
-
+    window.__builderState = state; // expose for console debugging
     let isDirty = false;
 
 function setDirty(on = true){
