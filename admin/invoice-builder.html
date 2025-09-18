@@ -315,6 +315,7 @@ body: JSON.stringify({
       empty.classList.add('hide');
 
       tb.innerHTML = rows.map((r,i)=>`
+      console.log('tbody rows after render:', tb.querySelectorAll('tr').length);
         <tr>
           <td>${esc(r.submission_id || r.submission_code || r.submission || '')}</td>
           <td>${esc(fmtDateISOish(r.break_date || r.break_at || r.date_of_break))}</td>
