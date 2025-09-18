@@ -192,8 +192,9 @@
       </div> <!-- end #draftBody -->
 
 <!-- Confirm Close Modal (direct child of #draftPanel) -->
-<div id="confirmCloseModal"
-     style="position:absolute;inset:0;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);">
+<div id="confirmCloseModal" role="dialog" aria-modal="true"
+     style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+            background:rgba(0,0,0,0.35);z-index:1100;">
   <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
     <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
     <div class="muted" style="font-size:13px;margin-bottom:14px;">
@@ -323,8 +324,12 @@ function applyPrefillToUI(prefill) {
 function showConfirmClose(show) {
   const m = document.getElementById('confirmCloseModal');
   if (!m) return;
-  if (show) m.classList.add('open');
-  else m.classList.remove('open');
+  m.style.display = show ? 'flex' : 'none';
+  if (show) {
+    // move focus into the dialog so ESC works naturally
+    (document.getElementById('btnConfirmSave') ||
+     document.getElementById('btnConfirmCancel') || m).focus();
+  }
 }
 
 async function handleAttemptClose() {
@@ -498,7 +503,12 @@ tb.querySelectorAll(".js-up").forEach(inp => {
     recalcFromDOM();
   }
 
-  function openOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.remove("hide"); }
+  function openOverlay() {
+  const wrap = $("draftOverlay");
+  if (wrap) wrap.classList.remove("hide");
+  const m = document.getElementById('confirmCloseModal'); // NEW
+  if (m) m.style.display = 'none';                        // NEW
+}
   function closeOverlay() { const wrap = $("draftOverlay"); if (wrap) wrap.classList.add("hide"); }
 
   let lastBundle = null;
@@ -532,6 +542,28 @@ tb.querySelectorAll(".js-up").forEach(inp => {
     if (rangeEl) rangeEl.textContent = (oldest || newest) ? ("Oldest: " + (oldest || "—") + " • Newest: " + (newest || "—")) : "—";
 
     const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
+   const subIds = subs.map(s => s && s.submission_id).filter(Boolean);
+
+// show shipping immediately
+{
+  const shipEl = document.querySelector(".js-ship");
+  if (shipEl) shipEl.textContent = money(SETTINGS.shipping);
+}
+
+// show an immediate estimate before rows load (uses submitted card counts)
+{
+  const estCards =
+    (lastBundle?.cards != null)
+      ? Number(lastBundle.cards)
+      : subs.reduce((a, s) => a + (Number(s?.cards) || 0), 0);
+
+  const gradeSum = estCards * SETTINGS.grade_fee;
+  updateTotals(gradeSum, 0); // upcharges unknown until rows/prefill
+}
+
+await fillCardsTable(subIds, subs);
+
+
     await fillCardsTable(subIds, subs);
     // Prefill any saved values for these submissions (if a draft exists)
 try {
@@ -540,10 +572,6 @@ try {
 } catch {}
 
     document.getElementById('btnDraftSave')?.setAttribute('disabled','');
-
-    const subEl = document.querySelector(".js-subtotal"); if (subEl) subEl.textContent = "$—";
-    const shipEl = document.querySelector(".js-ship");     if (shipEl) shipEl.textContent = money(SETTINGS.shipping);
-    const totEl  = document.querySelector(".js-total");    if (totEl)  totEl.textContent  = "$—";
   }
 
   // open from table: ensure settings loaded first
@@ -565,7 +593,26 @@ try {
   $("btnDraftBuild") && $("btnDraftBuild").addEventListener("click", openBuilderFromPreview);
   $("btnDraftClose") && $("btnDraftClose").addEventListener("click", handleAttemptClose);
   $("draftBackdrop") && $("draftBackdrop").addEventListener("click", handleAttemptClose);
-  window.addEventListener("keydown", (e) => { if (e.key === "Escape") handleAttemptClose(); });
+  function isConfirmOpen() {
+  const m = document.getElementById('confirmCloseModal');
+  return m && m.style.display !== 'none';
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (isConfirmOpen()) {
+    showConfirmClose(false);   // close the prompt if it's open
+  } else {
+    handleAttemptClose();      // otherwise, try to close the overlay (and prompt if dirty)
+  }
+});
+
+// Also close the prompt when clicking the dim area *inside* the confirm overlay
+const confirmEl = document.getElementById('confirmCloseModal');
+confirmEl?.addEventListener('click', (e) => {
+  if (e.target === confirmEl) showConfirmClose(false);
+});
+
   wireConfirmModal();
 
 })();
