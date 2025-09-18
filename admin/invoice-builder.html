@@ -8,16 +8,18 @@
   <link rel="icon" href="data:,">
 </head>
 <body>
+
+  <!-- APP SHELL -->
   <div id="shell">
     <div class="admin-shell">
       <!-- Sidebar -->
       <aside class="admin-sidebar">
         <div class="sidebar-title">PSA Admin</div>
-        <a class="sidebar-item" href="/admin/index.html">Active submissions</a>
-        <a class="sidebar-item" href="/admin/groups.html">Groups</a>
-        <a class="sidebar-item active" href="/admin/billing.html">Billing</a>
-        <a class="sidebar-item" href="#" title="Coming soon">Reports</a>
-        <a class="sidebar-item" href="#" title="Coming soon">Settings</a>
+        <a id="nav-active"  class="sidebar-item" href="/admin/index.html">Active submissions</a>
+        <a id="nav-groups"  class="sidebar-item" href="/admin/groups.html">Groups</a>
+        <a id="nav-billing" class="sidebar-item" href="/admin/billing.html">Billing</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item" href="#" title="Coming soon">Settings</a>
         <div class="sidebar-spacer"></div>
         <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
       </aside>
@@ -30,24 +32,17 @@
             <span class="dot"></span>
             <strong>Invoice Builder</strong>
           </div>
-          <div class="top-actions" style="display:flex;gap:8px;align-items:center;">
-            <a class="btn" href="/admin/billing.html">← Back to Billing</a>
-            <button id="btnSave" class="btn" type="button" disabled>Save</button>
-            <button id="btnSend" class="btn primary" type="button" title="Coming soon" disabled>Send</button>
+          <div class="top-actions">
+            <a href="/admin/billing.html" class="btn">← Back to Billing</a>
+            <button type="button" id="btnDraftSave" class="btn" style="min-width:120px;" disabled>Save</button>
+            <button type="button" id="btnDraftSend" class="btn primary" style="min-width:120px;">Send</button>
           </div>
         </div>
 
-        <!-- Header -->
-        <div style="padding:12px 16px;">
-          <div style="font-weight:700;margin-bottom:6px;">Draft Invoice Preview</div>
-          <div class="muted" style="font-size:12px;margin-bottom:10px;">
-            <span class="js-cust-email"></span> ·
-            <span class="js-sub-count">0</span> submissions ·
-            <span class="js-card-count">0</span> cards
-          </div>
-
+        <!-- Body -->
+        <div id="draftBody" style="padding:12px 16px; display:flex; flex-direction:column; gap:12px; overflow:hidden; flex:1 1 auto; min-height:0;">
           <div style="display:grid;grid-template-columns:1.2fr .8fr;gap:16px;align-items:start;">
-            <!-- left -->
+            <!-- Submissions + Groups -->
             <div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div style="border:1px solid #eee;border-radius:12px;padding:10px;">
@@ -62,7 +57,7 @@
               <div class="js-range muted" style="margin-top:8px;font-size:12px;"></div>
             </div>
 
-            <!-- right summary -->
+            <!-- Summary -->
             <div>
               <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
                 <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
@@ -81,336 +76,189 @@
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Cards -->
-        <div style="padding:0 16px 16px 16px; display:flex; flex-direction:column; gap:8px;">
-          <div style="font-weight:600;">Cards</div>
-          <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px; flex:1 1 auto; min-height:200px; overflow:auto; overscroll-behavior:contain;">
-            <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
-              <colgroup>
-                <col style="width:140px;">
-                <col style="width:120px;">
-                <col style="width:160px;">
-                <col style="width:110px;">
-                <col style="width:auto;">
-                <col style="width:120px;">
-                <col style="width:140px;">
-              </colgroup>
-              <thead>
-                <tr>
-                  <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Submission</th>
-                  <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Date of break</th>
-                  <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Break channel</th>
-                  <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Break #</th>
-                  <th style="text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Card description</th>
-                  <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Grading ($)</th>
-                  <th style="text-align:right;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:1;background:#f8fafc;">Upcharge ($)</th>
-                </tr>
-              </thead>
-              <tbody id="cardsTbody"></tbody>
-            </table>
+          <!-- Cards table -->
+          <div style="margin-top:12px; display:flex; flex-direction:column; flex:1 1 auto; min-height:0;">
+            <div style="font-weight:600;margin-bottom:6px;">Cards</div>
+            <div class="cards-wrap" style="border:1px solid #eee;border-radius:12px; flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;">
+              <table class="cards-table" style="width:100%;min-width:960px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
+                <thead>
+                  <tr>
+                    <th>Submission</th>
+                    <th>Date of break</th>
+                    <th>Break channel</th>
+                    <th style="text-align:right;">Break #</th>
+                    <th>Card description</th>
+                    <th style="text-align:right;">Grading ($)</th>
+                    <th style="text-align:right;">Upcharge ($)</th>
+                  </tr>
+                </thead>
+                <tbody id="cardsTbody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </main>
     </div>
   </div>
 
+  <!-- Confirm Close Modal -->
+  <div id="confirmCloseModal" role="dialog" aria-modal="true"
+       style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+              background:rgba(0,0,0,0.35);z-index:1100;">
+    <div style="width:min(460px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Unsaved changes</div>
+      <div class="muted" style="font-size:13px;margin-bottom:14px;">
+        Do you want to save your changes before leaving?
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="btnConfirmCancel" class="btn">Cancel</button>
+        <button type="button" id="btnConfirmDiscard" class="btn" style="background:#f1f5f9;">Discard</button>
+        <button type="button" id="btnConfirmSave" class="btn primary">Save &amp; Leave</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script -->
   <script type="module">
-    // ---------- tiny utils ----------
     const $ = (id) => document.getElementById(id);
-    const qs = new URLSearchParams(location.search);
-    const money = (n) => {
-      const x = Number(n);
-      return Number.isFinite(x) ? x.toLocaleString(undefined, { style:'currency', currency:'USD' }) : '$—';
-    };
-    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const fmtDateISOish = (v) => {
-      if (!v) return '—';
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) { const s = String(v); return s.length >= 10 ? s.slice(0,10) : s; }
-      return d.toISOString().slice(0,10);
-    };
+    const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
+    let SETTINGS = { ...DEFAULT_SETTINGS };
+    const SAVE_ENDPOINT = '/api/admin/billing/preview/save';
+    let draftInvoiceId = null;
+    let hasUnsavedChanges = false;
+    let lastBundle = null;
 
-    // ---------- constants & state ----------
-    const GRADE_FEE = 20.00;     // flat per-card grading (adjust if needed)
-    const SHIPPING  = 5.00;      // flat shipping shown in the summary
-    const PREFILL_URL = '/api/admin/billing/preview/prefill';
-    const CARDS_URL   = '/api/admin/billing/cards-preview';
-    const SAVE_URL    = '/api/admin/billing/preview/save';
-
-    const state = { rows: [], ship: SHIPPING };
-    let draftInvoiceId = (qs.get('invoice_id') || '').trim() || null;
-    const bundle = (() => {
-      const subs = (qs.get('subs') || '')
-        .split(',').map(s => s.trim()).filter(Boolean)
-        .map(id => ({ submission_id: id }));
-      return {
-        customer_email: (qs.get('email') || '').trim(),
-        submissions: subs,
-        groups: [],
-        group_codes: [],
-        invoice_id: draftInvoiceId
-      };
-    })();
-
-    // ---------- header chips ----------
-    function pill(text){
-      const span = document.createElement('span');
-      span.textContent = text;
-      span.style.display='inline-block';
-      span.style.padding='4px 8px';
-      span.className='pill';
-      return span;
-    }
-    function updateHeader(){
-      const emailEl = document.querySelector('.js-cust-email');
-      const subCtEl = document.querySelector('.js-sub-count');
-      const cardCtEl= document.querySelector('.js-card-count');
-      if (emailEl) emailEl.textContent = bundle.customer_email || '—';
-      if (subCtEl) subCtEl.textContent = String((bundle.submissions||[]).length);
-      if (cardCtEl) cardCtEl.textContent = String(state.rows.length);
-
-      const subList = document.querySelector('.js-sub-list');
-      const grpList = document.querySelector('.js-group-list');
-      if (subList){
-        subList.innerHTML=''; (bundle.submissions||[]).forEach(s=> subList.appendChild(pill(s.submission_id)));
-      }
-      if (grpList){
-        grpList.innerHTML=''; (bundle.group_codes||bundle.groups||[]).forEach(g=> grpList.appendChild(pill(g)));
-      }
-
-      const rngEl = document.querySelector('.js-range');
-      if (rngEl){
-        const ds = state.rows.map(r => new Date(r.break_date || r.break_at || r.date_of_break))
-                             .filter(d => !Number.isNaN(d.getTime()));
-        if (ds.length){
-          const minD = new Date(Math.min(...ds));
-          const maxD = new Date(Math.max(...ds));
-          rngEl.textContent = `Received ${fmtDateISOish(minD)} – ${fmtDateISOish(maxD)}`;
-        } else {
-          rngEl.textContent = '';
+    async function loadSettings() {
+      try {
+        const r = await fetch('/api/admin/settings', { credentials: 'same-origin' });
+        if (r.ok) {
+          const j = await r.json().catch(() => ({}));
+          const s = j?.settings || j || {};
+          SETTINGS = {
+            grade_fee: Number(s.grade_fee) || DEFAULT_SETTINGS.grade_fee,
+            shipping : Number(s.shipping)  || DEFAULT_SETTINGS.shipping,
+          };
         }
-      }
+      } catch {}
     }
 
-    // ---------- totals ----------
-    function recompute(){
-      const grade = state.rows.length * GRADE_FEE;
-      const up    = state.rows.reduce((a,r)=> a + (Number(r.__upcharge)||0), 0);
-      const sub   = grade + up;
-      const tot   = sub + state.ship;
+    function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
+    function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function pill(text){const span=document.createElement("span");span.textContent=text;span.className="pill";return span;}
 
-      const st = document.querySelector('.js-subtotal');
-      const sh = document.querySelector('.js-ship');
-      const gt = document.querySelector('.js-total');
-      if (st) st.textContent = money(sub);
-      if (sh) sh.textContent = money(state.ship);
-      if (gt) gt.textContent = money(tot);
-    }
-
-    // ---------- data fetch ----------
-    function normalizeRow(r){
-      const cents =
-        r.upcharge_cents ??
-        r.suggested_upcharge_cents ??
-        r.prefill_upcharge_cents ??
-        null;
-
-      const dollars = r.upcharge != null
-        ? Number(r.upcharge)
-        : (cents != null ? Number(cents) / 100 : 0);
-
-      return {
-        id: r.id || r.card_id || r.uuid || r.cardId || null,
-        submission: r.submission_id || r.submission_code || r.submission || '',
-        break_date: r.break_date || r.break_at || r.date_of_break || null,
-        channel: r.break_channel || r.channel || r.break || '',
-        break_no: r.break_number || r.break_num || r.break_no || r.break_id || '',
-        desc: r.card_description || r.description || r.card || r.title || '',
-        __upcharge: Number.isFinite(dollars) ? dollars : 0
-      };
-    }
+    function normalizeCardRow(r){return{
+      id:r.id||r.card_id||r.uuid||null,
+      submission:r.submission_id||r.submission_code||r.submission||"",
+      date:r.break_date||r.break_at||r.date_of_break||null,
+      channel:r.break_channel||r.channel||r.break||"",
+      breakNo:r.break_num||r.break_number||r.break_no||r.break_id||"",
+      desc:r.card_description||r.description||r.card||r.title||""
+    };}
 
     async function fetchCardsForSubs(subIds){
-      if (!subIds.length) return { ok:true, rows: [] };
-      const url = `${CARDS_URL}?${new URLSearchParams({ subs: subIds.join(',') })}`;
-      try {
-        const res = await fetch(url, { credentials:'same-origin' });
-        if (!res.ok) {
-          const t = await res.text().catch(()=> '');
-          return { ok:false, status:res.status, text:t };
-        }
-        const j = await res.json().catch(()=> ({ rows: [] }));
-        const rows = Array.isArray(j.rows) ? j.rows.map(normalizeRow) : [];
-        return { ok:true, rows };
-      } catch (e) {
-        return { ok:false, status:'network', text:String(e||'error') };
-      }
+      if(!subIds.length)return[];
+      const qs=new URLSearchParams({subs:subIds.join(",")}).toString();
+      const r=await fetch(`/api/admin/billing/cards-preview?${qs}`,{credentials:"same-origin"});
+      const j=await r.json().catch(()=>({rows:[]}));
+      return (j.rows||[]).map(normalizeCardRow);
     }
 
-    async function loadPrefill(subIds){
-      const qp = new URLSearchParams();
-      if (draftInvoiceId) qp.set('invoice_id', String(draftInvoiceId));
-      else if (subIds.length) qp.set('subs', subIds.join(','));
-      const em = (bundle.customer_email||'').trim(); if (em) qp.set('email', em);
-      if (![...qp.keys()].length) return { invoice_id:null, items:[] };
-
-      try{
-        const r = await fetch(`${PREFILL_URL}?${qp.toString()}`, { credentials:'same-origin' });
-        if (!r.ok) return { invoice_id:null, items:[] };
-        return await r.json();
-      } catch { return { invoice_id:null, items:[] }; }
+    async function loadPrefill(submissionIds){
+      if(!submissionIds?.length)return{invoice_id:null,items:[]};
+      const qs=encodeURIComponent(submissionIds.join(','));
+      const r=await fetch(`/api/admin/billing/preview/prefill?subs=${qs}`,{credentials:'same-origin'});
+      if(!r.ok)return{invoice_id:null,items:[]};
+      return r.json();
     }
 
     function applyPrefill(prefill){
-      if (!prefill || !Array.isArray(prefill.items) || !prefill.items.length) return;
-      const toDol = (c) => Number.isFinite(Number(c)) ? Number(c)/100 : 0;
-      const map = new Map(prefill.items.map(it => {
-        const dollars =
-          toDol(it.upcharge_cents ?? it.suggested_upcharge_cents ?? it.prefill_upcharge_cents) ||
-          (Number.isFinite(Number(it.upcharge)) ? Number(it.upcharge) : 0);
-        return [ String(it.card_id), dollars ];
-      }));
-      state.rows = state.rows.map(r => {
-        const saved = map.get(String(r.id || ''));
-        return saved != null ? { ...r, __upcharge: saved } : r;
+      if(!prefill?.items?.length)return;
+      const map=new Map(prefill.items.map(it=>[String(it.card_id),it]));
+      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp=>{
+        const id=String(inp.dataset.id||'');
+        const it=map.get(id);
+        if(it) inp.value=(Number(it.upcharge_cents||0)/100).toFixed(2);
       });
-      if (prefill.invoice_id) draftInvoiceId = prefill.invoice_id;
+      draftInvoiceId=prefill.invoice_id||null;
+      recalc();
     }
 
-    // ---------- render ----------
-    function renderRows(){
-      const tb = $('cardsTbody');
-      if (!tb) return;
-      tb.innerHTML = '';
-
-      if (!state.rows.length){
-        tb.innerHTML = '<tr><td colspan="7" style="padding:12px;text-align:center;color:#6b7280;">No card rows to show.</td></tr>';
-        recompute(); updateHeader();
-        return;
-      }
-
-      const frag = document.createDocumentFragment();
-      state.rows.forEach((r, i) => {
-        const tr = document.createElement('tr');
-        tr.setAttribute('data-row', String(i));
-        tr.innerHTML = `
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.submission)}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;">${esc(fmtDateISOish(r.break_date))}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.channel || '—')}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;">${esc(String(r.break_no || '—'))}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;overflow:hidden;text-overflow:ellipsis;">${esc(r.desc || '—')}</td>
-          <td style="padding:8px 12px;border-top:1px solid #f1f5f9;text-align:right;white-space:nowrap;" class="js-grade">${money(GRADE_FEE)}</td>
-          <td style="padding:6px 12px;border-top:1px solid #f1f5f9;text-align:right;">
-            <input class="up-inp" data-idx="${i}" data-id="${esc(r.id || '')}" type="number" step="0.01" min="0"
-                   value="${Number(r.__upcharge || 0).toFixed(2)}"
-                   style="width:96px;text-align:right;" ${r.id ? '' : 'disabled'} />
-          </td>`;
-        frag.appendChild(tr);
-      });
-      tb.appendChild(frag);
-
-      // wire inputs
-      tb.querySelectorAll('.up-inp').forEach(inp => {
-        inp.addEventListener('input', (e) => {
-          const idx = Number(e.currentTarget.dataset.idx);
-          const v = Number(e.currentTarget.value || 0);
-          state.rows[idx].__upcharge = Number.isFinite(v) ? v : 0;
-          $('#btnSave').disabled = false;
-          recompute();
-          updateHeader();
-        });
-      });
-
-      recompute();
-      updateHeader();
+    function updateTotals(gradeSum, upchargeSum){
+      const ship=SETTINGS.shipping, subtotal=gradeSum+upchargeSum, total=subtotal+ship;
+      document.querySelector(".js-subtotal").textContent=money(subtotal);
+      document.querySelector(".js-total").textContent=money(total);
+      document.querySelector(".js-ship").textContent=money(ship);
     }
 
-    // ---------- save ----------
-    function collectItems(){
-      return state.rows.map(r => {
-        const id = r.id;
-        if (!id) return null;
-        const dollars = Number(r.__upcharge || 0);
-        return { card_id: String(id), upcharge_cents: Math.round((Number.isFinite(dollars) ? dollars : 0) * 100) };
+    function recalc(){
+      const rows=[...document.querySelectorAll("#cardsTbody tr[data-row]")];
+      const gradeSum=rows.length*SETTINGS.grade_fee;
+      const upchargeSum=rows.reduce((s,tr)=>s+Number(tr.querySelector(".js-up")?.value||0),0);
+      updateTotals(gradeSum,upchargeSum);
+    }
+
+    function collectUpcharges(){
+      return [...document.querySelectorAll('#cardsTbody input.js-up')].map(inp=>{
+        const id=inp.dataset.id;const v=Number(inp.value||0);
+        return id&&Number.isFinite(v)?{card_id:id,upcharge_cents:Math.round(v*100)}:null;
       }).filter(Boolean);
     }
 
-    async function saveDraft(){
-      const email = (bundle.customer_email || '').trim();
-      const items = collectItems();
-      if (!email) { alert('Missing customer email.'); return; }
-      if (!items.length) { alert('Nothing to save.'); return; }
-
-      const btn = $('#btnSave');
-      if (btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
-
-      try{
-        const res = await fetch(SAVE_URL, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          credentials:'same-origin',
-          body: JSON.stringify({
-            customer_email: email,
-            items,
-            invoice_id: draftInvoiceId || null,
-            shipping_cents: Math.round((Number(state.ship) || 0) * 100)
-          })
-        });
-        if (!res.ok) throw new Error(await res.text().catch(()=> 'Save failed'));
-        const j = await res.json().catch(()=> ({}));
-        if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
-        if (btn){
-          btn.textContent = 'Saved ✓';
-          setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 900);
-        }
-      } catch (e){
-        console.error(e);
-        if (btn){ btn.textContent = 'Save'; btn.disabled = false; }
-        alert('Failed to save draft.');
-      }
+    async function save(silent=false){
+      const email=(lastBundle?.customer_email||'').trim();
+      const items=collectUpcharges();
+      if(!email||!items.length)return;
+      const btn=$("btnDraftSave");
+      btn.disabled=true;btn.textContent='Saving…';
+      const res=await fetch(SAVE_ENDPOINT,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',
+        body:JSON.stringify({customer_email:email,items,invoice_id:draftInvoiceId||null})
+      });
+      if(res.ok){
+        const j=await res.json().catch(()=>({}));
+        if(j.invoice_id) draftInvoiceId=j.invoice_id;
+        hasUnsavedChanges=false;
+        btn.textContent='Saved ✓';
+        setTimeout(()=>{btn.textContent='Save';btn.disabled=true;},1200);
+      } else {btn.disabled=false;btn.textContent='Save';}
     }
 
-    // ---------- boot ----------
+    async function populate(bundle){
+      lastBundle=bundle;
+      const subs=bundle.submissions||[];
+      document.querySelector(".js-sub-list").innerHTML='';
+      subs.forEach(s=>document.querySelector(".js-sub-list").appendChild(pill(s.submission_id)));
+      const subIds=subs.map(s=>s.submission_id);
+      const rows=await fetchCardsForSubs(subIds);
+      $("cardsTbody").innerHTML=rows.map((r,i)=>`
+        <tr data-row="${i}">
+          <td>${esc(r.submission)}</td>
+          <td>${esc(r.date||'')}</td>
+          <td>${esc(r.channel||'—')}</td>
+          <td style="text-align:right;">${esc(r.breakNo||'—')}</td>
+          <td>${esc(r.desc||'—')}</td>
+          <td style="text-align:right;">${money(SETTINGS.grade_fee)}</td>
+          <td style="text-align:right;"><input class="js-up" data-id="${esc(r.id||'')}" type="number" step="0.01" value="0.00" style="width:100px;text-align:right;"/></td>
+        </tr>`).join("");
+      $("cardsTbody").addEventListener("input",()=>{hasUnsavedChanges=true;$("btnDraftSave").disabled=false;recalc();});
+      recalc();
+      const pre=await loadPrefill(subIds);applyPrefill(pre);
+    }
+
+    // Boot
     (async function init(){
-      // sign out
-      document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
-        window.location.replace('/admin');
+      $("sidebar-signout")?.addEventListener("click",async e=>{
+        e.preventDefault();try{await fetch('/api/admin-logout',{method:'POST',credentials:'same-origin'});}catch{}window.location.replace('/admin');
       });
-
-      // show shipping immediately
-      const shipEl = document.querySelector('.js-ship');
-      if (shipEl) shipEl.textContent = money(state.ship);
-
-      const subIds = (bundle.submissions || []).map(s => s?.submission_id).filter(Boolean);
-      document.querySelector('.js-cust-email').textContent = bundle.customer_email || '—';
-      document.querySelector('.js-sub-count').textContent = String(subIds.length);
-
-      // 1) fetch rows
-      const r = await fetchCardsForSubs(subIds);
-      if (!r.ok){
-        const tb = $('cardsTbody');
-        tb.innerHTML = `<tr><td colspan="7" style="padding:12px;text-align:center;color:#b91c1c;">
-          Failed to load cards-preview (${esc(String(r.status))}). ${esc(r.text || '')}
-        </td></tr>`;
-        recompute(); updateHeader();
-        return;
-      }
-      state.rows = r.rows;
-
-      // 2) hydrate from prefill (if any)
-      const pre = await loadPrefill(subIds);
-      applyPrefill(pre);
-
-      // 3) render
-      renderRows();
-
-      // wire save
-      $('#btnSave')?.addEventListener('click', saveDraft);
-      $('#btnSave').disabled = true;
+      await loadSettings();
+      const qs=new URLSearchParams(location.search);
+      const subs=(qs.get("subs")||"").split(",").filter(Boolean).map(id=>({submission_id:id}));
+      const bundle={customer_email:qs.get("email")||"",submissions:subs};
+      await populate(bundle);
+      $("btnDraftSave")?.addEventListener("click",()=>save(false));
+      $("btnConfirmSave")?.addEventListener("click",()=>save(false));
     })();
   </script>
 </body>
