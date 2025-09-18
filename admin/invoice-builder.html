@@ -54,7 +54,10 @@
                   <div class="js-group-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
                 </div>
               </div>
-              <div class="js-range muted" style="margin-top:8px;font-size:12px;"></div>
+              <!-- Email (added) -->
+              <div class="js-email muted" style="margin-top:8px;font-size:12px;"></div>
+              <!-- Received range -->
+              <div class="js-range muted" style="margin-top:4px;font-size:12px;"></div>
             </div>
 
             <!-- Summary -->
@@ -145,7 +148,7 @@
 
     function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
     function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function pill(text){const span=document.createElement("span");span.textContent=text;span.className="pill";return span;}
+    function pill(text){const span=document.createElement("span");span.textContent=text;span.style.display="inline-block";span.style.padding="4px 8px";span.style.border="1px solid #e5e7eb";span.style.borderRadius="999px";span.style.fontSize="12px";span.style.background="#f8fafc";return span;}
 
     function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
@@ -228,8 +231,23 @@
     async function populate(bundle){
       lastBundle=bundle;
       const subs=bundle.submissions||[];
-      document.querySelector(".js-sub-list").innerHTML='';
-      subs.forEach(s=>document.querySelector(".js-sub-list").appendChild(pill(s.submission_id)));
+      const groups=bundle.groups||bundle.group_codes||[];
+      const email=bundle.customer_email||'';
+
+      // Submissions pills
+      const subEl=document.querySelector(".js-sub-list");
+      subEl.innerHTML='';
+      subs.forEach(s=>subEl.appendChild(pill(s.submission_id)));
+
+      // Groups pills (added)
+      const grpEl=document.querySelector(".js-group-list");
+      grpEl.innerHTML='';
+      groups.forEach(code=>grpEl.appendChild(pill(code)));
+
+      // Email line (added)
+      const emailEl=document.querySelector(".js-email");
+      if(emailEl) emailEl.textContent = email ? `Customer: ${email}` : 'Customer: —';
+
       const subIds=subs.map(s=>s.submission_id);
       const rows=await fetchCardsForSubs(subIds);
       $("cardsTbody").innerHTML=rows.map((r,i)=>`
@@ -242,8 +260,11 @@
           <td style="text-align:right;">${money(SETTINGS.grade_fee)}</td>
           <td style="text-align:right;"><input class="js-up" data-id="${esc(r.id||'')}" type="number" step="0.01" value="0.00" style="width:100px;text-align:right;"/></td>
         </tr>`).join("");
+
+      // delegated input: totals + save enablement
       $("cardsTbody").addEventListener("input",()=>{hasUnsavedChanges=true;$("btnDraftSave").disabled=false;recalc();});
       recalc();
+
       const pre=await loadPrefill(subIds);applyPrefill(pre);
     }
 
@@ -253,9 +274,13 @@
         e.preventDefault();try{await fetch('/api/admin-logout',{method:'POST',credentials:'same-origin'});}catch{}window.location.replace('/admin');
       });
       await loadSettings();
+
+      // Read query params (now includes groups)
       const qs=new URLSearchParams(location.search);
       const subs=(qs.get("subs")||"").split(",").filter(Boolean).map(id=>({submission_id:id}));
-      const bundle={customer_email:qs.get("email")||"",submissions:subs};
+      const groups=(qs.get("groups")||"").split(",").filter(Boolean);
+      const bundle={customer_email:qs.get("email")||"",submissions:subs,groups};
+
       await populate(bundle);
       $("btnDraftSave")?.addEventListener("click",()=>save(false));
       $("btnConfirmSave")?.addEventListener("click",()=>save(false));
