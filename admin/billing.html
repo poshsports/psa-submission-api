@@ -6,6 +6,15 @@
   <title>PSA Admin – Billing</title>
   <link rel="stylesheet" href="/admin/admin.css">
   <link rel="icon" href="data:,">
+  <style>
+    /* lightweight tab pills; safe + self-contained */
+    .subtabs { display:flex; gap:8px; padding:10px 16px 0; }
+    .subtabs a {
+      display:inline-block; padding:6px 10px; border:1px solid #e5e7eb; border-radius:999px;
+      text-decoration:none; color:#0f172a; font-size:14px; background:#fff;
+    }
+    .subtabs a.active { background:#eef2ff; border-color:#c7d2fe; font-weight:600; }
+  </style>
 </head>
 <body>
 
@@ -33,11 +42,18 @@
             <strong>Billing</strong>
           </div>
           <div class="top-actions">
-<button id="btnBatchSend" class="btn primary" type="button" disabled title="Coming soon">
-  Create &amp; Send Invoices
-</button>
+            <button id="btnBatchSend" class="btn primary" type="button" disabled title="Coming soon">
+              Create &amp; Send Invoices
+            </button>
           </div>
         </div>
+
+        <!-- Subtabs (same page, different filters) -->
+        <nav class="subtabs" role="tablist" aria-label="Billing views">
+          <a href="/admin/billing.html?tab=to-send"   data-tab="to-send">To send</a>
+          <a href="/admin/billing.html?tab=awaiting"  data-tab="awaiting">Awaiting payment</a>
+          <a href="/admin/billing.html?tab=paid"      data-tab="paid">Paid</a>
+        </nav>
 
         <!-- Toolbar -->
         <div class="toolbar">
@@ -72,14 +88,25 @@
     const $ = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
+      // sign out
       $('sidebar-signout')?.addEventListener('click', async (e) => {
         e.preventDefault();
         try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
         window.location.replace('/admin');
       });
 
+      // resolve selected tab (default: to-send)
+      const params = new URLSearchParams(location.search);
+      const currentTab = params.get('tab') || 'to-send';
+
+      // highlight active tab
+      document.querySelectorAll('.subtabs a[data-tab]').forEach(a => {
+        a.classList.toggle('active', a.dataset.tab === currentTab);
+      });
+
+      // load app; passing currentTab is backward-compatible (extra args are ignored)
       import('/admin/js/billing.app.js')
-        .then(mod => mod.showBillingView?.())
+        .then(mod => mod.showBillingView?.(currentTab))
         .catch(err => {
           console.error(err);
           $('subsTbody')?.insertAdjacentHTML(
