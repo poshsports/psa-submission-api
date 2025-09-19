@@ -9,6 +9,22 @@ const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
 const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
 const SEND_ENDPOINT          = '/api/admin/billing/send-invoice';
 
+// --- Tab helpers ---
+const VALID_TABS = new Set(['to-send','awaiting','paid']);
+function resolveTab(tabArg) {
+  const fromArg = (tabArg || '').trim();
+  if (VALID_TABS.has(fromArg)) return fromArg;
+  const qs = new URLSearchParams(location.search);
+  const fromURL = qs.get('tab') || '';
+  return VALID_TABS.has(fromURL) ? fromURL : 'to-send';
+}
+function showEmpty(message) {
+  const el = $('subsEmpty');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('hide');
+}
+
 async function ensureDraftForBundle(b) {
   const email  = (b?.customer_email || '').trim();
   const subIds = (Array.isArray(b?.submissions) ? b.submissions : [])
@@ -334,16 +350,40 @@ function wireCoreUI() {
   installGlobalDelegates();
 }
 // ---------- Entry ----------
-export async function showBillingView() {
-  // Header + initial render
+export async function showBillingView(tabArg) {
+  const tab = resolveTab(tabArg); // 'to-send' | 'awaiting' | 'paid'
+
+  // Always render the header so columns/layout are stable
   tbl.renderHead(COLUMNS.map(c => c.key), []);
 
+  if (tab !== 'to-send') {
+    // Placeholder views until we wire backend queries:
+    // - awaiting  => invoices with status 'sent' (unpaid)
+    // - paid      => historical paid invoices
+    tbl.setRows([]);          // no rows yet
+    tbl.applyFilters();
+    tbl.renderTable();
+    ensureSelectionColumn();
+    showEmpty(tab === 'awaiting'
+      ? 'No invoices awaiting payment.'
+      : 'No paid invoices yet.'
+    );
+
+    // Keep the "Create & Send" bulk button disabled (coming soon)
+    const btn = $('btnBatchSend');
+    if (btn) { btn.disabled = true; btn.title = 'Coming soon'; }
+
+    wireCoreUI();
+    return;
+  }
+
+  // --- Existing "To send" behavior (unchanged) ---
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
+
   // Auto-create drafts for any customers that don't have one yet
   ensureDraftsForAll(rows);
-
 
   tbl.setRows(normalized);
   tbl.applyFilters();
@@ -352,3 +392,4 @@ export async function showBillingView() {
 
   wireCoreUI();
 }
+
