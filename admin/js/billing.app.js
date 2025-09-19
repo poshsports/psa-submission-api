@@ -3,6 +3,61 @@ import { $, debounce } from './util.js';
 import * as tbl from './billing.table.js';
 import { COLUMNS } from './billing.columns.js';
 
+// --- Draft auto-create on billing list ---
+const PREFILL_ENDPOINT       = '/api/admin/billing/preview/prefill';
+const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
+const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
+
+async function ensureDraftForBundle(b) {
+  const email  = (b?.customer_email || '').trim();
+  const subIds = (Array.isArray(b?.submissions) ? b.submissions : [])
+    .map(s => s?.submission_id)
+    .filter(Boolean);
+
+  if (!email || !subIds.length) return;
+
+  // 1) Does a draft already exist?
+  try {
+    const pre = await fetch(
+      `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(email)}`,
+      { credentials: 'same-origin' }
+    ).then(r => r.ok ? r.json() : null);
+
+    if (pre?.invoice_id) return; // already have a draft
+  } catch {}
+
+  // 2) Get card ids for these submissions
+  let rows = [];
+  try {
+    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
+    const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
+    const j = await resp.json().catch(() => ({}));
+    rows = Array.isArray(j?.rows) ? j.rows : [];
+  } catch {}
+
+  const items = rows
+    .map(r => r?.id || r?.card_id)
+    .filter(Boolean)
+    .map(id => ({ card_id: id, upcharge_cents: 0 }));
+
+  if (!items.length) return;
+
+  // 3) Create the draft with zero upcharges
+  try {
+    await fetch(PREVIEW_SAVE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ customer_email: email, items, invoice_id: null })
+    });
+  } catch {}
+}
+
+function ensureDraftsForAll(bundles) {
+  // fire-and-forget to avoid blocking table render
+  bundles.forEach(b => { ensureDraftForBundle(b); });
+}
+
 function openBuilder(bundle) {
   if (!bundle) return;
 
@@ -209,6 +264,9 @@ export async function showBillingView() {
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
+  // Auto-create drafts for any customers that don't have one yet
+  ensureDraftsForAll(rows);
+
 
   tbl.setRows(normalized);
   tbl.applyFilters();
