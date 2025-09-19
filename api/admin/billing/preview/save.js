@@ -42,14 +42,16 @@ export default async function handler(req, res) {
     const client = sb();
 
     // Cards -> submission codes
-    const { data: cards, error: cardsErr } = await client
-      .from('submission_cards')
-      .select('id, submission_id')
-      .in('id', ids);
+const { data: cards, error: cardsErr } = await client
+  .from('submission_cards')
+  .select('id, submission_id, card_description')
+  .in('id', ids);
     if (cardsErr) return json(res, 500, { error: 'Failed to fetch cards', details: cardsErr.message });
     if (!cards || cards.length !== ids.length) {
       const got = new Set((cards || []).map(r => r.id));
       return json(res, 400, { error: 'Some cards not found', missing: ids.filter(x => !got.has(x)) });
+      const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
+      const descByCard = new Map(cards.map(r => [r.id, (r.card_description || '').trim()]));
     }
 
     const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
@@ -198,20 +200,22 @@ if (!invoice_id) {
       amount_cents: DEFAULTS.grade_fee_cents,
       created_at: now
     }));
-    const upchargeRows = ids.map(cid => {
-      const cents = upMap.get(cid) ?? 0;
-      return {
-        invoice_id,
-        submission_card_uuid: cid,
-        submission_code: codeByCard.get(cid),
-        kind: 'upcharge',
-        title: 'Upcharge',
-        qty: 1,
-        unit_cents: cents,
-        amount_cents: cents,
-        created_at: now
-      };
-    });
+const upchargeRows = ids.map(cid => {
+  const cents = upMap.get(cid) ?? 0;
+  const desc  = descByCard.get(cid) || '';
+  return {
+    invoice_id,
+    submission_card_uuid: cid,
+    submission_code: codeByCard.get(cid),
+    kind: 'upcharge',
+    title: desc || 'Upcharge',          // <- put the card description here
+    qty: 1,
+    unit_cents: cents,
+    amount_cents: cents,
+    meta: { card_id: cid },             // optional but helpful later
+    created_at: now
+  };
+});
 
     const { error: insG } = await client.from('billing_invoice_items').insert(gradingRows);
     if (insG) return json(res, 500, { error: 'Failed to insert grading items', details: insG.message });
