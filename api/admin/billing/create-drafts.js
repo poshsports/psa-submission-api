@@ -53,13 +53,99 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     .single();
   if (invErr || !inv) return { ok: false, error: 'invoice-not-found' };
   if (inv.draft_id) {
+    return { ok: true, data: { invoice_id: inv.id, draft_id: inv.draft_id, already: true } };
+  }
+
+  // 2) If we already have item rows for this invoice, use them directly (includes upcharges/shipping)
+  const { data: itemRows, error: itemsErr } = await client
+    .from('billing_invoice_items')
+    .select('submission_code, kind, title, qty, unit_cents, amount_cents, meta')
+    .eq('invoice_id', inv.id);
+  if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+
+  let line_items = [];
+  let subtotalItemsCents = 0;
+
+  if (Array.isArray(itemRows) && itemRows.length) {
+    // Build draft order items from existing invoice items
+    line_items = itemRows.map(it => {
+      const qty = Math.max(1, Number(it.qty || 1));
+      const unit = Number(it.unit_cents ?? 0);
+      const amount = Number(it.amount_cents ?? (qty * unit));
+      subtotalItemsCents += amount;
+
+      const baseTitle =
+        it.title ||
+        (it.kind === 'upcharge' ? 'Upcharge'
+          : it.kind === 'shipping' ? 'Shipping'
+          : 'Service');
+
+      const props = [];
+      if (it.submission_code) props.push({ name: 'Submission', value: it.submission_code });
+
+      return {
+        title: baseTitle,
+        quantity: qty,
+        price: moneyStrFromCents(unit || (amount / qty)),
+        properties: props
+      };
+    });
+
+    // Create Shopify draft from the itemized invoice rows (preserves upcharges/shipping)
+    const draftPayload = {
+      draft_order: {
+        customer: { id: Number(String(inv.shopify_customer_id).replace(/\D/g, '')) || inv.shopify_customer_id },
+        currency: 'USD',
+        tags: 'PSA Billing',
+        note: `PSA Invoice ${inv.id}`,
+        note_attributes: [
+          { name: 'psa_invoice_id', value: inv.id }
+        ],
+        line_items,
+        use_customer_default_address: true
+      }
+    };
+
+    const draftJson = await shopifyFetch('/draft_orders.json', 'POST', draftPayload);
+    const draft = draftJson?.draft_order;
+    if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
+
+    await client.from('billing_invoices')
+      .update({
+        status: 'draft',
+        draft_id: String(draft.id),
+        invoice_url: draft.invoice_url || null,
+        subtotal_cents: subtotalItemsCents,
+        total_cents: subtotalItemsCents
+      })
+      .eq('id', inv.id);
+
+    // Ensure we have submission links (for email resolution) if items carried codes
+    const codes = Array.from(new Set(itemRows.map(it => it.submission_code).filter(Boolean)));
+    if (codes.length) {
+      const linkRows = codes.map(code => ({
+        invoice_id: inv.id,
+        submission_code: code,
+        submission_uuid: null
+      }));
+      await client.from('billing_invoice_submissions').insert(linkRows).catch(() => {});
+    }
+
     return {
       ok: true,
-      data: { invoice_id: inv.id, draft_id: inv.draft_id, already: true }
+      data: {
+        invoice_id: inv.id,
+        draft_id: String(draft.id),
+        invoice_url: draft.invoice_url || null,
+        submissions: Array.from(new Set(itemRows.map(it => it.submission_code).filter(Boolean))),
+        subtotal_cents: subtotalItemsCents
+      }
     };
   }
 
-  // 2) Existing links?
+  // ---- Fallback (no invoice items yet): build from eligible submissions like before ----
+
+  // Existing links?
   const { data: links, error: linkErr } = await client
     .from('billing_invoice_submissions')
     .select('submission_code')
@@ -68,10 +154,9 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
 
   let codes = (links || []).map(l => l.submission_code).filter(Boolean);
 
-  // 3) If no links, collect eligible submissions for this customer
+  // If no links, collect eligible submissions for this customer
   let subs = [];
   if (!codes.length) {
-    // all 'received_from_psa' for this customer
     const { data: allForCustomer, error: sErr } = await client
       .from('psa_submissions')
       .select('submission_id, grading_service, cards')
@@ -80,7 +165,6 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     if (sErr) return { ok: false, error: 'load-subs-failed', details: sErr.message };
     subs = Array.isArray(allForCustomer) ? allForCustomer : [];
 
-    // exclude those already linked to open invoices (pending/draft/sent)
     const { data: openInvs, error: openErr } = await client
       .from('billing_invoices')
       .select('id')
@@ -105,7 +189,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
 
   if (!codes.length) return { ok: false, error: 'no-eligible-submissions' };
 
-  // 4) Ensure we have details for each code (cards/service)
+  // Ensure we have details for each code (cards/service)
   if (!subs.length) {
     const { data: forCodes, error: detErr } = await client
       .from('psa_submissions')
@@ -115,7 +199,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     subs = Array.isArray(forCodes) ? forCodes : [];
   }
 
-  const line_items = subs.map(s => ({
+  line_items = subs.map(s => ({
     title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
     quantity: Math.max(1, Number(s.cards || 0)),
     price: moneyStrFromCents(RATE_CENTS),
@@ -146,7 +230,6 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
   const draft = draftJson?.draft_order;
   if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
 
-  // Update invoice
   await client.from('billing_invoices')
     .update({
       status: 'draft',
@@ -157,7 +240,6 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     })
     .eq('id', inv.id);
 
-  // Insert links if we created from a fresh set
   if (!(links && links.length)) {
     const linkRows = codes.map(code => ({
       invoice_id: inv.id,
@@ -169,22 +251,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     }
   }
 
-  // Insert item rows
-  const itemRows = subs.map(s => ({
-    invoice_id: inv.id,
-    submission_code: s.submission_id,
-    kind: 'service',
-    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
-    qty: Math.max(1, Number(s.cards || 0)),
-    unit_cents: RATE_CENTS,
-    amount_cents: Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
-    meta: { grading_service: s.grading_service || null }
-  }));
-  if (itemRows.length) {
-    await client.from('billing_invoice_items').insert(itemRows);
-  }
-
-  // Flip submission statuses
+  // Flip submissions — (we'll revisit later when we wire paid status)
   await client
     .from('psa_submissions')
     .update({ status: 'balance_due' })
@@ -201,6 +268,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     }
   };
 }
+
 
 // ---- main handler ----
 export default async function handler(req, res) {
