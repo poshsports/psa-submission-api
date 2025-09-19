@@ -8,6 +8,13 @@ const STORE = process.env.SHOPIFY_STORE; // e.g. posh-sports-1194.myshopify.com
 const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04';
 
+// Build absolute origin for server-to-server calls (works on Vercel/Netlify)
+function getOrigin(req) {
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const host  = req.headers['x-forwarded-host']  || req.headers.host;
+  return `${proto}://${host}`;
+}
+
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(payload));
@@ -49,8 +56,36 @@ export default async function handler(req, res) {
       .eq('id', invoice_id)
       .single();
     if (invErr || !inv) return json(res, 404, { error: 'Invoice not found' });
-    if (!inv.draft_id) return json(res, 400, { error: 'Invoice has no draft_id' });
+    // If there's no Shopify draft yet, try to create it now via our own API
+if (!inv.draft_id) {
+  try {
+    await fetch(`${getOrigin(req)}/api/admin/billing/create-drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // If your create-drafts expects invoice_ids, use this:
+      body: JSON.stringify({ invoice_ids: [String(invoice_id)] }),
 
+      // If your create-drafts expects a different shape (e.g. emails),
+      // change the body accordingly after checking that file.
+    });
+
+    // Re-load the invoice so we see the draft_id persisted by create-drafts
+    const client2 = sb();
+    const { data: inv2 } = await client2
+      .from('billing_invoices')
+      .select('id, group_code, draft_id, status')
+      .eq('id', invoice_id)
+      .single();
+
+    if (inv2?.draft_id) {
+      inv.draft_id = inv2.draft_id;
+    } else {
+      return json(res, 400, { error: 'Invoice has no draft_id (post-create attempt)' });
+    }
+  } catch (e) {
+    return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)' });
+  }
+}
     // 2) Find a customer email from linked submissions (same customer across all)
     let toEmail = (to || '').trim();
     if (!toEmail) {
