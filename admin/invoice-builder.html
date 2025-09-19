@@ -238,6 +238,18 @@ async function loadPrefill(submissionIds){
       recalc();
     }
 
+    // Ensure a draft exists once rows are present (silent)
+async function ensureDraftExists(){
+  if (draftInvoiceId) return;                              // already have a draft
+  const email = (lastBundle?.customer_email || '').trim();
+  if (!email) return;
+
+  const items = collectUpcharges();                        // uses current table rows
+  if (!items.length) return;                               // nothing to save yet
+
+  await save(true);                                        // silent create/update
+}
+
     function updateTotals(gradeSum, upchargeSum){
       const ship=SETTINGS.shipping, subtotal=gradeSum+upchargeSum, total=subtotal+ship;
       document.querySelector(".js-subtotal").textContent=money(subtotal);
@@ -259,26 +271,34 @@ async function loadPrefill(submissionIds){
       }).filter(Boolean);
     }
 
-    async function save(silent=false){
-      const email=(lastBundle?.customer_email||'').trim();
-      const items=collectUpcharges();
-      if(!email||!items.length)return;
-      const btn=$("btnDraftSave");
-      btn.disabled=true;btn.textContent='Saving…';
-      const res=await fetch(SAVE_ENDPOINT,{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        body:JSON.stringify({customer_email:email,items,invoice_id:draftInvoiceId||null})
-      });
-      if(res.ok){
-        const j=await res.json().catch(()=>({}));
-        if(j.invoice_id) draftInvoiceId=j.invoice_id;
-        hasUnsavedChanges=false;
-        btn.textContent='Saved ✓';
-        setTimeout(()=>{btn.textContent='Save';btn.disabled=true;},1200);
-      } else {btn.disabled=false;btn.textContent='Save';}
-    }
+async function save(silent = false){
+  const email = (lastBundle?.customer_email || '').trim();
+  const items = collectUpcharges();
+  if (!email || !items.length) return;
 
+  const btn = $("btnDraftSave");
+  if (!silent && btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  const res = await fetch(SAVE_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ customer_email: email, items, invoice_id: draftInvoiceId || null })
+  });
+
+  if (res.ok) {
+    const j = await res.json().catch(() => ({}));
+    if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
+    hasUnsavedChanges = false;
+
+    if (!silent && btn) {
+      btn.textContent = 'Saved ✓';
+      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 1200);
+    }
+  } else {
+    if (!silent && btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  }
+}
     async function sendInvoice(){
   const email = (lastBundle?.customer_email || '').trim();
   const btn = $("btnDraftSend");
@@ -460,9 +480,12 @@ async function loadPrefill(submissionIds){
       });
       recalc();
 
-      const pre=await loadPrefill(subIds);applyPrefill(pre);
-    }
+      const pre = await loadPrefill(subIds);
+      applyPrefill(pre);
 
+      // If no draft was found/returned, create one now from the loaded rows
+      await ensureDraftExists();
+    }
     // Boot
     (async function init(){
       $("sidebar-signout")?.addEventListener("click",async e=>{
