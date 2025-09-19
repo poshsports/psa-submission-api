@@ -16,42 +16,52 @@ async function ensureDraftForBundle(b) {
 
   if (!email || !subIds.length) return;
 
-  // 1) Does a draft already exist?
-  try {
-    const pre = await fetch(
-      `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(email)}`,
-      { credentials: 'same-origin' }
-    ).then(r => r.ok ? r.json() : null);
-
-    if (pre?.invoice_id) return; // already have a draft
-  } catch {}
-
-  // 2) Get card ids for these submissions
-  let rows = [];
+  // 1) Get all card IDs for these submissions
+  let cardIds = [];
   try {
     const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
     const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
     const j = await resp.json().catch(() => ({}));
-    rows = Array.isArray(j?.rows) ? j.rows : [];
+    const rows = Array.isArray(j?.rows) ? j.rows : [];
+    cardIds = rows.map(r => r?.id || r?.card_id).filter(Boolean);
+  } catch {}
+  if (!cardIds.length) return;
+
+  // 2) Ask server for the existing draft (if any) scoped to these subs+email
+  let prefill = null;
+  try {
+    const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(email)}`;
+    prefill = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
   } catch {}
 
-  const items = rows
-    .map(r => r?.id || r?.card_id)
-    .filter(Boolean)
-    .map(id => ({ card_id: id, upcharge_cents: 0 }));
+  const invoiceId = prefill?.invoice_id || null;
+  const existingIds = new Set(
+    Array.isArray(prefill?.items) ? prefill.items.map(it => String(it.card_id)) : []
+  );
 
-  if (!items.length) return;
+  // 3) Create or append
+  //    - If no draft: create with all cards (upcharge 0)
+  //    - If draft exists: append only missing cards (if any)
+  const toSend = (invoiceId == null)
+    ? cardIds
+    : cardIds.filter(id => !existingIds.has(String(id)));
 
-  // 3) Create the draft with zero upcharges
+  if (!toSend.length) return;
+
   try {
     await fetch(PREVIEW_SAVE_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ customer_email: email, items, invoice_id: null })
+      body: JSON.stringify({
+        customer_email: email,
+        invoice_id: invoiceId,          // null => create; value => append
+        items: toSend.map(id => ({ card_id: id, upcharge_cents: 0 }))
+      })
     });
   } catch {}
 }
+
 
 function ensureDraftsForAll(bundles) {
   // fire-and-forget to avoid blocking table render
