@@ -213,13 +213,18 @@
       return (j.rows||[]).map(normalizeCardRow);
     }
 
-    async function loadPrefill(submissionIds){
-      if(!submissionIds?.length)return{invoice_id:null,items:[]};
-      const qs=encodeURIComponent(submissionIds.join(','));
-      const r=await fetch(`/api/admin/billing/preview/prefill?subs=${qs}`,{credentials:'same-origin'});
-      if(!r.ok)return{invoice_id:null,items:[]};
-      return r.json();
-    }
+async function loadPrefill(submissionIds){
+  if (!submissionIds?.length) return { invoice_id: null, items: [] };
+
+  const subsParam  = encodeURIComponent(submissionIds.join(','));
+  const emailParam = encodeURIComponent((lastBundle?.customer_email || '').trim());
+
+  const url = `/api/admin/billing/preview/prefill?subs=${subsParam}&email=${emailParam}`;
+  const r   = await fetch(url, { credentials: 'same-origin' });
+  if (!r.ok) return { invoice_id: null, items: [] };
+
+  return r.json();
+}
 
     function applyPrefill(prefill){
       if(!prefill?.items?.length)return;
