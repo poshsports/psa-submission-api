@@ -59,15 +59,21 @@ export default async function handler(req, res) {
     // If there's no Shopify draft yet, try to create it now via our own API
 if (!inv.draft_id) {
   try {
-    await fetch(`${getOrigin(req)}/api/admin/billing/create-drafts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // If your create-drafts expects invoice_ids, use this:
-      body: JSON.stringify({ invoice_ids: [String(invoice_id)] }),
+  const draftResp = await fetch(`${getOrigin(req)}/api/admin/billing/create-drafts`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    // forward session so requireAdmin() passes
+    'cookie': req.headers.cookie || ''
+  },
+  body: JSON.stringify({ invoice_ids: [String(invoice_id)] })
+});
 
-      // If your create-drafts expects a different shape (e.g. emails),
-      // change the body accordingly after checking that file.
-    });
+if (!draftResp.ok) {
+  const errText = await draftResp.text().catch(()=>'');
+  return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)', details: errText });
+}
+
 
     // Re-load the invoice so we see the draft_id persisted by create-drafts
     const client2 = sb();
@@ -113,13 +119,14 @@ if (!inv.draft_id) {
     }
 
     // 3) Send the invoice email via Shopify
-    const payload = {
-      draft_order_invoice: {
-        to: toEmail,
-        subject: subject || `PSA Balance — ${inv.group_code}`,
-        custom_message: message || `Your PSA grading balance for group ${inv.group_code} is ready.`
-      }
-    };
+const label = inv.group_code || inv.id;
+const payload = {
+  draft_order_invoice: {
+    to: toEmail,
+    subject: subject || `PSA Balance — ${label}`,
+    custom_message: message || `Your PSA grading balance${inv.group_code ? ` for group ${inv.group_code}` : ''} is ready.`
+  }
+};
     const result = await shopifyFetch(`/draft_orders/${inv.draft_id}/send_invoice.json`, 'POST', payload);
 
     // 4) Mark invoice as sent
