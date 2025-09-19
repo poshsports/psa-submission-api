@@ -7,6 +7,7 @@ import { COLUMNS } from './billing.columns.js';
 const PREFILL_ENDPOINT       = '/api/admin/billing/preview/prefill';
 const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
 const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
+const SEND_ENDPOINT          = '/api/admin/billing/send-invoice';
 
 async function ensureDraftForBundle(b) {
   const email  = (b?.customer_email || '').trim();
@@ -103,6 +104,73 @@ async function fetchDraftBundleByEmail(email) {
   } catch {
     return null;
   }
+}
+
+async function sendDraftForEmail(email) {
+  const em = (email || '').trim();
+  if (!em) return { email: em, ok: false, reason: 'no-email' };
+
+  // 1) Load the current bundle for this customer
+  const bundle = await fetchDraftBundleByEmail(em);
+  if (!bundle) return { email: em, ok: false, reason: 'bundle-not-found' };
+
+  // 2) Ensure the draft exists / is up-to-date (creates or appends new cards)
+  await ensureDraftForBundle(bundle);
+
+  // 3) Resolve the invoice id via prefill (email + subs)
+  const subIds = (Array.isArray(bundle.submissions) ? bundle.submissions : [])
+    .map(s => s?.submission_id)
+    .filter(Boolean);
+
+  if (!subIds.length) return { email: em, ok: false, reason: 'no-subs' };
+
+  let invoiceId = null;
+  try {
+    const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(em)}`;
+    const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+    invoiceId = pre?.invoice_id || null;
+  } catch {}
+
+  if (!invoiceId) return { email: em, ok: false, reason: 'no-invoice' };
+
+  // 4) Send the invoice
+  const res = await fetch(SEND_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ invoice_id: invoiceId, customer_email: em })
+  });
+
+  return { email: em, ok: res.ok, reason: res.ok ? null : 'send-failed' };
+}
+
+async function batchSendSelected() {
+  const btn = $('btnBatchSend');
+  if (!btn) return;
+
+  const selectedTrs = Array
+    .from(document.querySelectorAll('#subsTbody tr[data-id]'))
+    .filter(tr => tr.querySelector('input.__selrow')?.checked);
+
+  const emails = selectedTrs.map(extractEmailFromRow).filter(Boolean);
+  if (!emails.length) return;
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+
+  const results = [];
+  for (const email of emails) {
+    try {
+      results.push(await sendDraftForEmail(email));
+    } catch {
+      results.push({ email, ok: false, reason: 'unexpected-error' });
+    }
+  }
+
+  // (Optional) You could surface per-customer failures here if you want.
+  btn.textContent = 'Done';
+  setTimeout(() => { window.location.reload(); }, 400);
 }
 
 // ---------- Normalization for table rows ----------
@@ -258,6 +326,9 @@ function wireCoreUI() {
   $('prev-page')?.addEventListener('click', () => { tbl.prevPage(); tbl.renderTable(); ensureSelectionColumn(); });
   $('next-page')?.addEventListener('click', () => { tbl.nextPage(); tbl.renderTable(); ensureSelectionColumn(); });
 
+  // NEW: batch send click
+  $('btnBatchSend')?.addEventListener('click', batchSendSelected);
+
   window.addEventListener('psa:table-rendered', () => {
     ensureSelectionColumn();
     // global delegate is already installed, no need to rewire
@@ -265,7 +336,6 @@ function wireCoreUI() {
 
   installGlobalDelegates();
 }
-
 // ---------- Entry ----------
 export async function showBillingView() {
   // Header + initial render
