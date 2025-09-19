@@ -44,7 +44,11 @@ async function shopifyFetch(path, method = 'GET', body) {
 // Uses existing links if present; otherwise pulls *all* eligible submissions
 // for the same customer (status='received_from_psa') that aren't already on an
 // open invoice, then builds the draft and persists DB rows.
+// Creates/attaches a Shopify draft for a single billing invoice id.
+// Includes saved upcharges and shipping in the draft.
 async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
+  const DEFAULT_SHIPPING_CENTS = 500; // fallback $5 if no row exists
+
   // 1) Load invoice
   const { data: inv, error: invErr } = await client
     .from('billing_invoices')
@@ -56,96 +60,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     return { ok: true, data: { invoice_id: inv.id, draft_id: inv.draft_id, already: true } };
   }
 
-  // 2) If we already have item rows for this invoice, use them directly (includes upcharges/shipping)
-  const { data: itemRows, error: itemsErr } = await client
-    .from('billing_invoice_items')
-    .select('submission_code, kind, title, qty, unit_cents, amount_cents, meta')
-    .eq('invoice_id', inv.id);
-  if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message };
-
-  let line_items = [];
-  let subtotalItemsCents = 0;
-
-  if (Array.isArray(itemRows) && itemRows.length) {
-    // Build draft order items from existing invoice items
-    line_items = itemRows.map(it => {
-      const qty = Math.max(1, Number(it.qty || 1));
-      const unit = Number(it.unit_cents ?? 0);
-      const amount = Number(it.amount_cents ?? (qty * unit));
-      subtotalItemsCents += amount;
-
-      const baseTitle =
-        it.title ||
-        (it.kind === 'upcharge' ? 'Upcharge'
-          : it.kind === 'shipping' ? 'Shipping'
-          : 'Service');
-
-      const props = [];
-      if (it.submission_code) props.push({ name: 'Submission', value: it.submission_code });
-
-      return {
-        title: baseTitle,
-        quantity: qty,
-        price: moneyStrFromCents(unit || (amount / qty)),
-        properties: props
-      };
-    });
-
-    // Create Shopify draft from the itemized invoice rows (preserves upcharges/shipping)
-    const draftPayload = {
-      draft_order: {
-        customer: { id: Number(String(inv.shopify_customer_id).replace(/\D/g, '')) || inv.shopify_customer_id },
-        currency: 'USD',
-        tags: 'PSA Billing',
-        note: `PSA Invoice ${inv.id}`,
-        note_attributes: [
-          { name: 'psa_invoice_id', value: inv.id }
-        ],
-        line_items,
-        use_customer_default_address: true
-      }
-    };
-
-    const draftJson = await shopifyFetch('/draft_orders.json', 'POST', draftPayload);
-    const draft = draftJson?.draft_order;
-    if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
-
-    await client.from('billing_invoices')
-      .update({
-        status: 'draft',
-        draft_id: String(draft.id),
-        invoice_url: draft.invoice_url || null,
-        subtotal_cents: subtotalItemsCents,
-        total_cents: subtotalItemsCents
-      })
-      .eq('id', inv.id);
-
-    // Ensure we have submission links (for email resolution) if items carried codes
-    const codes = Array.from(new Set(itemRows.map(it => it.submission_code).filter(Boolean)));
-    if (codes.length) {
-      const linkRows = codes.map(code => ({
-        invoice_id: inv.id,
-        submission_code: code,
-        submission_uuid: null
-      }));
-      await client.from('billing_invoice_submissions').insert(linkRows).catch(() => {});
-    }
-
-    return {
-      ok: true,
-      data: {
-        invoice_id: inv.id,
-        draft_id: String(draft.id),
-        invoice_url: draft.invoice_url || null,
-        submissions: Array.from(new Set(itemRows.map(it => it.submission_code).filter(Boolean))),
-        subtotal_cents: subtotalItemsCents
-      }
-    };
-  }
-
-  // ---- Fallback (no invoice items yet): build from eligible submissions like before ----
-
-  // Existing links?
+  // 2) Existing linked submissions?
   const { data: links, error: linkErr } = await client
     .from('billing_invoice_submissions')
     .select('submission_code')
@@ -154,7 +69,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
 
   let codes = (links || []).map(l => l.submission_code).filter(Boolean);
 
-  // If no links, collect eligible submissions for this customer
+  // 3) If no links, collect eligible submissions for this customer that aren’t already on open invoices
   let subs = [];
   if (!codes.length) {
     const { data: allForCustomer, error: sErr } = await client
@@ -186,10 +101,9 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     subs = subs.filter(s => !usedSet.has(s.submission_id));
     codes = subs.map(s => s.submission_id);
   }
-
   if (!codes.length) return { ok: false, error: 'no-eligible-submissions' };
 
-  // Ensure we have details for each code (cards/service)
+  // 4) Ensure details for each submission code (cards/service)
   if (!subs.length) {
     const { data: forCodes, error: detErr } = await client
       .from('psa_submissions')
@@ -199,18 +113,79 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     subs = Array.isArray(forCodes) ? forCodes : [];
   }
 
-  line_items = subs.map(s => ({
+  // 5) Start with service lines (grading)
+  const line_items = subs.map(s => ({
     title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
     quantity: Math.max(1, Number(s.cards || 0)),
     price: moneyStrFromCents(RATE_CENTS),
     properties: [{ name: 'Submission', value: s.submission_id }]
   }));
-
-  const subtotal = subs.reduce(
+  let subtotal = subs.reduce(
     (sum, s) => sum + Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
     0
   );
 
+  // 6) Pull saved extras: upcharges & shipping
+  const { data: extras, error: exErr } = await client
+    .from('billing_invoice_items')
+    .select('kind, title, qty, unit_cents, amount_cents, meta')
+    .eq('invoice_id', inv.id);
+  if (exErr) return { ok: false, error: 'load-extras-failed', details: exErr.message };
+
+  const upcharges = (extras || []).filter(x => x.kind === 'upcharge');
+  const shippingRow = (extras || []).find(x => x.kind === 'shipping');
+
+  // Add upcharge lines (one custom line per saved upcharge)
+  for (const u of upcharges) {
+    const cents = Math.max(0, Number(u.amount_cents ?? u.unit_cents ?? 0));
+    if (!cents) continue;
+    line_items.push({
+      title: u.title || 'PSA Upcharge',
+      quantity: 1,
+      price: moneyStrFromCents(cents),
+      properties: [{ name: 'Kind', value: 'Upcharge' }]
+    });
+    subtotal += cents;
+  }
+
+  // Add shipping (use saved row if present, else default once)
+  let hadShipping = false;
+  if (shippingRow) {
+    const cents = Math.max(0, Number(shippingRow.amount_cents ?? shippingRow.unit_cents ?? 0));
+    if (cents) {
+      line_items.push({
+        title: shippingRow.title || 'Shipping (flat)',
+        quantity: 1,
+        price: moneyStrFromCents(cents),
+        properties: [{ name: 'Kind', value: 'Shipping' }]
+      });
+      subtotal += cents;
+      hadShipping = true;
+    }
+  } else {
+    // fallback default shipping if you don’t persist it in preview/save
+    line_items.push({
+      title: 'Shipping (flat)',
+      quantity: 1,
+      price: moneyStrFromCents(DEFAULT_SHIPPING_CENTS),
+      properties: [{ name: 'Kind', value: 'Shipping' }]
+    });
+    subtotal += DEFAULT_SHIPPING_CENTS;
+
+    // also store it so your DB matches Shopify going forward
+    await client.from('billing_invoice_items').insert([{
+      invoice_id: inv.id,
+      submission_code: null,
+      kind: 'shipping',
+      title: 'Shipping (flat)',
+      qty: 1,
+      unit_cents: DEFAULT_SHIPPING_CENTS,
+      amount_cents: DEFAULT_SHIPPING_CENTS,
+      meta: {}
+    }]);
+  }
+
+  // 7) Create Shopify Draft Order
   const draftPayload = {
     draft_order: {
       customer: { id: Number(String(inv.shopify_customer_id).replace(/\D/g, '')) || inv.shopify_customer_id },
@@ -230,6 +205,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
   const draft = draftJson?.draft_order;
   if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
 
+  // 8) Update invoice totals & ids
   await client.from('billing_invoices')
     .update({
       status: 'draft',
@@ -240,6 +216,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     })
     .eq('id', inv.id);
 
+  // Insert link rows if we created from a fresh set
   if (!(links && links.length)) {
     const linkRows = codes.map(code => ({
       invoice_id: inv.id,
@@ -251,7 +228,22 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     }
   }
 
-  // Flip submissions — (we'll revisit later when we wire paid status)
+  // Insert/refresh service item rows (DB) for parity (optional but consistent)
+  const serviceRows = subs.map(s => ({
+    invoice_id: inv.id,
+    submission_code: s.submission_id,
+    kind: 'service',
+    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
+    qty: Math.max(1, Number(s.cards || 0)),
+    unit_cents: RATE_CENTS,
+    amount_cents: Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
+    meta: { grading_service: s.grading_service || null }
+  }));
+  if (serviceRows.length) {
+    await client.from('billing_invoice_items').insert(serviceRows);
+  }
+
+  // Flip submission statuses
   await client
     .from('psa_submissions')
     .update({ status: 'balance_due' })
