@@ -243,7 +243,7 @@ function ensureSelectionColumn() {
       header.indeterminate = checkedCount > 0 && checkedCount < total;
       header.checked = total > 0 && checkedCount === total;
     }
-    const btn = $('btnBatchSend'); if (btn) btn.disabled = checkedCount === 0;
+    const btn = $('btnBatchSend'); if (btn) btn.disabled = true; // coming soon
   }
 
   setTimeout(updateSelAllUI, 0);
@@ -325,9 +325,6 @@ function wireCoreUI() {
 
   $('prev-page')?.addEventListener('click', () => { tbl.prevPage(); tbl.renderTable(); ensureSelectionColumn(); });
   $('next-page')?.addEventListener('click', () => { tbl.nextPage(); tbl.renderTable(); ensureSelectionColumn(); });
-
-  // NEW: batch send click
-  $('btnBatchSend')?.addEventListener('click', batchSendSelected);
 
   window.addEventListener('psa:table-rendered', () => {
     ensureSelectionColumn();
