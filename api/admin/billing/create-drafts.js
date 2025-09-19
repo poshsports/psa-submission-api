@@ -40,6 +40,168 @@ async function shopifyFetch(path, method = 'GET', body) {
   return resp.json();
 }
 
+// Creates/attaches a Shopify draft for a single billing invoice id.
+// Uses existing links if present; otherwise pulls *all* eligible submissions
+// for the same customer (status='received_from_psa') that aren't already on an
+// open invoice, then builds the draft and persists DB rows.
+async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
+  // 1) Load invoice
+  const { data: inv, error: invErr } = await client
+    .from('billing_invoices')
+    .select('id, shopify_customer_id, status, draft_id')
+    .eq('id', invoiceId)
+    .single();
+  if (invErr || !inv) return { ok: false, error: 'invoice-not-found' };
+  if (inv.draft_id) {
+    return {
+      ok: true,
+      data: { invoice_id: inv.id, draft_id: inv.draft_id, already: true }
+    };
+  }
+
+  // 2) Existing links?
+  const { data: links, error: linkErr } = await client
+    .from('billing_invoice_submissions')
+    .select('submission_code')
+    .eq('invoice_id', inv.id);
+  if (linkErr) return { ok: false, error: 'load-links-failed', details: linkErr.message };
+
+  let codes = (links || []).map(l => l.submission_code).filter(Boolean);
+
+  // 3) If no links, collect eligible submissions for this customer
+  let subs = [];
+  if (!codes.length) {
+    // all 'received_from_psa' for this customer
+    const { data: allForCustomer, error: sErr } = await client
+      .from('psa_submissions')
+      .select('submission_id, grading_service, cards')
+      .eq('shopify_customer_id', inv.shopify_customer_id)
+      .eq('status', 'received_from_psa');
+    if (sErr) return { ok: false, error: 'load-subs-failed', details: sErr.message };
+    subs = Array.isArray(allForCustomer) ? allForCustomer : [];
+
+    // exclude those already linked to open invoices (pending/draft/sent)
+    const { data: openInvs, error: openErr } = await client
+      .from('billing_invoices')
+      .select('id')
+      .eq('shopify_customer_id', inv.shopify_customer_id)
+      .in('status', ['pending', 'draft', 'sent']);
+    if (openErr) return { ok: false, error: 'load-open-invs-failed', details: openErr.message };
+
+    const openIds = (openInvs || []).map(i => i.id);
+    let used = [];
+    if (openIds.length) {
+      const { data: usedLinks, error: usedErr } = await client
+        .from('billing_invoice_submissions')
+        .select('submission_code')
+        .in('invoice_id', openIds);
+      if (usedErr) return { ok: false, error: 'load-used-links-failed', details: usedErr.message };
+      used = (usedLinks || []).map(u => u.submission_code);
+    }
+    const usedSet = new Set(used);
+    subs = subs.filter(s => !usedSet.has(s.submission_id));
+    codes = subs.map(s => s.submission_id);
+  }
+
+  if (!codes.length) return { ok: false, error: 'no-eligible-submissions' };
+
+  // 4) Ensure we have details for each code (cards/service)
+  if (!subs.length) {
+    const { data: forCodes, error: detErr } = await client
+      .from('psa_submissions')
+      .select('submission_id, grading_service, cards')
+      .in('submission_id', codes);
+    if (detErr) return { ok: false, error: 'load-sub-details-failed', details: detErr.message };
+    subs = Array.isArray(forCodes) ? forCodes : [];
+  }
+
+  const line_items = subs.map(s => ({
+    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
+    quantity: Math.max(1, Number(s.cards || 0)),
+    price: moneyStrFromCents(RATE_CENTS),
+    properties: [{ name: 'Submission', value: s.submission_id }]
+  }));
+
+  const subtotal = subs.reduce(
+    (sum, s) => sum + Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
+    0
+  );
+
+  const draftPayload = {
+    draft_order: {
+      customer: { id: Number(String(inv.shopify_customer_id).replace(/\D/g, '')) || inv.shopify_customer_id },
+      currency: 'USD',
+      tags: 'PSA Billing',
+      note: `PSA Invoice ${inv.id}: ${codes.join(', ')}`,
+      note_attributes: [
+        { name: 'psa_invoice_id', value: inv.id },
+        { name: 'psa_submission_codes', value: codes.join('|') }
+      ],
+      line_items,
+      use_customer_default_address: true
+    }
+  };
+
+  const draftJson = await shopifyFetch('/draft_orders.json', 'POST', draftPayload);
+  const draft = draftJson?.draft_order;
+  if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
+
+  // Update invoice
+  await client.from('billing_invoices')
+    .update({
+      status: 'draft',
+      draft_id: String(draft.id),
+      invoice_url: draft.invoice_url || null,
+      subtotal_cents: subtotal,
+      total_cents: subtotal
+    })
+    .eq('id', inv.id);
+
+  // Insert links if we created from a fresh set
+  if (!(links && links.length)) {
+    const linkRows = codes.map(code => ({
+      invoice_id: inv.id,
+      submission_code: code,
+      submission_uuid: null
+    }));
+    if (linkRows.length) {
+      await client.from('billing_invoice_submissions').insert(linkRows);
+    }
+  }
+
+  // Insert item rows
+  const itemRows = subs.map(s => ({
+    invoice_id: inv.id,
+    submission_code: s.submission_id,
+    kind: 'service',
+    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
+    qty: Math.max(1, Number(s.cards || 0)),
+    unit_cents: RATE_CENTS,
+    amount_cents: Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
+    meta: { grading_service: s.grading_service || null }
+  }));
+  if (itemRows.length) {
+    await client.from('billing_invoice_items').insert(itemRows);
+  }
+
+  // Flip submission statuses
+  await client
+    .from('psa_submissions')
+    .update({ status: 'balance_due' })
+    .in('submission_id', codes);
+
+  return {
+    ok: true,
+    data: {
+      invoice_id: inv.id,
+      draft_id: String(draft.id),
+      invoice_url: draft.invoice_url || null,
+      submissions: codes,
+      subtotal_cents: subtotal
+    }
+  };
+}
+
 // ---- main handler ----
 export default async function handler(req, res) {
   try {
@@ -47,11 +209,29 @@ export default async function handler(req, res) {
     if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
     assertEnv();
 
-    const { group_code, rate_cents } = (await readBody(req));
-    if (!group_code || typeof group_code !== 'string') {
-      return json(res, 400, { error: 'group_code is required' });
-    }
-    const RATE_CENTS = Number.isFinite(rate_cents) ? Math.max(0, rate_cents) : 2000; // default $20
+const { group_code, invoice_ids, rate_cents } = (await readBody(req));
+const ids = Array.isArray(invoice_ids) ? invoice_ids.filter(Boolean) : [];
+const RATE_CENTS = Number.isFinite(rate_cents) ? Math.max(0, rate_cents) : 2000; // default $20
+
+// New path: ensure/create drafts by explicit invoice id(s)
+if (ids.length) {
+  const client = sb();
+  const created = [];
+  const skipped = [];
+
+  for (const iid of ids) {
+    const out = await createDraftForInvoice(client, iid, RATE_CENTS);
+    if (out.ok) created.push(out.data);
+    else skipped.push({ invoice_id: iid, reason: out.error || 'unknown' });
+  }
+
+  return json(res, 200, { ok: true, created, skipped });
+}
+
+// Legacy/group path remains unchanged below
+if (!group_code || typeof group_code !== 'string') {
+  return json(res, 400, { error: 'group_code is required (or pass invoice_ids[])' });
+}
 
     const client = sb();
 
