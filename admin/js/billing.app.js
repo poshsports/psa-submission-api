@@ -9,6 +9,9 @@ const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
 const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
 const SEND_ENDPOINT          = '/api/admin/billing/send-invoice';
 
+// --- New: invoices list endpoint for Awaiting/Paid tabs ---
+const INVOICES_ENDPOINT      = '/api/admin/billing/invoices-list';
+
 // --- Tab helpers ---
 const VALID_TABS = new Set(['to-send','awaiting','paid']);
 function resolveTab(tabArg) {
@@ -23,6 +26,11 @@ function showEmpty(message) {
   if (!el) return;
   el.textContent = message;
   el.classList.remove('hide');
+}
+function hideEmpty() {
+  const el = $('subsEmpty');
+  if (!el) return;
+  el.classList.add('hide');
 }
 
 async function ensureDraftForBundle(b) {
@@ -57,8 +65,6 @@ async function ensureDraftForBundle(b) {
   );
 
   // 3) Create or append
-  //    - If no draft: create with all cards (upcharge 0)
-  //    - If draft exists: append only missing cards (if any)
   const toSend = (invoiceId == null)
     ? cardIds
     : cardIds.filter(id => !existingIds.has(String(id)));
@@ -78,7 +84,6 @@ async function ensureDraftForBundle(b) {
     });
   } catch {}
 }
-
 
 function ensureDraftsForAll(bundles) {
   // fire-and-forget to avoid blocking table render
@@ -107,6 +112,19 @@ async function fetchToBill() {
     if (!r.ok) return [];
     const j = await r.json().catch(() => ([]));
     return Array.isArray(j?.items) ? j.items : (Array.isArray(j) ? j : []);
+  } catch {
+    return [];
+  }
+}
+
+// New: list invoices for Awaiting/Paid
+async function fetchInvoices(status /* 'awaiting' | 'paid' */) {
+  const qs = new URLSearchParams({ status });
+  try {
+    const r = await fetch(`${INVOICES_ENDPOINT}?${qs.toString()}`, { credentials: 'same-origin' });
+    if (!r.ok) return [];
+    const j = await r.json().catch(() => ({}));
+    return Array.isArray(j?.items) ? j.items : [];
   } catch {
     return [];
   }
@@ -184,7 +202,6 @@ async function batchSendSelected() {
     }
   }
 
-  // (Optional) You could surface per-customer failures here if you want.
   btn.textContent = 'Done';
   setTimeout(() => { window.location.reload(); }, 400);
 }
@@ -220,6 +237,27 @@ function normalizeBundle(b) {
     returned_newest: toIso(returnedNewest),
     returned_oldest: toIso(returnedOldest),
     est_total_cents: b.estimated_cents ?? null,
+  };
+}
+
+// New: normalize invoice records from invoices-list into the same table shape
+function normalizeInvoiceRow(rec) {
+  return {
+    id: 'inv:' + String(rec.invoice_id || ''),
+    customer_name: '', // not needed for now
+    customer_email: rec.customer_email || '',
+    submissions: Array.isArray(rec.submissions) ? rec.submissions : [],
+    subs_count: rec.subs_count ?? (rec.submissions?.length || 0),
+    groups: rec.group_code ? [rec.group_code] : [],
+    cards: Number(rec.cards || 0),
+    // Reuse the "est_total_cents" column to show invoice total
+    est_total_cents: (Number.isFinite(rec.total_cents) ? rec.total_cents
+                     : Number.isFinite(rec.subtotal_cents) ? rec.subtotal_cents
+                     : null),
+    // Reuse returned_* columns for date sorting/display
+    returned_newest: rec.updated_at || null,
+    returned_oldest: rec.created_at || null,
+    status: rec.status || '',
   };
 }
 
@@ -288,13 +326,10 @@ function installGlobalDelegates() {
 
       if (bundleJson) {
         try {
-          // the attribute was HTML-escaped in markup; browser gives raw string back
           const bundle = JSON.parse(bundleJson);
           openBuilder(bundle);
           return;
-        } catch {
-          // fallback to email fetch if JSON parse fails
-        }
+        } catch {}
       }
 
       const tr = draftBtn.closest('tr[data-id]');
@@ -344,11 +379,11 @@ function wireCoreUI() {
 
   window.addEventListener('psa:table-rendered', () => {
     ensureSelectionColumn();
-    // global delegate is already installed, no need to rewire
   });
 
   installGlobalDelegates();
 }
+
 // ---------- Entry ----------
 export async function showBillingView(tabArg) {
   const tab = resolveTab(tabArg); // 'to-send' | 'awaiting' | 'paid'
@@ -357,17 +392,22 @@ export async function showBillingView(tabArg) {
   tbl.renderHead(COLUMNS.map(c => c.key), []);
 
   if (tab !== 'to-send') {
-    // Placeholder views until we wire backend queries:
-    // - awaiting  => invoices with status 'sent' (unpaid)
-    // - paid      => historical paid invoices
-    tbl.setRows([]);          // no rows yet
+    let rows = await fetchInvoices(tab); // awaiting | paid
+    const normalized = rows.map(normalizeInvoiceRow).map(tbl.normalizeRow);
+
+    tbl.setRows(normalized);
     tbl.applyFilters();
     tbl.renderTable();
     ensureSelectionColumn();
-    showEmpty(tab === 'awaiting'
-      ? 'No invoices awaiting payment.'
-      : 'No paid invoices yet.'
-    );
+
+    if (!normalized.length) {
+      showEmpty(tab === 'awaiting'
+        ? 'No invoices awaiting payment.'
+        : 'No paid invoices yet.'
+      );
+    } else {
+      hideEmpty();
+    }
 
     // Keep the "Create & Send" bulk button disabled (coming soon)
     const btn = $('btnBatchSend');
@@ -389,7 +429,7 @@ export async function showBillingView(tabArg) {
   tbl.applyFilters();
   tbl.renderTable();
   ensureSelectionColumn();
+  hideEmpty();
 
   wireCoreUI();
 }
-
