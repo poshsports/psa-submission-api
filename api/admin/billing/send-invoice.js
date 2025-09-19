@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
     if (!STORE || !ADMIN_TOKEN) return json(res, 500, { error: 'Missing Shopify env vars' });
 
-    const { invoice_id, to, subject, message } = await readBody(req);
+    const { invoice_id, to, customer_email, subject, message } = await readBody(req);
     if (!invoice_id) return json(res, 400, { error: 'invoice_id is required' });
 
     const client = sb();
@@ -93,7 +93,7 @@ if (!draftResp.ok) {
   }
 }
     // 2) Find a customer email from linked submissions (same customer across all)
-    let toEmail = (to || '').trim();
+    let toEmail = (to || customer_email || '').trim();
     if (!toEmail) {
       const { data: link, error: linkErr } = await client
         .from('billing_invoice_submissions')
