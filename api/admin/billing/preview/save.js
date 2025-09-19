@@ -47,12 +47,14 @@ const { data: cards, error: cardsErr } = await client
   .select('id, submission_id, card_description')
   .in('id', ids);
     if (cardsErr) return json(res, 500, { error: 'Failed to fetch cards', details: cardsErr.message });
-    if (!cards || cards.length !== ids.length) {
-      const got = new Set((cards || []).map(r => r.id));
-      return json(res, 400, { error: 'Some cards not found', missing: ids.filter(x => !got.has(x)) });
-      const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
-      const descByCard = new Map(cards.map(r => [r.id, (r.card_description || '').trim()]));
-    }
+if (!cards || cards.length !== ids.length) {
+  const got = new Set((cards || []).map(r => r.id));
+  return json(res, 400, { error: 'Some cards not found', missing: ids.filter(x => !got.has(x)) });
+}
+// define these AFTER the check so they’re available later
+const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
+const descByCard = new Map(cards.map(r => [r.id, (r.card_description || '').trim()]));
+
 
     const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
     if (!subCodes.length) return json(res, 400, { error: 'Cards missing submission codes' });
@@ -188,7 +190,6 @@ if (!invoice_id) {
 
     // Insert grading + upcharge
     const now = new Date().toISOString();
-    const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
     const gradingRows = ids.map(cid => ({
       invoice_id,
       submission_card_uuid: cid,
