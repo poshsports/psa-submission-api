@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     // 1) Grab invoices in this bucket
     const { data: invs, error: invErr } = await client
       .from('billing_invoices')
-      .select('id, status, group_code, shopify_customer_id, subtotal_cents, total_cents, shipping_cents, created_at, updated_at')
+      .select('id, status, group_code, shopify_customer_id, subtotal_cents, total_cents, shipping_cents, invoice_url, created_at, updated_at')
       .in('status', wantedStatuses)
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -83,20 +83,21 @@ export default async function handler(req, res) {
     let rows = invs.map(inv => {
       const codes = subsByInvoice.get(inv.id) || [];
       const email = codes.length ? (emailByCode.get(codes[0]) || '') : '';
-      return {
-        invoice_id: inv.id,
-        status: inv.status,
-        group_code: inv.group_code || null,
-        customer_email: email,
-        submissions: codes.map(code => ({ submission_id: code })), // minimal; enough for UI counts/search
-        subs_count: codes.length,
-        cards: cardsByInvoice.get(inv.id) || 0,
-        subtotal_cents: inv.subtotal_cents ?? null,
-        shipping_cents: inv.shipping_cents ?? null,
-        total_cents: inv.total_cents ?? null,
-        updated_at: inv.updated_at,
-        created_at: inv.created_at,
-      };
+return {
+  invoice_id: inv.id,
+  status: inv.status,
+  group_code: inv.group_code || null,
+  customer_email: email,
+  invoice_url: inv.invoice_url || null,     // <-- add this
+  submissions: codes.map(code => ({ submission_id: code })),
+  subs_count: codes.length,
+  cards: cardsByInvoice.get(inv.id) || 0,
+  subtotal_cents: inv.subtotal_cents ?? null,
+  shipping_cents: inv.shipping_cents ?? null,
+  total_cents: inv.total_cents ?? null,
+  updated_at: inv.updated_at,
+  created_at: inv.created_at,
+};
     });
 
     // 6) In-memory search filter (email, group code, submission code)
