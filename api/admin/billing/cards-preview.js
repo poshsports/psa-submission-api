@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   // Using card_index (int4) for stable ordering inside each submission.
   const { data, error } = await supabase
     .from("submission_cards")
-    .select("id, submission_id, break_date, break_channel, break_number, card_description, card_index")
+    .select("id, submission_id, break_date, break_channel, break_number, card_description, card_index, grading_service")
     .in("submission_id", ids)
     .order("submission_id", { ascending: true })
     .order("card_index", { ascending: true }); // secondary, per-sub ordering
