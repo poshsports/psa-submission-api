@@ -217,7 +217,7 @@ function normalizeCardRow(r){return{
       breakNo:r.break_num||r.break_number||r.break_no||r.break_id||"",
       desc:r.card_description||r.description||r.card||r.title||"",
       service:r.grading_service||"",
-      grading_cents: priceCentsForService(r.grading_service)
+      grading_cents: Number(r.grading_amount ?? r.grading_cents ?? 0) || priceCentsForService(r.grading_service)
     };}
 
     async function fetchCardsForSubs(subIds){
