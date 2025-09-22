@@ -443,13 +443,14 @@ if (tab !== 'to-send') {
   tbl.renderTable();
   ensureSelectionColumn();
 
-  if (normalized.length === 0) {
-    showEmpty(tab === 'awaiting'
-      ? 'No invoices awaiting payment.'
-      : 'No paid invoices yet.'
-    );
-  }
-
+if (normalized.length === 0) {
+  showEmpty(tab === 'awaiting'
+    ? 'No invoices awaiting payment.'
+    : 'No paid invoices yet.'
+  );
+} else {
+  hideEmpty();
+}
   // Keep bulk button disabled in read-only tabs
   const btn = $('btnBatchSend');
   if (btn) { btn.disabled = true; btn.title = 'Coming soon'; }
