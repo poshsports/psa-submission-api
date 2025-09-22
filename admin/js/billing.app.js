@@ -427,7 +427,7 @@ export async function showBillingView(tabArg) {
 
 if (tab !== 'to-send') {
   // Read-only lists from the backend
-  let recs = await fetchToBill(tab);
+  let recs = await fetchInvoices(tab);
   if (!Array.isArray(recs)) recs = [];
 
   // normalize and remember urls for click-open
