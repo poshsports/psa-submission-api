@@ -68,6 +68,57 @@ function pickGradingService(payload = {}) {
   return uniq.length === 1 ? uniq[0] : `Mixed: ${uniq.slice(0,3).join(', ')}${uniq.length>3 ? '…' : ''}`;
 }
 
+// ----- pricing (server-side authoritative) -----
+const EVALUATION_FEE_CENTS = 500; // $5/card
+
+// Order matters (first match wins)
+const SERVICE_PRICING = [
+  { match: /value\s*bulk/i, label: 'PSA Value Bulk', cents: 2800, turnaround_days: 65 },
+  { match: /\bvalue\b/i,     label: 'PSA Value',      cents: 3500, turnaround_days: 45 },
+  { match: /regular/i,       label: 'PSA Regular',    cents: 8500, turnaround_days: 10 },
+];
+
+function resolveServiceFromString(s) {
+  const txt = String(s || '').trim();
+  if (!txt) return null;
+  for (const tier of SERVICE_PRICING) {
+    if (tier.match.test(txt)) return tier;
+  }
+  return null;
+}
+
+function resolveService(payload) {
+  const picked = pickGradingService(payload);       // try top-level/ per-card label
+  const tier = resolveServiceFromString(picked);
+  if (tier) return { ...tier, picked };
+  // if nothing matched but cards have service labels, try the first card desc
+  const firstCard = Array.isArray(payload.card_info) && payload.card_info.length > 0 ? payload.card_info[0] : null;
+  const fallback = resolveServiceFromString(
+    firstCard?.psa_grading || firstCard?.grading_service || firstCard?.service_level || firstCard?.service
+  );
+  return fallback ? { ...fallback, picked } : null;
+}
+
+function computeTotalsCents({ cards, evaluation, serviceInfo }) {
+  const perCardCents = serviceInfo?.cents || 0;
+  const gradingCents = (Number(cards) || 0) * perCardCents;
+  const evalCents    = (Number(evaluation) || 0) * EVALUATION_FEE_CENTS;
+  const grandCents   = gradingCents + evalCents;
+
+  // include cents + dollars for convenience
+  return {
+    per_card_cents: perCardCents,
+    grading_cents: gradingCents,
+    evaluation_cents: evalCents,
+    grand_cents: grandCents,
+    grading: gradingCents / 100,
+    evaluation: evalCents / 100,
+    grand: grandCents / 100,
+    service_label: serviceInfo?.label || null,
+    service_turnaround_days: serviceInfo?.turnaround_days || null,
+  };
+}
+
 export default async function handler(req, res) {
   cors(res, req.headers.origin || '');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -97,14 +148,19 @@ export default async function handler(req, res) {
     ? Math.max(0, Math.trunc(cardsNumRaw))
     : (Array.isArray(payload.card_info) ? payload.card_info.length : 1);
 
-  const totals = payload.totals || {};
+  // evaluation is a count of cards to evaluate
   const evalAmtRaw =
     typeof payload.evaluation === 'number'
       ? payload.evaluation
-      : totals?.evaluation;
+      : payload?.totals?.evaluation; //legacy fallback if client sent dollars
   const evaluation = Number.isFinite(Number(evalAmtRaw))
     ? Math.max(0, Math.trunc(Number(evalAmtRaw)))
     : 0;
+
+  // Resolve service + compute totals on the server
+  const serviceInfo = resolveService(payload);
+  const totals = computeTotalsCents({ cards, evaluation, serviceInfo });
+
 
   if (!email || !cards) {
     return res.status(400).json({ ok: false, error: 'bad_request', detail: 'Missing email or cards' });
@@ -116,6 +172,8 @@ export default async function handler(req, res) {
   const submitted_via = isEval ? 'form_precheckout' : 'form_no_payment';
 
   // ---- Build row (do NOT set submission_id; DB will assign psa-###) ----
+  const normalizedLabel = serviceInfo?.label || pickGradingService(payload) || null;
+
   const row = {
     cards,
     evaluation,
@@ -124,13 +182,14 @@ export default async function handler(req, res) {
     submitted_at_iso: payload.submitted_at_iso ?? new Date().toISOString(),
     customer_email: email,
     address: payload.address ?? null,      // jsonb
-    totals,                                // jsonb
+    totals,                                // jsonb (authoritative; includes *_cents & dollars)
     card_info: payload.card_info ?? null,  // jsonb
     shopify_customer_id: payload.shopify_customer_id ?? null,
     shopify: payload.shopify ?? null,      // jsonb
     raw: payload ?? null,                  // jsonb audit copy
-    grading_service: pickGradingService(payload),
+    grading_service: normalizedLabel,
   };
+
 
       try {
     // If the client is sending back a real psa-### (final no-eval pass),
