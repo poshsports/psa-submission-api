@@ -9,6 +9,11 @@ const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
 const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
 const SEND_ENDPOINT          = '/api/admin/billing/send-invoice';
 
+// read-only views need a little state
+let CURRENT_TAB = 'to-send';
+const URL_BY_ROWID = new Map(); // key: 'inv:<invoice_id>' -> value: invoice_url
+
+
 // --- New: invoices list endpoint for Awaiting/Paid tabs ---
 const INVOICES_ENDPOINT      = '/api/admin/billing/invoices-list';
 
@@ -106,9 +111,10 @@ function openBuilder(bundle) {
 }
 
 // ---------- API ----------
-async function fetchToBill() {
+async function fetchToBill(tab = 'to-send') {
   try {
-    const r = await fetch('/api/admin/billing/to-bill', { credentials: 'same-origin' });
+    const qs = new URLSearchParams({ tab });
+    const r = await fetch(`/api/admin/billing/to-bill?${qs}`, { credentials: 'same-origin' });
     if (!r.ok) return [];
     const j = await r.json().catch(() => ([]));
     return Array.isArray(j?.items) ? j.items : (Array.isArray(j) ? j : []);
@@ -260,6 +266,25 @@ function normalizeInvoiceRow(rec) {
     status: rec.status || '',
   };
 }
+function normalizeInvoiceRecord(rec) {
+  // rec is returned by /api/admin/billing/to-bill?tab=awaiting|paid
+  // Expected fields: invoice_id, invoice_url, customer_email, customer_name,
+  // total_cents, groups[], submissions_count/cards_count (optional)
+  return {
+    id: 'inv:' + String(rec.invoice_id || ''),
+    customer_name: rec.customer_name || '',
+    customer_email: rec.customer_email || '',
+    submissions: [],                      // not used in these tabs
+    subs_count: Number(rec.submissions_count || rec.cards_count || 0),
+    groups: Array.isArray(rec.groups) ? rec.groups : [],
+    cards: Number(rec.cards_count || 0),
+    returned_newest: null,
+    returned_oldest: null,
+    est_total_cents: Number.isFinite(rec.total_cents) ? rec.total_cents : null,
+    __invoice_url: rec.invoice_url || null, // carry url for click-open
+  };
+}
+
 
 // ---------- Selection (header checkbox + enabling batch button) ----------
 function ensureSelectionColumn() {
@@ -341,16 +366,24 @@ function installGlobalDelegates() {
       return;
     }
 
-    // Row click (ignore controls)
-    const tr = e.target.closest('tr[data-id]');
-    if (tr) {
-      const isInteractive = e.target.closest('button, a, input, select, textarea, label');
-      if (isInteractive) return;
-      const email = extractEmailFromRow(tr);
-      if (!email) return;
-      const item = await fetchDraftBundleByEmail(email);
-      if (item) openBuilder(item);
-    }
+// Row click (ignore controls)
+const tr = e.target.closest('tr[data-id]');
+if (tr) {
+  const isInteractive = e.target.closest('button, a, input, select, textarea, label');
+  if (isInteractive) return;
+
+  if (CURRENT_TAB === 'to-send') {
+    const email = extractEmailFromRow(tr);
+    if (!email) return;
+    const item = await fetchDraftBundleByEmail(email);
+    if (item) openBuilder(item);
+  } else {
+    // read-only: open Shopify customer-facing invoice
+    const rowId = String(tr.dataset.id || '');
+    const url = URL_BY_ROWID.get(rowId);
+    if (url) window.open(url, '_blank');
+  }
+}
   });
 }
 
@@ -387,35 +420,43 @@ function wireCoreUI() {
 // ---------- Entry ----------
 export async function showBillingView(tabArg) {
   const tab = resolveTab(tabArg); // 'to-send' | 'awaiting' | 'paid'
+  CURRENT_TAB = tab;
 
   // Always render the header so columns/layout are stable
   tbl.renderHead(COLUMNS.map(c => c.key), []);
 
-  if (tab !== 'to-send') {
-    let rows = await fetchInvoices(tab); // awaiting | paid
-    const normalized = rows.map(normalizeInvoiceRow).map(tbl.normalizeRow);
+if (tab !== 'to-send') {
+  // Read-only lists from the backend
+  let recs = await fetchToBill(tab);
+  if (!Array.isArray(recs)) recs = [];
 
-    tbl.setRows(normalized);
-    tbl.applyFilters();
-    tbl.renderTable();
-    ensureSelectionColumn();
+  // normalize and remember urls for click-open
+  URL_BY_ROWID.clear();
+  const normalized = recs.map(normalizeInvoiceRecord).map(tbl.normalizeRow);
+  recs.forEach((r) => {
+    const rowId = 'inv:' + String(r.invoice_id || '');
+    if (r.invoice_url) URL_BY_ROWID.set(rowId, r.invoice_url);
+  });
 
-    if (!normalized.length) {
-      showEmpty(tab === 'awaiting'
-        ? 'No invoices awaiting payment.'
-        : 'No paid invoices yet.'
-      );
-    } else {
-      hideEmpty();
-    }
+  tbl.setRows(normalized);
+  tbl.applyFilters();
+  tbl.renderTable();
+  ensureSelectionColumn();
 
-    // Keep the "Create & Send" bulk button disabled (coming soon)
-    const btn = $('btnBatchSend');
-    if (btn) { btn.disabled = true; btn.title = 'Coming soon'; }
-
-    wireCoreUI();
-    return;
+  if (normalized.length === 0) {
+    showEmpty(tab === 'awaiting'
+      ? 'No invoices awaiting payment.'
+      : 'No paid invoices yet.'
+    );
   }
+
+  // Keep bulk button disabled in read-only tabs
+  const btn = $('btnBatchSend');
+  if (btn) { btn.disabled = true; btn.title = 'Coming soon'; }
+
+  wireCoreUI();
+  return;
+}
 
   // --- Existing "To send" behavior (unchanged) ---
   let rows = await fetchToBill();
