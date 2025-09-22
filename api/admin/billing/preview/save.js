@@ -3,6 +3,20 @@ import { sb } from '../../../_util/supabase.js';
 import { requireAdmin } from '../../../_util/adminAuth.js';
 
 const DEFAULTS = { grade_fee_cents: 2000, shipping_cents: 500 };
+// Pull per-card grading cents from canonical view
+async function fetchGradingCentsByCard(cardIds){
+  if (!Array.isArray(cardIds) || !cardIds.length) return {};
+  const { data, error } = await sb()
+    .from('billing_invoice_cards_v')
+    .select('card_id, grading_amount')
+    .in('card_id', cardIds);
+  if (error) return {};
+  const map = {};
+  for (const row of data) {
+    map[String(row.card_id)] = Number(row.grading_amount) || 0; // in cents
+  }
+  return map;
+}
 
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json');
@@ -188,19 +202,25 @@ if (!invoice_id) {
       .in('kind', ['service','upcharge']);
     if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
 
-    // Insert grading + upcharge
-    const now = new Date().toISOString();
-    const gradingRows = ids.map(cid => ({
-      invoice_id,
-      submission_card_uuid: cid,
-      submission_code: codeByCard.get(cid),
-      kind: 'service',
-      title: 'Grading Fee',
-      qty: 1,
-      unit_cents: DEFAULTS.grade_fee_cents,
-      amount_cents: DEFAULTS.grade_fee_cents,
-      created_at: now
-    }));
+// Insert grading + upcharge
+// Pull per-card grading cents from the canonical view for these card ids
+const gradeByCard = await fetchGradingCentsByCard(ids);
+
+const now = new Date().toISOString();
+const gradingRows = ids.map(cid => {
+  const unit = Number(gradeByCard[cid]) || DEFAULTS.grade_fee_cents; // fallback if service missing
+  return {
+    invoice_id,
+    submission_card_uuid: cid,
+    submission_code: codeByCard.get(cid),
+    kind: 'service',
+    title: 'Grading Fee',
+    qty: 1,
+    unit_cents: unit,
+    amount_cents: unit,
+    created_at: now
+  };
+});
 const upchargeRows = ids.map(cid => {
   const cents = upMap.get(cid) ?? 0;
   const desc  = descByCard.get(cid) || '';
