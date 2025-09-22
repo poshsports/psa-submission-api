@@ -29,11 +29,11 @@ export default async function handler(req, res) {
   // Pull per-card rows for those submissions.
   // Using card_index (int4) for stable ordering inside each submission.
   const { data, error } = await supabase
-    .from("submission_cards")
-    .select("id, submission_id, break_date, break_channel, break_number, card_description, card_index, grading_service")
+    .from("billing_invoice_cards_v")
+    .select("card_id, submission_id, break_date, break_channel, break_number, card_description, grading_service, grading_amount, upcharge_amount")
     .in("submission_id", ids)
     .order("submission_id", { ascending: true })
-    .order("card_index", { ascending: true }); // secondary, per-sub ordering
+    .order("card_description", { ascending: true });
 
   if (error) {
     console.error("[cards-preview] supabase error:", error);
