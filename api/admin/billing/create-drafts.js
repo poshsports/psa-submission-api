@@ -243,11 +243,9 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     await client.from('billing_invoice_items').insert(serviceRows);
   }
 
-  // Flip submission statuses
-  await client
-    .from('psa_submissions')
-    .update({ status: 'balance_due' })
-    .in('submission_id', codes);
+// NOTE: Do NOT change submission status here.
+// We flip to 'balance_due' only after a successful send in /api/admin/billing/send-invoice.js
+
 
   return {
     ok: true,
@@ -472,11 +470,8 @@ if (!group_code || typeof group_code !== 'string') {
         await client.from('billing_invoice_items').insert(itemRows);
       }
 
-      // flip submissions -> balance_due
-      await client
-        .from('psa_submissions')
-        .update({ status: 'balance_due' })
-        .in('submission_id', codes);
+// NOTE: do not flip here; send-invoice.js will mark balance_due after a successful email send
+
 
       results.push({
         group_code,
