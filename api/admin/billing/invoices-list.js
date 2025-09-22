@@ -2,6 +2,26 @@
 import { sb } from '../../_util/supabase.js';
 import { requireAdmin } from '../../_util/adminAuth.js';
 
+const STORE = process.env.SHOPIFY_STORE;
+const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
+const API_VERSION = process.env.SHOPIFY_API_VERSION || '2024-04';
+
+async function shopifyFetch(path, method = 'GET') {
+  const url = `https://${STORE}/admin/api/${API_VERSION}${path}`;
+  const r = await fetch(url, {
+    method,
+    headers: {
+      'X-Shopify-Access-Token': ADMIN_TOKEN,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+  });
+  const text = await r.text().catch(() => '');
+  if (!r.ok) throw new Error(`Shopify ${method} ${path} ${r.status}: ${text || '(no body)'}`);
+  return text ? JSON.parse(text) : {};
+}
+
+
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(payload));
@@ -28,7 +48,7 @@ export default async function handler(req, res) {
     // 1) Grab invoices in this bucket
     const { data: invs, error: invErr } = await client
       .from('billing_invoices')
-      .select('id, status, group_code, shopify_customer_id, subtotal_cents, total_cents, shipping_cents, invoice_url, created_at, updated_at')
+      .select('id, status, group_code, shopify_customer_id, draft_id, invoice_url, subtotal_cents, total_cents, shipping_cents, created_at, updated_at')
       .in('status', wantedStatuses)
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -79,6 +99,26 @@ export default async function handler(req, res) {
       cardsByInvoice.set(it.invoice_id, (cardsByInvoice.get(it.invoice_id) || 0) + (Number(it.qty) || 0));
     });
 
+// Build a view URL per invoice:
+// - awaiting: use customer invoice_url (pay link)
+// - paid: try to resolve admin order URL from the draft; fall back to invoice_url
+const viewUrlById = new Map();
+if (statusParam === 'awaiting') {
+  for (const inv of invs) viewUrlById.set(inv.id, inv.invoice_url || null);
+} else if (statusParam === 'paid') {
+  for (const inv of invs) {
+    let url = inv.invoice_url || null; // fallback
+    try {
+      if (inv.draft_id && STORE && ADMIN_TOKEN) {
+        const jd = await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'GET');
+        const orderId = jd?.draft_order?.order_id;
+        if (orderId) url = `https://${STORE}/admin/orders/${orderId}`;
+      }
+    } catch { /* non-fatal */ }
+    viewUrlById.set(inv.id, url);
+  }
+}
+
     // 5) Build rows
     let rows = invs.map(inv => {
       const codes = subsByInvoice.get(inv.id) || [];
@@ -88,7 +128,8 @@ return {
   status: inv.status,
   group_code: inv.group_code || null,
   customer_email: email,
-  invoice_url: inv.invoice_url || null,     // <-- add this
+  invoice_url: inv.invoice_url || null,
+  view_url: viewUrlById.get(inv.id) || inv.invoice_url || null,
   submissions: codes.map(code => ({ submission_id: code })),
   subs_count: codes.length,
   cards: cardsByInvoice.get(inv.id) || 0,
