@@ -241,21 +241,6 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     }
   }
 
-  // Insert/refresh service item rows (DB) for parity (optional but consistent)
-  const serviceRows = subs.map(s => ({
-    invoice_id: inv.id,
-    submission_code: s.submission_id,
-    kind: 'service',
-    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
-    qty: Math.max(1, Number(s.cards || 0)),
-    unit_cents: RATE_CENTS,
-    amount_cents: Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
-    meta: { grading_service: s.grading_service || null }
-  }));
-  if (serviceRows.length) {
-    await client.from('billing_invoice_items').insert(serviceRows);
-  }
-
 // NOTE: Do NOT change submission status here.
 // We flip to 'balance_due' only after a successful send in /api/admin/billing/send-invoice.js
 
@@ -446,6 +431,7 @@ if (!group_code || typeof group_code !== 'string') {
       const draft = draftJson?.draft_order;
       if (!draft || !draft.id) throw new Error('Draft order create returned no id');
 
+      const subtotal = list.reduce((sum, s) => sum + (Number(s.cards || 0) * RATE_CENTS), 0);
   // Persist invoice details + links + items
   await client.from('billing_invoices')
     .update({
