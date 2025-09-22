@@ -113,30 +113,45 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     subs = Array.isArray(forCodes) ? forCodes : [];
   }
 
-  // 5) Start with service lines (grading)
-  const line_items = subs.map(s => ({
-    title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
-    quantity: Math.max(1, Number(s.cards || 0)),
-    price: moneyStrFromCents(RATE_CENTS),
-    properties: [{ name: 'Submission', value: s.submission_id }]
-  }));
-  let subtotal = subs.reduce(
-    (sum, s) => sum + Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
-    0
-  );
-
-  // 6) Pull saved extras: upcharges & shipping
-  const { data: extras, error: exErr } = await client
+  // 5) Build line_items from DB (authoritative)
+  // Read saved invoice items (service + upcharge + shipping)
+  const { data: items, error: itemsErr } = await client
     .from('billing_invoice_items')
-    .select('kind, title, qty, unit_cents, amount_cents, meta')
+    .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
     .eq('invoice_id', inv.id);
-  if (exErr) return { ok: false, error: 'load-extras-failed', details: exErr.message };
+  if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message });
 
-  const upcharges = (extras || []).filter(x => x.kind === 'upcharge');
-  const shippingRow = (extras || []).find(x => x.kind === 'shipping');
+  const line_items = [];
+  let subtotal = 0;
 
-  // Add upcharge lines (one custom line per saved upcharge)
-  for (const u of upcharges) {
+  const serviceItems  = (items || []).filter(x => x.kind === 'service');
+  const upchargeItems = (items || []).filter(x => x.kind === 'upcharge');
+  const shippingRow   = (items || []).find(x => x.kind === 'shipping');
+
+  // Group service items by unit_cents to avoid dozens of lines at the same price
+  const groupedService = new Map(); // key: unit_cents -> { qty }
+  for (const it of serviceItems) {
+    const unit = Math.max(0, Number(it.unit_cents || it.amount_cents || 0));
+    const qty  = Math.max(1, Number(it.qty || 1));
+    if (!unit) continue;
+    const g = groupedService.get(unit) || { qty: 0 };
+    g.qty += qty;
+    groupedService.set(unit, g);
+  }
+
+  // Push grouped service lines
+  for (const [unit, g] of groupedService.entries()) {
+    line_items.push({
+      title: 'PSA Grading',
+      quantity: g.qty,
+      price: moneyStrFromCents(unit),
+      properties: [{ name: 'Kind', value: 'Service' }]
+    });
+    subtotal += g.qty * unit;
+  }
+
+  // Push each saved upcharge as its own line (preserves your existing behavior/titles)
+  for (const u of upchargeItems) {
     const cents = Math.max(0, Number(u.amount_cents ?? u.unit_cents ?? 0));
     if (!cents) continue;
     line_items.push({
@@ -148,8 +163,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     subtotal += cents;
   }
 
-  // Add shipping (use saved row if present, else default once)
-  let hadShipping = false;
+  // Shipping: prefer saved shipping row, else default once (and persist)
   if (shippingRow) {
     const cents = Math.max(0, Number(shippingRow.amount_cents ?? shippingRow.unit_cents ?? 0));
     if (cents) {
@@ -160,10 +174,9 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
         properties: [{ name: 'Kind', value: 'Shipping' }]
       });
       subtotal += cents;
-      hadShipping = true;
     }
   } else {
-    // fallback default shipping if you don’t persist it in preview/save
+    // fallback
     line_items.push({
       title: 'Shipping (flat)',
       quantity: 1,
@@ -172,7 +185,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
     });
     subtotal += DEFAULT_SHIPPING_CENTS;
 
-    // also store it so your DB matches Shopify going forward
+    // persist fallback so DB matches Shopify
     await client.from('billing_invoice_items').insert([{
       invoice_id: inv.id,
       submission_code: null,
@@ -433,17 +446,16 @@ if (!group_code || typeof group_code !== 'string') {
       const draft = draftJson?.draft_order;
       if (!draft || !draft.id) throw new Error('Draft order create returned no id');
 
-      // Persist invoice details + links + items
-      const subtotal = list.reduce((sum, s) => sum + (Number(s.cards || 0) * RATE_CENTS), 0);
-      await client.from('billing_invoices')
-        .update({
-          status: 'draft',
-          draft_id: String(draft.id),
-          invoice_url: draft.invoice_url || null,
-          subtotal_cents: subtotal,
-          total_cents: subtotal
-        })
-        .eq('id', invoiceRow.id);
+  // Persist invoice details + links + items
+  await client.from('billing_invoices')
+    .update({
+      status: 'draft',
+      draft_id: String(draft.id),
+      invoice_url: draft.invoice_url || null,
+      subtotal_cents: subtotal,
+      total_cents: subtotal
+    })
+    .eq('id', invoiceRow.id);
 
       // link submissions
       const linkRows = list.map(s => ({
@@ -453,21 +465,6 @@ if (!group_code || typeof group_code !== 'string') {
       }));
       if (linkRows.length) {
         await client.from('billing_invoice_submissions').insert(linkRows);
-      }
-
-      // item rows (service lines only for now)
-      const itemRows = list.map(s => ({
-        invoice_id: invoiceRow.id,
-        submission_code: s.submission_id,
-        kind: 'service',
-        title: `PSA Grading — ${s.grading_service || 'Service'} — ${s.submission_id}`,
-        qty: Math.max(1, Number(s.cards || 0)),
-        unit_cents: RATE_CENTS,
-        amount_cents: Math.max(1, Number(s.cards || 0)) * RATE_CENTS,
-        meta: { grading_service: s.grading_service || null }
-      }));
-      if (itemRows.length) {
-        await client.from('billing_invoice_items').insert(itemRows);
       }
 
 // NOTE: do not flip here; send-invoice.js will mark balance_due after a successful email send
