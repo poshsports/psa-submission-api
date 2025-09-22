@@ -174,6 +174,19 @@
 
     function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
     function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    // Map PSA service → cents (fallback to default grade fee if unknown)
+function priceCentsForService(name){
+  const n = String(name || "").trim().toLowerCase();
+  const map = new Map([
+    ["psa value bulk", 2800],
+    ["psa value", 3500],
+    ["psa regular", 8500],
+    // add others here as needed (psa express, super express, etc.)
+  ]);
+  if (map.has(n)) return map.get(n);
+  // fallback to the UI default if service isn't recognized
+  return Math.round((Number(SETTINGS?.grade_fee ?? 20) || 20) * 100);
+}
 
     function pill(text){
       const span=document.createElement("span");
@@ -196,13 +209,15 @@
       return span;
     }
 
-    function normalizeCardRow(r){return{
+function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
       submission:r.submission_id||r.submission_code||r.submission||"",
       date:r.break_date||r.break_at||r.date_of_break||null,
       channel:r.break_channel||r.channel||r.break||"",
       breakNo:r.break_num||r.break_number||r.break_no||r.break_id||"",
-      desc:r.card_description||r.description||r.card||r.title||""
+      desc:r.card_description||r.description||r.card||r.title||"",
+      service:r.grading_service||"",
+      grading_cents: priceCentsForService(r.grading_service)
     };}
 
     async function fetchCardsForSubs(subIds){
@@ -259,7 +274,7 @@ async function ensureDraftExists(){
 
     function recalc(){
       const rows=[...document.querySelectorAll("#cardsTbody tr[data-row]")];
-      const gradeSum=rows.length*SETTINGS.grade_fee;
+      const gradeSum = rows.reduce((s,tr)=> s + (Number(tr.dataset.gradeCents||0)/100), 0);
       const upchargeSum=rows.reduce((s,tr)=>s+Number(tr.querySelector(".js-up")?.value||0),0);
       updateTotals(gradeSum,upchargeSum);
     }
@@ -370,7 +385,7 @@ async function save(silent = false){
   if (show) {
     const email = (lastBundle?.customer_email || '').trim() || '—';
     const rows = [...document.querySelectorAll("#cardsTbody tr[data-row]")];
-    const gradeSum = rows.length * SETTINGS.grade_fee;
+    const gradeSum = rows.reduce((s,tr)=> s + (Number(tr.dataset.gradeCents||0)/100), 0);
     const upchargeSum = rows.reduce((s,tr)=> s + Number(tr.querySelector(".js-up")?.value || 0), 0);
     const total = gradeSum + upchargeSum + SETTINGS.shipping;
 
@@ -462,13 +477,13 @@ async function save(silent = false){
       const subIds=subs.map(s=>s.submission_id);
       const rows=await fetchCardsForSubs(subIds);
       $("cardsTbody").innerHTML=rows.map((r,i)=>`
-        <tr data-row="${i}">
+        <tr data-row="${i}" data-grade-cents="${r.grading_cents||0}">
           <td>${esc(r.submission)}</td>
           <td>${esc(r.date||'')}</td>
           <td>${esc(r.channel||'—')}</td>
           <td style="text-align:right;">${esc(r.breakNo||'—')}</td>
           <td>${esc(r.desc||'—')}</td>
-          <td style="text-align:right;">${money(SETTINGS.grade_fee)}</td>
+          <td style="text-align:right;">${money((r.grading_cents||0)/100)}</td>
           <td style="text-align:right;"><input class="js-up" data-id="${esc(r.id||'')}" type="number" step="0.01" value="0.00" style="width:100px;text-align:right;"/></td>
         </tr>`).join("");
 
