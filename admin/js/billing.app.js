@@ -433,10 +433,11 @@ if (tab !== 'to-send') {
   // normalize and remember urls for click-open
   URL_BY_ROWID.clear();
   const normalized = recs.map(normalizeInvoiceRecord).map(tbl.normalizeRow);
-  recs.forEach((r) => {
-    const rowId = 'inv:' + String(r.invoice_id || '');
-    if (r.invoice_url) URL_BY_ROWID.set(rowId, r.invoice_url);
-  });
+recs.forEach((r) => {
+  const rowId = 'inv:' + String(r.invoice_id || '');
+  const url = r.view_url || r.invoice_url || null;
+  if (url) URL_BY_ROWID.set(rowId, url);
+});
 
   tbl.setRows(normalized);
   tbl.applyFilters();
