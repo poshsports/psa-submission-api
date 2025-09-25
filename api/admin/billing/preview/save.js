@@ -199,7 +199,7 @@ if (!invoice_id) {
       .delete()
       .eq('invoice_id', invoice_id)
       .in('submission_card_uuid', ids)
-      .in('kind', ['grading','upcharge']);
+      .in('kind', ['service','upcharge']);
     if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
 
 // Insert grading + upcharge
@@ -213,7 +213,7 @@ const gradingRows = ids.map(cid => {
     invoice_id,
     submission_card_uuid: cid,
     submission_code: codeByCard.get(cid),
-    kind: 'grading',              // <- use 'grading'
+    kind: 'service',              // <- allowed by your check constraint
     title: 'Grading',
     qty: 1,
     unit_cents: unit,
