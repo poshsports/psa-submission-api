@@ -63,7 +63,7 @@
           <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
             <div style="font-weight:600;margin-bottom:8px;">Users</div>
             <div class="users-wrap" style="overflow:auto;">
-              <table style="width:100%;min-width:720px;border-collapse:separate;border-spacing:0;">
+              <table style="width:100%;min-width:840px;border-collapse:separate;border-spacing:0;">
                 <thead>
                   <tr>
                     <th style="text-align:left;">Name</th>
@@ -71,6 +71,7 @@
                     <th style="text-align:left;">Role</th>
                     <th style="text-align:left;">Status</th>
                     <th style="text-align:left;">Added</th>
+                    <th style="text-align:left;">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="usersTbody"></tbody>
@@ -84,27 +85,55 @@
 
   <script type="module">
     const $ = (id) => document.getElementById(id);
+    const state = { meEmail: null };
 
     function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function timeago(iso){
+    function timefmt(iso){
       if(!iso) return '—';
       const d = new Date(iso);
       return d.toLocaleString();
+    }
+
+    async function fetchMe(){
+      try {
+        const r = await fetch('/api/admin/users/me', { credentials:'same-origin' });
+        if (r.ok) {
+          const j = await r.json().catch(()=>({}));
+          state.meEmail = (j && j.email) ? String(j.email).toLowerCase() : null;
+        }
+      } catch {}
     }
 
     async function fetchUsers(){
       const r = await fetch('/api/admin/users/list', { credentials: 'same-origin' });
       const j = await r.json().catch(()=>({users:[]}));
       const rows = j.users || [];
-      $("usersTbody").innerHTML = rows.map(u => `
-        <tr>
-          <td>${esc(u.name||'—')}</td>
-          <td>${esc(u.email)}</td>
-          <td>${esc(u.role)}</td>
-          <td>${u.is_active ? 'Active' : 'Disabled'}</td>
-          <td>${timeago(u.created_at)}</td>
-        </tr>
-      `).join('');
+
+      $("usersTbody").innerHTML = rows.map(u => {
+        const id = u.id || u.auth_user_id || u.user_id || '';
+        const email = String(u.email || '').trim();
+        const isSelf = state.meEmail && email.toLowerCase() === state.meEmail;
+
+        return `
+          <tr>
+            <td>${esc(u.name||'—')}</td>
+            <td>${esc(email)}</td>
+            <td>${esc(u.role || 'staff')}</td>
+            <td>${u.is_active ? 'Active' : 'Disabled'}</td>
+            <td>${timefmt(u.created_at)}</td>
+            <td style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn" data-act="reset" data-email="${esc(email)}">Send reset</button>
+              <button class="btn danger"
+                      data-act="delete"
+                      data-id="${esc(id)}"
+                      data-email="${esc(email)}"
+                      ${isSelf ? 'disabled title="You can’t delete yourself"' : ''}>
+                Delete
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
     async function inviteUser(e){
@@ -138,16 +167,89 @@
       }
     }
 
+    // Bind invite submit
     $("inviteForm").addEventListener("submit", inviteUser);
 
-    // (Optional) signout hook matches your other pages
+    // Actions (event delegation bound to tbody)
+    $("usersTbody").addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+
+      const act = btn.dataset.act;
+
+      // SEND PASSWORD RESET
+      if (act === 'reset') {
+        const email = btn.dataset.email;
+        const prevText = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Sending…';
+        try {
+          const r = await fetch('/api/admin/users/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ email })
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || 'Failed to send reset');
+          alert(`Reset email sent to ${email}.`);
+        } catch (err) {
+          console.error(err);
+          alert('Could not send reset: ' + (err.message || err));
+        } finally {
+          btn.disabled = false; btn.textContent = prevText;
+        }
+        return;
+      }
+
+      // DELETE USER
+      if (act === 'delete') {
+        const id = btn.dataset.id;
+        const email = btn.dataset.email;
+
+        // extra guard in case the button wasn't disabled yet
+        if (state.meEmail && email.toLowerCase() === state.meEmail) {
+          alert("You can't delete yourself.");
+          return;
+        }
+
+        if (!id) { alert('Missing user id.'); return; }
+        if (!confirm(`Remove ${email}? They will lose access.`)) return;
+
+        const prevText = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Removing…';
+        try {
+          const r = await fetch('/api/admin/users/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ id })
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || 'Delete failed');
+
+          await fetchUsers();
+        } catch (err) {
+          console.error(err);
+          alert('Could not delete: ' + (err.message || err));
+        } finally {
+          btn.disabled = false; btn.textContent = prevText;
+        }
+        return;
+      }
+    });
+
+    // Sign out
     document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
       e.preventDefault();
       try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
       window.location.replace('/admin');
     });
 
-    fetchUsers();
+    // Init: get current admin (for self-delete guard) then load users
+    (async function init(){
+      await fetchMe();
+      await fetchUsers();
+    })();
   </script>
 </body>
 </html>
