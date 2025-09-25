@@ -1,81 +1,99 @@
-// /api/admin/login.js
-// Email + password admin login: verifies Supabase credentials, checks admin table,
-// then sets an httpOnly cookie for the admin portal.
+// /api/admin/login.js  (Vercel Node serverless function)
 
-import { createClient as createSb } from '@supabase/supabase-js';
-import { sb } from '../../_util/supabase.js';           // your service client
-import jwt from 'jsonwebtoken';
+import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'change-me';
+// Use the SAME cookie name the old passcode route used.
+// If you’re not sure, open the old /api/admin-login file and copy the name.
+// Defaulting to 'psa_admin' here:
+const COOKIE_NAME = process.env.ADMIN_COOKIE_NAME || 'psa_admin';
 
-// Small helpers
-function json(res, status, payload) {
-  res.status(status).setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(payload));
-}
-async function readBody(req) {
-  const chunks = [];
-  for await (const ch of req) chunks.push(Buffer.from(ch));
-  const raw = Buffer.concat(chunks).toString('utf8') || '{}';
-  try { return JSON.parse(raw); } catch { return {}; }
+// 1 day
+const COOKIE_MAX_AGE = 60 * 60 * 24;
+
+function send(res, status, json, headers = {}) {
+  res.statusCode = status;
+  Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(json));
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-
-  if (!SUPABASE_URL || !SUPABASE_ANON || !ADMIN_JWT_SECRET) {
-    return json(res, 500, { error: 'Server misconfigured (env missing)' });
+  if (req.method !== 'POST') {
+    return send(res, 405, { error: 'Method not allowed' });
   }
 
+  // Parse JSON body (compatible with Vercel/Node)
+  let body = {};
   try {
-    const { email, password } = await readBody(req);
-    if (!email || !password) return json(res, 400, { error: 'Email and password are required' });
+    if (typeof req.body === 'object' && req.body) {
+      body = req.body;
+    } else if (typeof req.body === 'string') {
+      body = JSON.parse(req.body || '{}');
+    } else {
+      // raw body
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    }
+  } catch (e) {
+    return send(res, 400, { error: 'Invalid JSON body' });
+  }
 
-    // 1) Make sure this user exists in your admin users table AND is active
-    const svc = sb(); // service key client
-    const { data: adminUser, error: auErr } = await svc
-      .from('admin_users')             // <- use your exact table name
-      .select('id, email, name, role, is_active')
-      .eq('email', email.toLowerCase())
+  const { email, password } = body || {};
+  if (!email || !password) {
+    return send(res, 400, { error: 'Email and password are required' });
+  }
+
+  // Env sanity
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return send(res, 500, { error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env' });
+  }
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  try {
+    // 1) Sign in with Supabase Auth
+    const { data: authData, error: signInErr } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (signInErr) {
+      return send(res, 401, { error: 'Invalid email or password' });
+    }
+
+    // 2) Confirm this user is in your admin table and is active
+    const userId = authData.user?.id;
+    const { data: adminRow, error: adminErr } = await supabase
+      .from('admin_users')
+      .select('id, role, is_active')
+      .eq('auth_user_id', userId)           // best match by auth id
       .maybeSingle();
 
-    if (auErr)           return json(res, 500, { error: 'DB error' });
-    if (!adminUser)      return json(res, 401, { error: 'Not authorized' });
-    if (adminUser && adminUser.is_active === false)
-                         return json(res, 403, { error: 'User disabled' });
+    if (adminErr) {
+      return send(res, 500, { error: 'Failed to check admin table' });
+    }
+    if (!adminRow || adminRow.is_active === false) {
+      return send(res, 403, { error: 'No access' });
+    }
 
-    // 2) Verify credentials with Supabase Auth
-    const pub = createSb(SUPABASE_URL, SUPABASE_ANON);
-    const { data: signIn, error: signErr } = await pub.auth.signInWithPassword({ email, password });
-    if (signErr || !signIn?.session?.access_token)
-      return json(res, 401, { error: 'Invalid email or password' });
-
-    // 3) Create a short JWT for your admin portal (what requireAdmin() will verify)
-    const payload = {
-      sub: adminUser.id,
-      email: adminUser.email,
-      role: adminUser.role || 'staff',
-      kind: 'psa_admin',
-    };
-    const token = jwt.sign(payload, ADMIN_JWT_SECRET, { expiresIn: '7d' });
-
-    // 4) Set cookie (httpOnly) used by requireAdmin()
-    const isProd = process.env.NODE_ENV === 'production';
+    // 3) Set the same cookie your old passcode route set (keep the app logic unchanged)
+    // Simple flag cookie (the app already trusts the presence of this cookie).
     const cookie = [
-      `psa_admin=${token}`,
-      'Path=/',
-      'HttpOnly',
-      isProd ? 'Secure' : '',
-      'SameSite=Lax',
-      `Max-Age=${60 * 60 * 24 * 7}`, // 7d
-    ].filter(Boolean).join('; ');
+      `${COOKIE_NAME}=1`,
+      `HttpOnly`,
+      `Path=/`,
+      `SameSite=Lax`,
+      `Max-Age=${COOKIE_MAX_AGE}`,
+      `Secure`
+    ].join('; ');
 
     res.setHeader('Set-Cookie', cookie);
-    return json(res, 200, { ok: true, user: { id: adminUser.id, email: adminUser.email, role: adminUser.role } });
-  } catch (err) {
-    console.error('admin/login error', err);
-    return json(res, 500, { error: 'Server error' });
+
+    return send(res, 200, { ok: true });
+  } catch (e) {
+    // Surface a readable reason in JSON; your console logs will still show stack traces on Vercel
+    return send(res, 500, { error: 'Login handler crashed' });
   }
 }
