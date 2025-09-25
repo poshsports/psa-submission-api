@@ -263,7 +263,7 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const ok = await requireAdmin(req, res);
-    if (!ok) return; // 401 already sent by requireAdmin
+    if (!ok) return json(res, 401, { error: 'Unauthorized' });
     assertEnv();
 
 const { group_code, invoice_ids, rate_cents } = (await readBody(req));
