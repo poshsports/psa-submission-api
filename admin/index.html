@@ -20,14 +20,7 @@
         <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
 
         <div class="login-row" style="display:flex;gap:8px;">
-<button
-  id="btnEmailLogin"
-  class="btn primary"
-  type="button"
-  onclick="window.__psaEmailLogin && window.__psaEmailLogin()"
->
-  Sign in
-</button>
+<button id="btnEmailLogin" class="btn primary" type="button">Sign in</button>
           <button
             id="btnReset"
             class="btn"
@@ -194,7 +187,7 @@
   <!-- Small helpers for login/reset -->
   <script>
     // Email/password sign in -> calls /api/admin/login
-    window.__psaLogin = async function () {
+    window.__psaEmailLogin = async function () {
       const email = (document.getElementById('loginEmail')?.value || '').trim();
       const password = document.getElementById('loginPassword')?.value || '';
       const err = document.getElementById('err');
@@ -253,8 +246,9 @@
     (function(){
       const b1 = document.getElementById('btnEmailLogin');
       const b2 = document.getElementById('btnReset');
-      b1 && b1.addEventListener('click', window.__psaLogin);
+      b1 && b1.addEventListener('click', window.__psaEmailLogin);
       b2 && b2.addEventListener('click', window.__psaSendReset);
+      window.__psaLogin = undefined; // prevent old passcode handler from being used anywhere
     })();
   </script>
 </body>
