@@ -124,7 +124,7 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
   const line_items = [];
   let subtotal = 0;
 
-  const serviceItems  = (items || []).filter(x => x.kind === 'grading');
+  const serviceItems  = (items || []).filter(x => x.kind === 'service');
   const upchargeItems = (items || []).filter(x => x.kind === 'upcharge');
   const shippingRow   = (items || []).find(x => x.kind === 'shipping');
 
