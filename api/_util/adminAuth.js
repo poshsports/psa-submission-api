@@ -1,33 +1,85 @@
-// api/_util/adminAuth.js (ESM)
-export const ADMIN_COOKIE_NAME = 'psa_admin';   // keep as-is
-export const ADMIN_COOKIE_OK_VALUE = '1';       // set to null to only require presence
+// /api/_util/adminAuth.js  (ESM)
+import { createClient } from '@supabase/supabase-js';
 
-function parseCookieHeader(h) {
-  if (!h) return {};
-  // supports "cookie" or "Cookie"
-  const raw = Array.isArray(h) ? h.join(';') : String(h);
-  return Object.fromEntries(
-    raw.split(';')
-       .map(s => s.trim())
-       .filter(Boolean)
-       .map(kv => {
-         const idx = kv.indexOf('=');
-         return idx === -1 ? [kv, ''] : [kv.slice(0, idx), kv.slice(idx + 1)];
-       })
-  );
+const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+
+// Server-side Supabase client (Service Role so we can validate tokens and read admin_users)
+const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+});
+
+function parseCookies(req) {
+  const h = req.headers?.cookie || '';
+  const out = {};
+  h.split(';').map(v => v.trim()).filter(Boolean).forEach(kv => {
+    const i = kv.indexOf('=');
+    if (i > 0) out[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+  });
+  return out;
 }
 
-export function requireAdmin(req) {
-  // Prefer parsed cookies if present; fall back to header parsing
-  const byProp = (req.cookies && req.cookies[ADMIN_COOKIE_NAME]) || null;
-  if (byProp) {
-    if (ADMIN_COOKIE_OK_VALUE == null) return true;
-    return byProp === ADMIN_COOKIE_OK_VALUE;
+async function getAdminUserFromRequest(req) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
   }
 
-  const cookies = parseCookieHeader(req.headers?.cookie || req.headers?.Cookie);
-  const val = cookies[ADMIN_COOKIE_NAME] || null;
-  if (!val) return false;
-  if (ADMIN_COOKIE_OK_VALUE == null) return true;
-  return val === ADMIN_COOKIE_OK_VALUE;
+  const cookies = parseCookies(req);
+  const accessToken = cookies['psa_admin_session'];
+  if (!accessToken) return null;
+
+  // 1) Validate Supabase auth token
+  const { data: auth, error: authErr } = await sb.auth.getUser(accessToken);
+  if (authErr || !auth?.user?.email) return null;
+
+  const email = String(auth.user.email).toLowerCase();
+
+  // 2) Enforce admin access + role via your admin_users table
+  const { data: admin, error: adminErr } = await sb
+    .from('admin_users')
+    .select('id, email, role, is_active')
+    .ilike('email', email)
+    .maybeSingle();
+
+  if (adminErr || !admin || !admin.is_active) return null;
+
+  return {
+    id: admin.id,
+    email: admin.email,
+    role: String(admin.role || 'staff').toLowerCase(),
+    supabase_user_id: auth.user.id,
+  };
+}
+
+/** Require any admin (staff/manager/owner). */
+export async function requireAdmin(req, res) {
+  try {
+    const me = await getAdminUserFromRequest(req);
+    if (me) return me;
+  } catch {}
+  if (res) {
+    res.statusCode = 401;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
+  }
+  return null;
+}
+
+/** Require owner role specifically. */
+export async function requireOwner(req, res) {
+  const me = await requireAdmin(req, res);
+  if (!me) return null;
+  if (me.role !== 'owner') {
+    if (res) {
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: 'Forbidden (owner role required)' }));
+    }
+    return null;
+  }
+  return me;
+}
+
+// Optional helper if a route wants to read user without enforcing
+export async function getOptionalAdmin(req) {
+  try { return await getAdminUserFromRequest(req); } catch { return null; }
 }
