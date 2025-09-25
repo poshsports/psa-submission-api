@@ -311,7 +311,10 @@ async function save(silent = false){
       setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 1200);
     }
   } else {
-    if (!silent && btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    const txt = await res.text().catch(()=> '');
+    console.error('[preview/save] failed:', txt);
+    if (!silent) alert('Save failed.\n' + (txt || ''));
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
   }
 }
     async function sendInvoice(){
