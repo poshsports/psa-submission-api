@@ -83,18 +83,22 @@ export default async function handler(req, res) {
 
     if (!invoice_id) return res.status(200).json({ invoice_id: null, items: [] });
 
-    // C) Pull per-card saved values from the view
-    const { data: rows, error: vErr } = await client
-      .from('billing_invoice_cards_v')
-      .select('submission_card_id, grading_cents, upcharge_cents')
-      .eq('invoice_id', invoice_id);
-    if (vErr) return res.status(500).json({ error: 'Failed to read invoice items', details: vErr.message });
+// C) Pull per-card saved upcharges for THIS invoice (authoritative)
+const { data: rows, error: vErr } = await client
+  .from('billing_invoice_items')
+  .select('submission_card_uuid, amount_cents')
+  .eq('invoice_id', invoice_id)
+  .eq('kind', 'upcharge');
 
-    const items = (rows || []).map(r => ({
-      card_id: r.submission_card_id,
-      grading_cents: r.grading_cents || 0,
-      upcharge_cents: r.upcharge_cents || 0
-    }));
+if (vErr) {
+  return res.status(500).json({ error: 'Failed to read saved upcharges', details: vErr.message });
+}
+
+const items = (rows || []).map(r => ({
+  card_id: r.submission_card_uuid,
+  grading_cents: 0,                                  // not used by UI prefill
+  upcharge_cents: Number(r.amount_cents) || 0
+}));
 
     return res.status(200).json({ invoice_id, items });
   } catch (err) {
