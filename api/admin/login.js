@@ -43,17 +43,18 @@ export default async function handler(req, res) {
     const access = auth.session?.access_token;
     if (!access) return json(res, 500, { error: 'No session token returned' });
 
-    const cookie = [
-      `psa_admin_session=${access}`,
-      'Path=/',
-      'HttpOnly',
-      'SameSite=Lax',
-      'Secure',          // keep if site is HTTPS (it is)
-      'Max-Age=604800'   // 7 days
-    ].join('; ');
+// Set BOTH cookies: a front-end readable flag, and the real HttpOnly session
+const flags = 'Path=/; SameSite=Lax; Secure; Max-Age=604800';
 
-    res.setHeader('Set-Cookie', cookie);
-    return json(res, 200, { ok: true, role: admin.role });
+res.setHeader('Set-Cookie', [
+  // non-HttpOnly flag your front-end can read on reload
+  `psa_admin=1; ${flags}`,
+  // HttpOnly JWT session for the server to validate
+  `psa_admin_session=${access}; ${flags}; HttpOnly`,
+]);
+
+return json(res, 200, { ok: true, role: admin.role });
+
   } catch (e) {
     return json(res, 500, { error: 'Server error', details: String(e?.message || e) });
   }
