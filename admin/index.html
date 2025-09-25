@@ -10,40 +10,41 @@
 <body>
 
   <!-- LOGIN (changed: email + password instead of passcode) -->
-  <div id="login">
-    <div class="psa-login">
-      <h1>PSA Admin</h1>
-      <div id="auth-note" class="muted">not signed in</div>
+ <!-- LOGIN (email + password) -->
+<div id="login">
+  <div class="psa-login">
+    <h1>PSA Admin</h1>
+    <div id="auth-note" class="muted">not signed in</div>
 
-      <!-- simple stacked inputs to fit existing styles -->
-      <div class="login-col" style="display:flex;flex-direction:column;gap:8px;min-width:300px;">
-        <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
-        <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+    <div class="login-col" style="display:flex;flex-direction:column;gap:8px;min-width:300px;">
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
 
-        <div class="login-row" style="display:flex;gap:8px;">
-          <button
-            id="btnLogin"
-            class="btn primary"
-            type="button"
-            onclick="window.__psaLogin && window.__psaLogin()"
-          >
-            Sign in
-          </button>
-          <button
-            id="btnReset"
-            class="btn"
-            type="button"
-            onclick="window.__psaSendReset && window.__psaSendReset()"
-          >
-            Forgot password
-          </button>
-        </div>
-
-        <div id="err" class="error"></div>
-        <div id="ok"  class="muted"></div>
+      <div class="login-row" style="display:flex;gap:8px;">
+        <button
+          id="btnEmailLogin"
+          class="btn primary"
+          type="button"
+          onclick="window.__psaEmailLogin && window.__psaEmailLogin()"
+        >
+          Sign in
+        </button>
+        <button
+          id="btnReset"
+          class="btn"
+          type="button"
+          onclick="window.__psaSendReset && window.__psaSendReset()"
+        >
+          Forgot password
+        </button>
       </div>
+
+      <div id="err" class="error"></div>
+      <div id="ok"  class="muted"></div>
     </div>
   </div>
+</div>
+
 
   <!-- APP SHELL -->
   <div id="shell" class="hide">
