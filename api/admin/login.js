@@ -1,99 +1,73 @@
-// /api/admin/login.js  (Vercel Node serverless function)
-
+// /api/admin/login.js
 import { createClient } from '@supabase/supabase-js';
 
-// Use the SAME cookie name the old passcode route used.
-// If you’re not sure, open the old /api/admin-login file and copy the name.
-// Defaulting to 'psa_admin' here:
-const COOKIE_NAME = process.env.ADMIN_COOKIE_NAME || 'psa_admin';
+const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
 
-// 1 day
-const COOKIE_MAX_AGE = 60 * 60 * 24;
+// Create a server-side Supabase client with the Service Role key (bypasses RLS)
+const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false }
+});
 
-function send(res, status, json, headers = {}) {
+function json(res, status, body) {
   res.statusCode = status;
-  Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(json));
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(body));
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return send(res, 405, { error: 'Method not allowed' });
-  }
-
-  // Parse JSON body (compatible with Vercel/Node)
-  let body = {};
-  try {
-    if (typeof req.body === 'object' && req.body) {
-      body = req.body;
-    } else if (typeof req.body === 'string') {
-      body = JSON.parse(req.body || '{}');
-    } else {
-      // raw body
-      const chunks = [];
-      for await (const c of req) chunks.push(c);
-      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
-    }
-  } catch (e) {
-    return send(res, 400, { error: 'Invalid JSON body' });
-  }
-
-  const { email, password } = body || {};
-  if (!email || !password) {
-    return send(res, 400, { error: 'Email and password are required' });
-  }
-
-  // Env sanity
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!SUPABASE_URL || !SERVICE_KEY) {
-    return send(res, 500, { error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env' });
-  }
-
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
   try {
-    // 1) Sign in with Supabase Auth
-    const { data: authData, error: signInErr } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (signInErr) {
-      return send(res, 401, { error: 'Invalid email or password' });
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return json(res, 500, { error: 'Server missing Supabase env vars' });
     }
 
-    // 2) Confirm this user is in your admin table and is active
-    const userId = authData.user?.id;
-    const { data: adminRow, error: adminErr } = await supabase
+    const { email = '', password = '' } = (await readBody(req)) || {};
+    if (!email || !password) return json(res, 400, { error: 'Email and password are required' });
+
+    // 1) Must be an active admin user (case-insensitive match)
+    const { data: admin, error: adminErr } = await sb
       .from('admin_users')
       .select('id, role, is_active')
-      .eq('auth_user_id', userId)           // best match by auth id
+      .ilike('email', email)       // case-insensitive
       .maybeSingle();
 
-    if (adminErr) {
-      return send(res, 500, { error: 'Failed to check admin table' });
-    }
-    if (!adminRow || adminRow.is_active === false) {
-      return send(res, 403, { error: 'No access' });
-    }
+    if (adminErr) return json(res, 500, { error: 'Admin lookup failed', details: adminErr.message });
+    if (!admin || !admin.is_active) return json(res, 403, { error: 'No access' });
 
-    // 3) Set the same cookie your old passcode route set (keep the app logic unchanged)
-    // Simple flag cookie (the app already trusts the presence of this cookie).
+    // 2) Validate the credentials
+    const { data: auth, error: authErr } = await sb.auth.signInWithPassword({ email, password });
+    if (authErr) return json(res, 401, { error: 'Invalid email or password' });
+
+    // 3) Set session cookie (httpOnly). Name can be anything your frontend expects.
+    const access = auth.session?.access_token;
+    if (!access) return json(res, 500, { error: 'No session token returned' });
+
     const cookie = [
-      `${COOKIE_NAME}=1`,
-      `HttpOnly`,
-      `Path=/`,
-      `SameSite=Lax`,
-      `Max-Age=${COOKIE_MAX_AGE}`,
-      `Secure`
+      `psa_admin_session=${access}`,
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Lax',
+      'Secure',          // keep if site is HTTPS (it is)
+      'Max-Age=604800'   // 7 days
     ].join('; ');
 
     res.setHeader('Set-Cookie', cookie);
-
-    return send(res, 200, { ok: true });
+    return json(res, 200, { ok: true, role: admin.role });
   } catch (e) {
-    // Surface a readable reason in JSON; your console logs will still show stack traces on Vercel
-    return send(res, 500, { error: 'Login handler crashed' });
+    return json(res, 500, { error: 'Server error', details: String(e?.message || e) });
   }
+}
+
+// tiny body reader for Vercel/Node
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => (data += c));
+    req.on('end', () => {
+      try { resolve(data ? JSON.parse(data) : {}); }
+      catch (err) { reject(err); }
+    });
+    req.on('error', reject);
+  });
 }
