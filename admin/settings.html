@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PSA Admin – Settings</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="icon" href="data:,">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div id="shell">
+    <div class="admin-shell">
+      <!-- Sidebar -->
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a id="nav-active"  class="sidebar-item" href="/admin/index.html">Active submissions</a>
+        <a id="nav-groups"  class="sidebar-item" href="/admin/groups.html">Groups</a>
+        <a id="nav-billing" class="sidebar-item" href="/admin/billing.html">Billing</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item active" href="/admin/settings.html">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
+
+      <!-- Main -->
+      <main class="admin-main">
+        <div class="topbar">
+          <div class="brand">
+            <span class="dot"></span>
+            <strong>Settings</strong>
+            <span class="muted" style="margin-left:6px;">/ Users</span>
+          </div>
+        </div>
+
+        <div style="padding:16px; display:grid; grid-template-columns: 1fr; gap:16px;">
+          <!-- Invite form -->
+          <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
+            <div style="font-weight:600;margin-bottom:8px;">Invite user</div>
+            <form id="inviteForm" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label class="muted" style="font-size:12px;">Name</label>
+                <input id="invName" type="text" placeholder="Jane Doe" style="min-width:220px;">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label class="muted" style="font-size:12px;">Email</label>
+                <input id="invEmail" type="email" placeholder="jane@example.com" required style="min-width:260px;">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <label class="muted" style="font-size:12px;">Role</label>
+                <select id="invRole" style="min-width:160px;">
+                  <option value="staff">Staff</option>
+                  <option value="manager">Manager</option>
+                  <option value="owner">Owner</option>
+                </select>
+              </div>
+              <button id="btnInvite" type="submit" class="btn primary" style="min-width:120px;">Invite</button>
+              <div id="inviteMsg" class="muted" style="font-size:12px;"></div>
+            </form>
+          </div>
+
+          <!-- Users table -->
+          <div style="border:1px solid #eee;border-radius:12px;padding:12px;">
+            <div style="font-weight:600;margin-bottom:8px;">Users</div>
+            <div class="users-wrap" style="overflow:auto;">
+              <table style="width:100%;min-width:720px;border-collapse:separate;border-spacing:0;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">Name</th>
+                    <th style="text-align:left;">Email</th>
+                    <th style="text-align:left;">Role</th>
+                    <th style="text-align:left;">Status</th>
+                    <th style="text-align:left;">Added</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+
+    function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function timeago(iso){
+      if(!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleString();
+    }
+
+    async function fetchUsers(){
+      const r = await fetch('/api/admin/users/list', { credentials: 'same-origin' });
+      const j = await r.json().catch(()=>({users:[]}));
+      const rows = j.users || [];
+      $("usersTbody").innerHTML = rows.map(u => `
+        <tr>
+          <td>${esc(u.name||'—')}</td>
+          <td>${esc(u.email)}</td>
+          <td>${esc(u.role)}</td>
+          <td>${u.is_active ? 'Active' : 'Disabled'}</td>
+          <td>${timeago(u.created_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function inviteUser(e){
+      e.preventDefault();
+      const btn = $("btnInvite");
+      const msg = $("inviteMsg");
+      msg.textContent = '';
+      btn.disabled = true; btn.textContent = 'Inviting…';
+      try {
+        const payload = {
+          name: $("invName").value.trim(),
+          email: $("invEmail").value.trim(),
+          role: $("invRole").value
+        };
+        const r = await fetch('/api/admin/users/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(payload)
+        });
+        const j = await r.json().catch(()=>({}));
+        if (!r.ok) throw new Error(j?.error || 'Invite failed');
+        msg.textContent = `Invite sent to ${payload.email}.`;
+        $("invName").value = ''; $("invEmail").value = ''; $("invRole").value='staff';
+        await fetchUsers();
+      } catch (err) {
+        console.error(err);
+        msg.textContent = String(err?.message || err);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Invite';
+      }
+    }
+
+    $("inviteForm").addEventListener("submit", inviteUser);
+
+    // (Optional) signout hook matches your other pages
+    document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
+      window.location.replace('/admin');
+    });
+
+    fetchUsers();
+  </script>
+</body>
+</html>
