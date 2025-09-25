@@ -43,17 +43,20 @@ export default async function handler(req, res) {
     const access = auth.session?.access_token;
     if (!access) return json(res, 500, { error: 'No session token returned' });
 
-// Set BOTH cookies: a front-end readable flag, and the real HttpOnly session
-const flags = 'Path=/; SameSite=Lax; Secure; Max-Age=604800';
+// Set BOTH cookies: a front-end readable role + a real HttpOnly session
+const role = String(admin.role || 'staff').toLowerCase();
+
+const isLocal = (req.headers.host || '').startsWith('localhost');
+const flags = `Path=/; SameSite=Lax; ${isLocal ? '' : 'Secure; '}Max-Age=604800`;
 
 res.setHeader('Set-Cookie', [
-  `psa_admin=1; ${flags}`,
-  `psa_role=${encodeURIComponent(admin.role)}; ${flags}`, 
-  `psa_admin_session=${access}; ${flags}; HttpOnly`,
+  `psa_admin=1; ${flags}`,                    // optional "I'm an admin UI" flag
+  `psa_role=${role}; ${flags}`,               // readable by JS (no HttpOnly)
+  `psa_admin_session=${access}; ${flags}; HttpOnly`, // real session token
 ]);
-return json(res, 200, { ok: true, role: admin.role });
 
-return json(res, 200, { ok: true, role: admin.role });
+return json(res, 200, { ok: true, role });
+
 
   } catch (e) {
     return json(res, 500, { error: 'Server error', details: String(e?.message || e) });
