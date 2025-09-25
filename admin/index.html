@@ -9,23 +9,39 @@
 </head>
 <body>
 
-  <!-- LOGIN -->
+  <!-- LOGIN (changed: email + password instead of passcode) -->
   <div id="login">
     <div class="psa-login">
       <h1>PSA Admin</h1>
       <div id="auth-note" class="muted">not signed in</div>
-      <div class="login-row">
-        <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password" />
-        <button
-          id="btnLogin"
-          class="btn primary"
-          type="button"
-          onclick="window.__psaLogin && window.__psaLogin()"
-        >
-          Sign in
-        </button>
+
+      <!-- simple stacked inputs to fit existing styles -->
+      <div class="login-col" style="display:flex;flex-direction:column;gap:8px;min-width:300px;">
+        <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
+        <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+
+        <div class="login-row" style="display:flex;gap:8px;">
+          <button
+            id="btnLogin"
+            class="btn primary"
+            type="button"
+            onclick="window.__psaLogin && window.__psaLogin()"
+          >
+            Sign in
+          </button>
+          <button
+            id="btnReset"
+            class="btn"
+            type="button"
+            onclick="window.__psaSendReset && window.__psaSendReset()"
+          >
+            Forgot password
+          </button>
+        </div>
+
+        <div id="err" class="error"></div>
+        <div id="ok"  class="muted"></div>
       </div>
-      <div id="err" class="error"></div>
     </div>
   </div>
 
@@ -44,8 +60,6 @@
   <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
 </aside>
 
-
-
       <!-- Main -->
       <main class="admin-main">
         <!-- Top bar -->
@@ -55,7 +69,7 @@
             <strong>Active submissions</strong>
           </div>
           <div class="top-actions">
-            <span id="auth-note-top" class="muted">passcode session</span>
+            <span id="auth-note-top" class="muted">signed in</span>
           </div>
         </div>
 
@@ -201,5 +215,63 @@
 
   <!-- Module entrypoint -->
   <script type="module" src="/admin/js/admin.app.js"></script>
+
+  <!-- Small helpers for login/reset -->
+  <script>
+    // Email/password sign in -> calls /api/admin/login
+    window.__psaLogin = async function () {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const err = document.getElementById('err');
+      err.textContent = '';
+
+      const btn = document.getElementById('btnLogin');
+      btn.disabled = true; btn.textContent = 'Signing in…';
+      try {
+        const r = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ email, password })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'Sign-in failed');
+
+        // Cookies are set by the server; refresh so admin.app.js proceeds into the app
+        location.reload();
+      } catch (e) {
+        err.textContent = e.message || String(e);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Sign in';
+      }
+    };
+
+    // Sends a password reset email using the email field
+    window.__psaSendReset = async function () {
+      const email = document.getElementById('loginEmail').value.trim();
+      const err = document.getElementById('err');
+      const ok  = document.getElementById('ok');
+      err.textContent = ''; ok.textContent = '';
+
+      if (!email) {
+        err.textContent = 'Enter your email first.'; 
+        return;
+      }
+      try {
+        const r = await fetch('/api/admin/users/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ email })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'Could not send reset email');
+
+        ok.textContent = 'Reset email sent (check inbox/spam).';
+      } catch (e) {
+        err.textContent = e.message || String(e);
+      }
+    };
+  </script>
 </body>
 </html>
