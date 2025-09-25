@@ -9,61 +9,58 @@
 </head>
 <body>
 
-  <!-- LOGIN (changed: email + password instead of passcode) -->
- <!-- LOGIN (email + password) -->
-<div id="login">
-  <div class="psa-login">
-    <h1>PSA Admin</h1>
-    <div id="auth-note" class="muted">not signed in</div>
+  <!-- LOGIN (email + password) -->
+  <div id="login">
+    <div class="psa-login">
+      <h1>PSA Admin</h1>
+      <div id="auth-note" class="muted">not signed in</div>
 
-    <div class="login-col" style="display:flex;flex-direction:column;gap:8px;min-width:300px;">
-      <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
-      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+      <div class="login-col" style="display:flex;flex-direction:column;gap:8px;min-width:300px;">
+        <input id="loginEmail" type="email" placeholder="Email" autocomplete="username" />
+        <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
 
-      <div class="login-row" style="display:flex;gap:8px;">
-        <button
-          id="btnEmailLogin"
-          class="btn primary"
-          type="button"
-          onclick="window.__psaEmailLogin && window.__psaEmailLogin()"
-        >
-          Sign in
-        </button>
-        <button
-          id="btnReset"
-          class="btn"
-          type="button"
-          onclick="window.__psaSendReset && window.__psaSendReset()"
-        >
-          Forgot password
-        </button>
+        <div class="login-row" style="display:flex;gap:8px;">
+          <button
+            id="btnEmailLogin"
+            class="btn primary"
+            type="button"
+            onclick="window.__psaLogin && window.__psaLogin()"
+          >
+            Sign in
+          </button>
+          <button
+            id="btnReset"
+            class="btn"
+            type="button"
+            onclick="window.__psaSendReset && window.__psaSendReset()"
+          >
+            Forgot password
+          </button>
+        </div>
+
+        <div id="err" class="error"></div>
+        <div id="ok"  class="muted"></div>
       </div>
-
-      <div id="err" class="error"></div>
-      <div id="ok"  class="muted"></div>
     </div>
   </div>
-</div>
-
 
   <!-- APP SHELL -->
   <div id="shell" class="hide">
     <div class="admin-shell">
       <!-- Sidebar -->
-<aside class="admin-sidebar">
-  <div class="sidebar-title">PSA Admin</div>
-  <a id="nav-active" class="sidebar-item active" href="/admin/index.html">Active submissions</a>
-  <a id="nav-groups" class="sidebar-item" href="/admin/groups.html">Groups</a>
-  <a id="nav-billing" class="sidebar-item" href="/admin/billing.html">Billing</a>
-  <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
-  <a id="nav-settings" class="sidebar-item" href="/admin/settings.html">Settings</a>
-  <div class="sidebar-spacer"></div>
-  <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
-</aside>
+      <aside class="admin-sidebar">
+        <div class="sidebar-title">PSA Admin</div>
+        <a id="nav-active" class="sidebar-item active" href="/admin/index.html">Active submissions</a>
+        <a id="nav-groups" class="sidebar-item" href="/admin/groups.html">Groups</a>
+        <a id="nav-billing" class="sidebar-item" href="/admin/billing.html">Billing</a>
+        <a id="nav-reports" class="sidebar-item" href="#" title="Coming soon">Reports</a>
+        <a id="nav-settings" class="sidebar-item" href="/admin/settings.html">Settings</a>
+        <div class="sidebar-spacer"></div>
+        <a id="sidebar-signout" class="sidebar-item" href="#">Sign out</a>
+      </aside>
 
       <!-- Main -->
       <main class="admin-main">
-        <!-- Top bar -->
         <div class="topbar">
           <div class="brand">
             <span class="dot"></span>
@@ -74,18 +71,12 @@
           </div>
         </div>
 
-        <!-- Views pills -->
-        <div class="views-bar" id="views-bar">
-          <!-- rendered by JS -->
-        </div>
+        <div class="views-bar" id="views-bar"></div>
 
         <!-- ===================== Submissions view ===================== -->
         <section id="view-submissions">
-          <!-- Toolbar -->
           <div class="toolbar">
             <input id="q" type="search" placeholder="Search email or submission…" />
-
-            <!-- Date range button + popover (right after search) -->
             <button id="btnDate" class="btn" type="button" title="Filter by date">Dates: All</button>
             <div id="date-popover" class="popover hide" role="dialog" aria-modal="true">
               <div id="rangeCal" class="range-cal">
@@ -94,9 +85,7 @@
                   <button id="datePreset7" class="btn" type="button">Last 7 days</button>
                   <button id="datePreset30" class="btn" type="button">Last 30 days</button>
                 </div>
-
                 <div class="rc-months">
-                  <!-- Left month -->
                   <div class="rc-month">
                     <div class="rc-head">
                       <button id="rc-prev" class="btn" type="button" title="Previous month">‹</button>
@@ -104,8 +93,6 @@
                     </div>
                     <div id="rc-grid-left" class="rc-grid"></div>
                   </div>
-
-                  <!-- Right month -->
                   <div class="rc-month">
                     <div class="rc-head">
                       <div id="rc-title-right" class="rc-title"></div>
@@ -115,7 +102,6 @@
                   </div>
                 </div>
               </div>
-
               <div class="rc-foot">
                 <span id="rc-range-label" class="muted"></span>
                 <div class="spacer"></div>
@@ -123,14 +109,11 @@
                 <button id="dateCancel" class="btn" type="button">Cancel</button>
                 <button id="dateApply"  class="btn primary" type="button">Apply</button>
               </div>
-
-              <!-- hidden inputs the table code reads -->
               <input id="dateFrom" type="date" hidden />
               <input id="dateTo"   type="date" hidden />
             </div>
 
             <div class="filters">
-              <!-- Status (checkbox dropdown) -->
               <button id="btnStatus" class="btn" type="button">Status: All</button>
               <div id="status-popover" class="popover hide" role="dialog" aria-modal="true">
                 <div class="status-list">
@@ -147,7 +130,6 @@
                 </div>
               </div>
 
-              <!-- Evaluation (unchanged) -->
               <select id="fEval" aria-label="Evaluation">
                 <option value="all">Evaluation: All</option>
                 <option value="yes">Yes</option>
@@ -155,7 +137,6 @@
               </select>
             </div>
 
-            <!-- Grading Service filter -->
             <select id="fService" title="Grading service" style="min-width:220px">
               <option value="">Grading: All</option>
             </select>
@@ -166,10 +147,8 @@
             <button id="btnRefresh" class="btn" type="button">Refresh</button>
           </div>
 
-          <!-- Error line -->
           <div id="subsErr" class="error hide"></div>
 
-          <!-- Table -->
           <div class="table-wrap">
             <div class="table-scroller">
               <table class="table" id="subsTable">
@@ -180,19 +159,14 @@
             <div id="subsEmpty" class="empty hide">No submissions found.</div>
           </div>
 
-          <!-- Pagination -->
           <div class="pagination">
             <span class="page-range" id="page-range">0–0 of 0</span>
             <button class="page-btn" id="prev-page">‹</button>
             <button class="page-btn" id="next-page">›</button>
           </div>
         </section>
-        <!-- =================== /Submissions view ===================== -->
 
-        <!-- ======================= Groups view ======================= -->
-        <section id="view-groups" class="hide"><!-- rendered by JS --></section>
-        <!-- ===================== /Groups view ======================= -->
-
+        <section id="view-groups" class="hide"></section>
       </main>
     </div>
   </div>
@@ -221,13 +195,16 @@
   <script>
     // Email/password sign in -> calls /api/admin/login
     window.__psaLogin = async function () {
-      const email = document.getElementById('loginEmail').value.trim();
-      const password = document.getElementById('loginPassword').value;
+      const email = (document.getElementById('loginEmail')?.value || '').trim();
+      const password = document.getElementById('loginPassword')?.value || '';
       const err = document.getElementById('err');
       err.textContent = '';
 
-      const btn = document.getElementById('btnLogin');
-      btn.disabled = true; btn.textContent = 'Signing in…';
+      if (!email)   { err.textContent = 'Enter your email.'; return; }
+      if (!password){ err.textContent = 'Enter your password.'; return; }
+
+      const btn = document.getElementById('btnEmailLogin'); // <-- fixed id
+      btn.disabled = true; const old = btn.textContent; btn.textContent = 'Signing in…';
       try {
         const r = await fetch('/api/admin/login', {
           method: 'POST',
@@ -238,26 +215,24 @@
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'Sign-in failed');
 
-        // Cookies are set by the server; refresh so admin.app.js proceeds into the app
+        // Server sets auth cookie; reload so admin.app.js enters the app
         location.reload();
       } catch (e) {
         err.textContent = e.message || String(e);
       } finally {
-        btn.disabled = false; btn.textContent = 'Sign in';
+        btn.disabled = false; btn.textContent = old;
       }
     };
 
     // Sends a password reset email using the email field
     window.__psaSendReset = async function () {
-      const email = document.getElementById('loginEmail').value.trim();
+      const email = (document.getElementById('loginEmail')?.value || '').trim();
       const err = document.getElementById('err');
       const ok  = document.getElementById('ok');
       err.textContent = ''; ok.textContent = '';
 
-      if (!email) {
-        err.textContent = 'Enter your email first.'; 
-        return;
-      }
+      if (!email) { err.textContent = 'Enter your email first.'; return; }
+
       try {
         const r = await fetch('/api/admin/users/reset', {
           method: 'POST',
@@ -273,6 +248,14 @@
         err.textContent = e.message || String(e);
       }
     };
+
+    // Also bind via JS to be extra safe
+    (function(){
+      const b1 = document.getElementById('btnEmailLogin');
+      const b2 = document.getElementById('btnReset');
+      b1 && b1.addEventListener('click', window.__psaLogin);
+      b2 && b2.addEventListener('click', window.__psaSendReset);
+    })();
   </script>
 </body>
 </html>
