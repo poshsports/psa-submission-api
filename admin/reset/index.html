@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Reset password • PSA Admin</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:#f7f7f8; }
+    .card { max-width:420px; margin:10vh auto; background:#fff; border:1px solid #eee; border-radius:12px; padding:20px; box-shadow: 0 2px 10px rgba(0,0,0,.04);}
+    .title { font-weight:700; font-size:18px; margin-bottom:6px; }
+    .muted { color:#6b7280; font-size:12px; margin: 0 0 16px; }
+    label { display:block; font-size:13px; margin:10px 0 6px; color:#374151; }
+    input { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:10px; font-size:14px; }
+    button { margin-top:16px; width:100%; padding:10px 14px; border-radius:10px; border:0; color:#fff; background:#0f766e; font-weight:600; cursor:pointer; }
+    button[disabled]{opacity:.6; cursor:not-allowed;}
+    .msg { margin-top:12px; font-size:13px; }
+    .ok { color:#065f46; }
+    .err { color:#b91c1c; }
+    .center { text-align:center; }
+    a { color:#0f766e; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">Set a new password</div>
+    <p class="muted">Enter a new password to finish your reset.</p>
+
+    <form id="form" style="display:none;">
+      <label>New password</label>
+      <input id="pw1" type="password" placeholder="••••••••" minlength="8" required>
+      <label>Confirm password</label>
+      <input id="pw2" type="password" placeholder="••••••••" minlength="8" required>
+      <button id="submitBtn" type="submit">Update password</button>
+      <div id="msg" class="msg"></div>
+    </form>
+
+    <div id="boot" class="center muted">Checking reset link…</div>
+  </div>
+
+  <!-- Supabase JS v2 from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // TODO: fill with your Supabase project values (Settings → API)
+    const SUPABASE_URL = 'https://uqymahibrfcghdxihpvp.supabase.co';          // e.g. https://abcxyz.supabase.co
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxeW1haGlicmZjZ2hkeGlocHZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMDU2NzAsImV4cCI6MjA2Njg4MTY3MH0.NiOWeMfROatp--A0mpET_SG1ZXoaO102NsdlAjF1v3Q'; // public anon key
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const boot = document.getElementById('boot');
+    const form = document.getElementById('form');
+    const msg  = document.getElementById('msg');
+    const btn  = document.getElementById('submitBtn');
+
+    function getHashParam(name){
+      const p = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      return p.get(name);
+    }
+
+    (async function init(){
+      // The recovery link provides access_token + refresh_token in the URL hash
+      const access_token  = getHashParam('access_token');
+      const refresh_token = getHashParam('refresh_token');
+      const type          = getHashParam('type'); // should be "recovery"
+
+      if (!access_token || !refresh_token) {
+        boot.textContent = 'Invalid or expired reset link.';
+        return;
+      }
+
+      try {
+        // Establish a session with the provided tokens
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) throw error;
+
+        boot.style.display = 'none';
+        form.style.display = 'block';
+      } catch (e) {
+        boot.textContent = 'Could not validate reset link. ' + (e.message || e);
+      }
+    })();
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+      msg.className = 'msg';
+
+      const pw1 = document.getElementById('pw1').value.trim();
+      const pw2 = document.getElementById('pw2').value.trim();
+
+      if (pw1.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; msg.classList.add('err'); return; }
+      if (pw1 !== pw2)    { msg.textContent = 'Passwords do not match.'; msg.classList.add('err'); return; }
+
+      btn.disabled = true; btn.textContent = 'Updating…';
+      try {
+        const { error } = await supabase.auth.updateUser({ password: pw1 });
+        if (error) throw error;
+
+        msg.textContent = 'Password updated! You can now sign in.';
+        msg.classList.add('ok');
+        // Optional: redirect back to admin sign-in
+        setTimeout(() => { window.location.href = '/admin/'; }, 1000);
+      } catch (e) {
+        msg.textContent = e.message || String(e);
+        msg.classList.add('err');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Update password';
+      }
+    });
+  </script>
+</body>
+</html>
