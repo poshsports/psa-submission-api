@@ -115,11 +115,11 @@ async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
 
   // 5) Build line_items from DB (authoritative)
   // Read saved invoice items (service + upcharge + shipping)
-  const { data: items, error: itemsErr } = await client
-    .from('billing_invoice_items')
-    .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
-    .eq('invoice_id', inv.id);
-  if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message });
+const { data: items, error: itemsErr } = await client
+  .from('billing_invoice_items')
+  .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
+  .eq('invoice_id', inv.id);
+if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message };
 
   const line_items = [];
   let subtotal = 0;
