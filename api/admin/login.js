@@ -47,11 +47,11 @@ export default async function handler(req, res) {
 const flags = 'Path=/; SameSite=Lax; Secure; Max-Age=604800';
 
 res.setHeader('Set-Cookie', [
-  // non-HttpOnly flag your front-end can read on reload
   `psa_admin=1; ${flags}`,
-  // HttpOnly JWT session for the server to validate
+  `psa_role=${encodeURIComponent(admin.role)}; ${flags}`, 
   `psa_admin_session=${access}; ${flags}; HttpOnly`,
 ]);
+return json(res, 200, { ok: true, role: admin.role });
 
 return json(res, 200, { ok: true, role: admin.role });
 
