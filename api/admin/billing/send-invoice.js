@@ -41,7 +41,8 @@ async function shopifyFetch(path, method = 'GET', body) {
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-    if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
+    const ok = await requireAdmin(req, res);
+if (!ok) return; // 401 already sent by requireAdmin
     if (!STORE || !ADMIN_TOKEN) return json(res, 500, { error: 'Missing Shopify env vars' });
 
     const { invoice_id, to, customer_email, subject, message } = await readBody(req);
