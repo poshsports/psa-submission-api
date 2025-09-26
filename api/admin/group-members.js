@@ -10,10 +10,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (!requireAdmin(req)) {
-    res.status(401).json({ ok: false, error: 'Unauthorized' });
-    return;
-  }
+const ok = await requireAdmin(req, res);
+if (!ok) return;
 
   let { group_id, code } = req.query;
 
