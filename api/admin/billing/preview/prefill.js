@@ -7,7 +7,8 @@ const uniq = (arr) => Array.from(new Set(arr));
 export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') { res.setHeader('Allow','GET'); return res.status(405).json({ error:'Method not allowed' }); }
-    if (!requireAdmin(req)) return res.status(401).json({ error: 'Unauthorized' });
+    const ok = await requireAdmin(req, res);
+if (!ok) return; // 401 already sent by helper
 
     const raw = String(req.query.subs || '').trim();
     const subCodes = raw.split(',').map(s => s.trim()).filter(Boolean);
