@@ -5,7 +5,8 @@ import { requireAdmin } from '../../_util/adminAuth.js';
 export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); return res.status(405).json({ error: 'Method not allowed' }); }
-    const ok = await requireAdmin(req, res); if (!ok) return; // 401 handled inside
+    const me = await requireOwner(req, res);
+if (!me) return;
 
     const { data, error } = await sb()
       .from('admin_users')
