@@ -10,8 +10,9 @@ const readBody = async (req) => {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-  const ok = await requireAdmin(req, res);
-if (!ok) return; // 401 already sent by helper
+const me = await requireOwner(req, res);
+if (!me) return;
+
 
   const { id, hard } = await readBody(req);
   if (!id) return json(res, 400, { error: 'id is required' });
