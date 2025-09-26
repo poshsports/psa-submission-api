@@ -40,7 +40,8 @@ function fp(token) {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
+  const ok = await requireAdmin(req, res);
+if (!ok) return; // 401 already sent by helper
 
   // allow testing a token safely via ?token=shpat_...
   const q = new URL(req.url, `https://${req.headers.host}`).searchParams;
