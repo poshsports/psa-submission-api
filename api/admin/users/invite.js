@@ -1,6 +1,6 @@
 // /api/admin/users/invite.js
 import { sb } from '../../_util/supabase.js';
-import { requireAdmin } from '../../_util/adminAuth.js';
+import { requireAdmin, requireOwner } from '../../_util/adminAuth.js';
 import { createClient } from '@supabase/supabase-js';
 const adminClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY); // SERVICE ROLE
 
