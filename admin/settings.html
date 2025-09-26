@@ -192,72 +192,113 @@ async function fetchUsers(){
     $("inviteForm")?.addEventListener("submit", inviteUser);
 
     // Actions (event delegation bound to tbody)
-    $("usersTbody")?.addEventListener('click', async (e) => {
-      const btn = e.target.closest('button[data-act]');
-      if (!btn) return;
+// Actions: reset & delete (event delegation)
+$("usersTbody")?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
 
-      const act = btn.dataset.act;
+  const act = btn.dataset.act;
 
-      // SEND PASSWORD RESET
-      if (act === 'reset') {
-        const email = btn.dataset.email;
-        const prevText = btn.textContent;
-        btn.disabled = true; btn.textContent = 'Sending…';
-        try {
-          const r = await fetch('/api/admin/users/reset', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ email })
-          });
-          const j = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(j.error || 'Failed to send reset');
-          alert(`Reset email sent to ${email}.`);
-        } catch (err) {
-          console.error(err);
-          alert('Could not send reset: ' + (err.message || err));
-        } finally {
-          btn.disabled = false; btn.textContent = prevText;
-        }
-        return;
-      }
+  // SEND PASSWORD RESET
+  if (act === 'reset') {
+    const email = btn.dataset.email;
+    const prevText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/admin/users/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Failed to send reset');
+      alert(`Reset email sent to ${email}.`);
+    } catch (err) {
+      console.error(err);
+      alert('Could not send reset: ' + (err.message || err));
+    } finally {
+      btn.disabled = false; btn.textContent = prevText;
+    }
+    return;
+  }
 
-      // DELETE USER
-      if (act === 'delete') {
-        const id = btn.dataset.id;
-        const email = btn.dataset.email;
+  // DELETE USER
+  if (act === 'delete') {
+    const id = btn.dataset.id;
+    const email = btn.dataset.email;
 
-        // extra guard in case the button wasn't disabled yet
-        if (state.meEmail && email.toLowerCase() === state.meEmail) {
-          alert("You can't delete yourself.");
-          return;
-        }
+    // guard: can't delete yourself
+    if (state.meEmail && email.toLowerCase() === state.meEmail) {
+      alert("You can't delete yourself.");
+      return;
+    }
 
-        if (!id) { alert('Missing user id.'); return; }
-        if (!confirm(`Remove ${email}? They will lose access.`)) return;
+    if (!id) { alert('Missing user id.'); return; }
+    if (!confirm(`Remove ${email}? They will lose access.`)) return;
 
-        const prevText = btn.textContent;
-        btn.disabled = true; btn.textContent = 'Removing…';
-        try {
-          const r = await fetch('/api/admin/users/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ id })
-          });
-          const j = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(j.error || 'Delete failed');
+    const prevText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Removing…';
+    try {
+      const r = await fetch('/api/admin/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ id })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Delete failed');
 
-          await fetchUsers();
-        } catch (err) {
-          console.error(err);
-          alert('Could not delete: ' + (err.message || err));
-        } finally {
-          btn.disabled = false; btn.textContent = prevText;
-        }
-        return;
-      }
+      await fetchUsers();
+    } catch (err) {
+      console.error(err);
+      alert('Could not delete: ' + (err.message || err));
+    } finally {
+      btn.disabled = false; btn.textContent = prevText;
+    }
+    return;
+  }
+});
+
+// Role change (event delegation) — separate listener
+$("usersTbody")?.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select[data-role]');
+  if (!sel) return;
+
+  const id = sel.getAttribute('data-id');
+  const newRole = sel.value;
+  const prev = sel.getAttribute('data-prev') || sel.value; // first time prev may not exist
+
+  // remember previous value
+  sel.setAttribute('data-prev', prev);
+
+  if (!confirm(`Change role to "${newRole}"?`)) {
+    sel.value = prev;
+    return;
+  }
+
+  sel.disabled = true;
+  try {
+    const r = await fetch('/api/admin/users/update-role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ id, role: newRole })
     });
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(j.error || 'Update failed');
+
+    // success: new prev = current value
+    sel.setAttribute('data-prev', newRole);
+  } catch (err) {
+    alert(err.message || String(err));
+    // revert UI on error
+    sel.value = prev;
+  } finally {
+    sel.disabled = false;
+  }
+});
+
 
     // Sign out
     document.getElementById('sidebar-signout')?.addEventListener('click', async (e) => {
