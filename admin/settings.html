@@ -131,7 +131,15 @@ async function fetchUsers(){
       <tr>
         <td>${esc(u.name||'—')}</td>
         <td>${esc(email)}</td>
-        <td>${esc(u.role || 'staff')}</td>
+        <td>
+  <select data-role
+          data-id="${esc(id)}"
+          ${isSelf ? 'disabled title="You can’t change your own role"' : ''}>
+    ${['staff','manager','owner'].map(r => `
+      <option value="${r}" ${String(u.role||'staff').toLowerCase()===r?'selected':''}>${r}</option>
+    `).join('')}
+  </select>
+</td>
         <td>${u.is_active ? 'Active' : 'Disabled'}</td>
         <td>${timefmt(u.created_at)}</td>
         <td style="display:flex;gap:8px;flex-wrap:wrap;">
