@@ -6,8 +6,9 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const cookieFlags = 'Path=/; SameSite=Lax; Secure';
 res.setHeader('Set-Cookie', [
-  'psa_admin_session=; Path=/; Max-Age=0; SameSite=Lax; Secure',
-  'psa_role=; Path=/; Max-Age=0; SameSite=Lax; Secure'
+  'psa_admin_session=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0',
+  'psa_role=; Path=/; SameSite=Lax; Secure; Max-Age=0',
+  'psa_admin=; Path=/; SameSite=Lax; Secure; Max-Age=0',
 ]);
   return res.status(200).json({ ok: true });
 }
