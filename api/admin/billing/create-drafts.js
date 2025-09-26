@@ -262,8 +262,8 @@ if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-    const ok = await requireAdmin(req, res);
-    if (!ok) return json(res, 401, { error: 'Unauthorized' });
+const ok = await requireAdmin(req, res);
+if (!ok) return;
     assertEnv();
 
 const { group_code, invoice_ids, rate_cents } = (await readBody(req));
