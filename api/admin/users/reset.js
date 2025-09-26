@@ -11,7 +11,8 @@ const origin = (req) => `${req.headers['x-forwarded-proto']||'https'}://${req.he
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-  if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
+ const ok = await requireAdmin(req, res);
+if (!ok) return; // 401 already sent by helper
 
   const { email } = await readBody(req);
   if (!email) return json(res, 400, { error: 'email is required' });
