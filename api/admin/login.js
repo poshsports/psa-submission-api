@@ -51,7 +51,7 @@ const flags = `Path=/; SameSite=Lax; ${isLocal ? '' : 'Secure; '}Max-Age=604800`
 
 res.setHeader('Set-Cookie', [
   `psa_admin=1; ${flags}`,                    // optional "I'm an admin UI" flag
-  `psa_role=${role}; ${flags}`,               // readable by JS (no HttpOnly)
+  `psa_role=${encodeURIComponent(role)}; ${flags}`,
   `psa_admin_session=${access}; ${flags}; HttpOnly`, // real session token
 ]);
 
