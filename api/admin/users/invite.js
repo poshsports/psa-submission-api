@@ -20,7 +20,8 @@ async function readBody(req) {
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }); }
-    const ok = await requireAdmin(req, res); if (!ok) return;
+    const me = await requireOwner(req, res);
+if (!me) return;
 
     const { email, name, role } = await readBody(req);
     const em = String(email || '').trim().toLowerCase();
