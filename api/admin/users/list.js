@@ -1,6 +1,6 @@
 // /api/admin/users/list.js
 import { sb } from '../../_util/supabase.js';
-import { requireAdmin } from '../../_util/adminAuth.js';
+import { requireAdmin, requireOwner } from '../../_util/adminAuth.js';
 
 export default async function handler(req, res) {
   try {
