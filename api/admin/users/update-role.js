@@ -1,6 +1,6 @@
 // /api/admin/users/update-role.js
 import { createClient } from '@supabase/supabase-js';
-import { requireOwner } from '../_util/adminAuth.js'; // adjust relative path if your util is elsewhere
+import { requireOwner } from '../../_util/adminAuth.js';
 
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
