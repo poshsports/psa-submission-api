@@ -1,6 +1,6 @@
 // /api/admin/users/delete.js
 import { sb } from '../../_util/supabase.js';
-import { requireAdmin, requireOwner } from '../../_util/adminAuth.js';
+import { requireOwner } from '../../_util/adminAuth.js';
 
 const json = (res, s, p) => (res.status(s).setHeader('Content-Type','application/json'), res.end(JSON.stringify(p)));
 const readBody = async (req) => {
