@@ -184,8 +184,9 @@ async function addServerEstimates(bundles = []) {
         return Number.isFinite(n) ? n : 0;
       };
 
-      // Some builds expose one of: grading_cents | unit_cents | price_cents | service_cents
-      const gradeKeys = ['grading_cents','unit_cents','price_cents','service_cents'];
+// Match cards-preview output fields
+const gradeKeys = ['grading_amount','grading_service_cents','grading_cents','unit_cents','price_cents','service_cents'];
+
 
       for (const row of rows) {
         const g = gradeKeys.map(k => num(row?.[k])).find(n => n > 0) || 0;
