@@ -2,6 +2,8 @@
 import { escapeHtml } from './util.js';
 
 /* helpers */
+const fmtMoney = (cents) =>
+  Number.isFinite(cents) ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100) : '—';
 const fmtCurrencyFromCents = (cents) => {
   const n = Number(cents);
   if (!Number.isFinite(n)) return '—';
@@ -128,10 +130,10 @@ export const COLUMNS = [
   sortable: true,
   align: 'right',
   format: (_val, r) => {
-    const cents =
-      (Number.isFinite(r.est_total_cents) ? r.est_total_cents :
-       Number.isFinite(r.est_total)       ? r.est_total       : null);
-    return fmtCurrencyFromCents(cents);
+    const cents = Number.isFinite(r.est_total_cents) ? r.est_total_cents
+                  : Number.isFinite(r.est_total)      ? r.est_total
+                  : null;
+    return fmtMoney(cents);
   },
 },
 
