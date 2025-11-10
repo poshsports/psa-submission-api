@@ -136,6 +136,49 @@ async function fetchInvoices(status /* 'awaiting' | 'paid' */) {
   }
 }
 
+async function addServerEstimates(bundles = []) {
+  // For each bundle (customer row), ask PREFILL for the current draft and use its total
+  const out = [];
+  for (const b of bundles) {
+    const email = (b?.customer_email || '').trim();
+    const subs  = (Array.isArray(b?.submissions) ? b.submissions : [])
+      .map(s => s?.submission_id)
+      .filter(Boolean);
+
+    // default: push as-is if we don't have enough info
+    if (!email || !subs.length) { out.push(b); continue; }
+
+    try {
+      const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(email)}`;
+      const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+
+      // Prefer a server-computed total if present
+      let cents = Number(pre?.total_cents);
+      if (!Number.isFinite(cents)) {
+        // Fallback: sum item unit cents + upcharges if provided
+        const items = Array.isArray(pre?.items) ? pre.items : [];
+        cents = items.reduce((sum, it) => {
+          const unit = Number(it?.unit_cents);      // unit grading fee
+          const up   = Number(it?.upcharge_cents);  // upcharge if any
+          const n = (Number.isFinite(unit) ? unit : 0) + (Number.isFinite(up) ? up : 0);
+          return sum + n;
+        }, 0);
+        if (cents <= 0) cents = null;
+      }
+
+      if (Number.isFinite(cents)) {
+        // attach as server estimate so normalizeBundle picks it up
+        b.estimated_cents = cents;
+      }
+    } catch {
+      // ignore; we’ll just keep the row’s existing estimate (if any)
+    }
+
+    out.push(b);
+  }
+  return out;
+}
+
 async function fetchDraftBundleByEmail(email) {
   const url = `/api/admin/billing/to-bill?q=${encodeURIComponent(email)}`;
   try {
@@ -492,10 +535,15 @@ if (normalized.length === 0) {
   return;
 }
 
-  // --- Existing "To send" behavior (unchanged) ---
+  // --- Existing "To send" behavior (now with server-backed estimate) ---
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
+
+  // Pull the same total used by the invoice builder (prefill)
+  rows = await addServerEstimates(rows);
+
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
+
 
   // Auto-create drafts for any customers that don't have one yet
   ensureDraftsForAll(rows);
