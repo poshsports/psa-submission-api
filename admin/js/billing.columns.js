@@ -2,6 +2,16 @@
 import { escapeHtml } from './util.js';
 
 /* helpers */
+const fmtCurrencyFromCents = (cents) => {
+  const n = Number(cents);
+  if (!Number.isFinite(n)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2
+  }).format(n / 100);
+};
+
 const esc = (s) => escapeHtml(String(s ?? ''));
 const fmtDateTime = (iso) => {
   if (!iso) return '—';
@@ -112,12 +122,19 @@ export const COLUMNS = [
   },
 
   // Est. Total: placeholder for now (no preview button here)
-  {
-    key: 'est_total',
-    label: 'Est. Total',
-    sortable: false,
-    format: () => '—',
+{
+  key: 'est_total',
+  label: 'Est. Total',
+  sortable: true,
+  align: 'right',
+  format: (_val, r) => {
+    const cents =
+      (Number.isFinite(r.est_total_cents) ? r.est_total_cents :
+       Number.isFinite(r.est_total)       ? r.est_total       : null);
+    return fmtCurrencyFromCents(cents);
   },
+},
+
 
   // Actions: single "Create Draft" button
   {
