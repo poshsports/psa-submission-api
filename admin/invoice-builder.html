@@ -316,15 +316,41 @@ function normalizeCardRow(r){return{
       const j=await r.json().catch(()=>({rows:[]}));
       return (j.rows||[]).map(normalizeCardRow);
     }
-async function fetchShipTos(subIds) {
+async function fetchShipTos(subIds){
   if (!Array.isArray(subIds) || subIds.length === 0) return [];
 
-  // normalize the API response shape into our UI shape
+  // pull a ship-to-ish object from any response shape
+  const extractShip = (j) => {
+    if (!j || typeof j !== 'object') return null;
+
+    // common fields we’ve seen
+    if (j.shipping_address || j.ship_to || j.address || j.customer_address) {
+      return j.shipping_address || j.ship_to || j.address || j.customer_address;
+    }
+
+    // drawer-style envelope: { ok:true, item:{ ... } }
+    if (j.item) return extractShip(j.item);
+
+    // some builds: { items:[ {...}, {...} ] }
+    if (Array.isArray(j.items)) {
+      for (const it of j.items) {
+        const got = extractShip(it);
+        if (got) return got;
+      }
+    }
+
+    // nested data
+    if (j.data) return extractShip(j.data);
+
+    return null;
+  };
+
+  // normalize to our UI shape
   const norm = (a) => {
     if (!a) return null;
     const name   = (a.name || a.contact || a.full_name || '').trim();
-    const line1  = (a.street || a.address1 || a.addr1 || '').trim();
-    const line2  = (a.address2 || a.addr2 || '').trim();
+    const line1  = (a.street || a.address1 || a.addr1 || a.line1 || '').trim();
+    const line2  = (a.address2 || a.addr2 || a.line2 || '').trim();
     const city   = (a.city || '').trim();
     const region = (a.state || a.region || a.province || '').trim();
     const postal = (a.zip || a.postal || a.postal_code || '').trim();
@@ -336,18 +362,13 @@ async function fetchShipTos(subIds) {
   const out = [];
   for (const id of subIds) {
     try {
-      // This is the endpoint your drawer shows as 200 OK:
-      // e.g. /api/admin/submission?submission_id=psa-009
       const url = `/api/admin/submission?submission_id=${encodeURIComponent(id)}`;
       const r = await fetch(url, { credentials: 'same-origin' });
       if (!r.ok) continue;
 
       const j = await r.json().catch(() => ({}));
-
-      // Based on your drawer payload: `shipping_address` holds the fields
-      // { name, street, address2, city, state, zip, country }
-      const ship = j?.shipping_address || j?.ship_to || j?.address;
-      const x = norm(ship);
+      const raw = extractShip(j);
+      const x = norm(raw);
       if (x) out.push(x);
     } catch {}
   }
@@ -362,6 +383,7 @@ async function fetchShipTos(subIds) {
   }
   return uniq;
 }
+
 
 
 async function loadPrefill(submissionIds){
