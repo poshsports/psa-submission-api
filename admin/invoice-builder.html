@@ -80,6 +80,21 @@
                   <div>Total (est.)</div>
                   <div class="js-total">$—</div>
                 </div>
+                <div class="panel" id="shipToPanel" style="border:1px solid #eee;border-radius:12px;padding:12px;margin-top:12px;">
+                  <div style="font-weight:600;margin-bottom:6px;">Ship-to</div>
+                  <div id="shipToBody" class="mono small" style="white-space:pre-line">—</div>
+                
+                  <!-- Shown only when multiple addresses are present -->
+                  <div id="shipToChooser" class="hide" style="margin-top:10px">
+                    <label for="shipToSelect" class="small" style="display:block;margin-bottom:6px">
+                      Multiple shipping addresses detected — choose which one this invoice should use:
+                    </label>
+                    <select id="shipToSelect"></select>
+                    <div class="note muted" style="margin-top:6px;font-size:12px;">
+                      To invoice separately per address, create/send one invoice per selection.
+                    </div>
+                  </div>
+                </div>
                 <div class="muted" style="font-size:12px;margin-top:8px;">Tax will be calculated by Shopify on save.</div>
               </div>
             </div>
@@ -151,6 +166,8 @@
     let SETTINGS = { ...DEFAULT_SETTINGS };
     const SAVE_ENDPOINT = '/api/admin/billing/preview/save';
     const SEND_ENDPOINT = '/api/admin/billing/send-invoice';
+    const SHIPTO_ENDPOINT = '/api/admin/billing/ship-to';
+
     let draftInvoiceId = null;
     let hasUnsavedChanges = false;
     let lastBundle = null;
@@ -208,6 +225,78 @@ function priceCentsForService(name){
       span.style.fontWeight = "600";
       return span;
     }
+// ---- Ship-to rendering helpers ----
+function formatShipTo(a){
+  // Accepts { name, line1, line2, city, region, postal, country } or similarly named fields
+  if (!a) return '—';
+  const name   = a.name   || a.contact || a.full_name || '';
+  const line1  = a.line1  || a.address1 || a.addr1 || '';
+  const line2  = a.line2  || a.address2 || a.addr2 || '';
+  const city   = a.city   || '';
+  const region = a.region || a.state || a.province || '';
+  const postal = a.postal || a.zip || a.postal_code || '';
+  const country= a.country|| 'US';
+
+  const lines = [
+    name,
+    line1,
+    line2,
+    [city, region, postal].filter(Boolean).join(', '),
+    country
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
+function renderShipTo(addresses){
+  const body    = $('shipToBody');
+  const chooser = $('shipToChooser');
+  const select  = $('shipToSelect');
+  if (!body) return;
+
+  const list = Array.isArray(addresses) ? addresses.filter(Boolean) : [];
+  if (list.length === 0){
+    // hide chooser, show dash
+    if (chooser) chooser.classList.add('hide');
+    body.textContent = '—';
+    return;
+  }
+
+  // If only one address: show it, hide chooser
+  if (list.length === 1){
+    if (chooser) chooser.classList.add('hide');
+    body.textContent = formatShipTo(list[0]);
+    // remember selection on the bundle so it can be reused if needed
+    lastBundle.selected_ship_to = list[0];
+    return;
+  }
+
+  // Multiple addresses: populate select + show chooser
+  if (select){
+    select.innerHTML = '';
+    list.forEach((addr, idx) => {
+      const opt = document.createElement('option');
+      // First line of the address or the name as the short label
+      const label = (addr.name || addr.contact || addr.full_name || addr.line1 || addr.address1 || `Address ${idx+1}`);
+      opt.value = String(idx);
+      opt.textContent = label;
+      select.appendChild(opt);
+    });
+
+    // default to first
+    body.textContent = formatShipTo(list[0]);
+    lastBundle.selected_ship_to = list[0];
+
+    select.onchange = () => {
+      const i = Number(select.value);
+      const chosen = list[i] || list[0];
+      body.textContent = formatShipTo(chosen);
+      lastBundle.selected_ship_to = chosen;
+    };
+
+    if (chooser) chooser.classList.remove('hide');
+  }
+}
 
 function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
@@ -227,6 +316,33 @@ function normalizeCardRow(r){return{
       const j=await r.json().catch(()=>({rows:[]}));
       return (j.rows||[]).map(normalizeCardRow);
     }
+// Try to fetch one or more shipping addresses for these submissions
+async function fetchShipTos(subIds){
+  if (!Array.isArray(subIds) || subIds.length === 0) return [];
+
+  // Primary: dedicated endpoint
+  try {
+    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
+    const r  = await fetch(`${SHIPTO_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
+    if (r.ok){
+      const j = await r.json().catch(()=> ({}));
+      // Expect either {addresses:[...]}, or a single {address:{...}}, or raw array
+      if (Array.isArray(j?.addresses)) return j.addresses;
+      if (Array.isArray(j))            return j;
+      if (j?.address)                  return [j.address];
+    }
+  } catch {}
+
+  // Fallback: some backends may include a ship_to in prefill
+  try {
+    const pre = await loadPrefill(subIds);
+    if (pre?.ship_to) return [pre.ship_to];
+    if (Array.isArray(pre?.ship_tos) && pre.ship_tos.length) return pre.ship_tos;
+  } catch {}
+
+  // If nothing resolvable, return empty list (UI will show "—")
+  return [];
+}
 
 async function loadPrefill(submissionIds){
   if (!submissionIds?.length) return { invoice_id: null, items: [] };
@@ -478,6 +594,13 @@ async function save(silent = false){
       }
 
       const subIds=subs.map(s=>s.submission_id);
+      // Load and render ship-to before table so the user sees it right away
+try {
+  const shipTos = await fetchShipTos(subIds);
+  renderShipTo(shipTos);
+} catch {
+  renderShipTo([]); // graceful fallback
+}
       const rows=await fetchCardsForSubs(subIds);
       $("cardsTbody").innerHTML=rows.map((r,i)=>`
         <tr data-row="${i}" data-grade-cents="${r.grading_cents||0}">
