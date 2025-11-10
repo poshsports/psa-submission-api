@@ -123,17 +123,23 @@ export const COLUMNS = [
     format: (_val, r) => (r.age_days == null ? '—' : String(r.age_days)),
   },
 
-  // Est. Total: placeholder for now (no preview button here)
+ // Est. Total: show server/client estimate (in dollars)
 {
   key: 'est_total',
   label: 'Est. Total',
   sortable: true,
-  align: 'right',
   format: (_val, r) => {
-    const cents = Number.isFinite(r.est_total_cents) ? r.est_total_cents
-                  : Number.isFinite(r.est_total)      ? r.est_total
-                  : null;
-    return fmtMoney(cents);
+    // prefer cents if present; both are already set in normalizeBundle/normalizeInvoiceRecord
+    const cents =
+      Number.isFinite(Number(r.est_total_cents)) ? Number(r.est_total_cents) :
+      Number.isFinite(Number(r.est_total))       ? Number(r.est_total)       :
+      null;
+
+    if (!Number.isFinite(cents) || cents <= 0) return '—';
+
+    const dollars = cents / 100;
+    // simple USD formatting without Intl (keeps this file tiny)
+    return `$${dollars.toFixed(2)}`;
   },
 },
 
