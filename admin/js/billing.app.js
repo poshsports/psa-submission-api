@@ -167,24 +167,51 @@ async function addServerEstimates(bundles = []) {
       continue;
     }
 
-    // --- STEP 3: otherwise fetch /api/admin/billing/cards-preview to compute manually ---
+       // --- STEP 3: otherwise fetch /api/admin/billing/cards-preview to compute manually ---
     let total = 0;
     try {
       const qs = new URLSearchParams({ subs: subs.join(',') }).toString();
       const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
       const j = await resp.json().catch(() => ({}));
+      console.log('[addServerEstimates] cards-preview payload for', email, j);
+
       const rows = Array.isArray(j?.rows) ? j.rows : [];
 
+      const num = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+
+      // Some builds expose one of: grading_cents | unit_cents | price_cents | service_cents
+      const gradeKeys = ['grading_cents','unit_cents','price_cents','service_cents'];
+
       for (const row of rows) {
-        const g = Number(row?.grading_cents) || Number(row?.unit_cents) || 0;
-        const u = Number(row?.upcharge_cents) || 0;
+        const g = gradeKeys.map(k => num(row?.[k])).find(n => n > 0) || 0;
+        const u = num(row?.upcharge_cents);
         total += g + u;
       }
 
-      // add $5 shipping flat if any billable card exists
-      if (total > 0) total += SHIPPING_FLAT_CENTS;
+      // If the API exposes a roll-up, prefer it
+      const rollup = num(j?.subtotal_cents) || num(j?.totals?.subtotal_cents);
+      if (rollup > 0 && rollup !== total) total = rollup;
+
+      // Add flat shipping if anything is billable and no shipping was included
+      const shippingFromRows =
+        rows.reduce((s, r) => s + num(r?.shipping_cents), 0) ||
+        num(j?.shipping_cents) || num(j?.totals?.shipping_cents);
+
+      if (total > 0 && shippingFromRows === 0) {
+        total += SHIPPING_FLAT_CENTS; // $5.00
+      }
     } catch (err) {
       console.warn('[addServerEstimates] cards-preview failed:', err);
+    }
+
+    // Hard fallback if cards-preview had nothing: use prefill items’ upcharges (+$5)
+    if (total <= 0) {
+      const items = Array.isArray(pre?.items) ? pre.items : [];
+      const upcharges = items.reduce((s, it) => s + (Number(it?.upcharge_cents) || 0), 0);
+      if (upcharges > 0) total = upcharges + SHIPPING_FLAT_CENTS;
     }
 
     b.estimated_cents = total > 0 ? total : null;
