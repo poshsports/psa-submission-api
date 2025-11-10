@@ -8,6 +8,9 @@ const PREFILL_ENDPOINT       = '/api/admin/billing/preview/prefill';
 const PREVIEW_SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
 const CARDS_PREVIEW_ENDPOINT = '/api/admin/billing/cards-preview';
 const SEND_ENDPOINT          = '/api/admin/billing/send-invoice';
+// Match Invoice Builder's flat shipping for estimates
+const SHIPPING_FLAT_CENTS = 500; // $5.00
+
 
 // read-only views need a little state
 let CURRENT_TAB = 'to-send';
@@ -175,16 +178,19 @@ async function addServerEstimates(bundles = []) {
       }, 0);
 
       // Optional (kept but 0 by default)
-      const shippingCents = items.reduce((sum, it) => sum + (Number(it?.shipping_cents) || 0), 0);
-      const discountCents = items.reduce((sum, it) => sum + (Number(it?.discount_cents) || 0), 0);
+let shippingCents = items.reduce((sum, it) => sum + (Number(it?.shipping_cents) || 0), 0);
+const discountCents = items.reduce((sum, it) => sum + (Number(it?.discount_cents) || 0), 0);
 
-      // 4) Choose grading component:
-      //    - prefer non-zero server grading
-      //    - else use client grading estimate
-      const gradingCents = serverGradingCents > 0 ? serverGradingCents : clientGradingCents;
+const gradingCents = serverGradingCents > 0 ? serverGradingCents : clientGradingCents;
 
-      const total = gradingCents + upchargeCents + shippingCents - discountCents;
-      b.estimated_cents = total > 0 ? total : null;
+// If no shipping from server but there is something to bill, add the flat $5
+if (shippingCents === 0 && (gradingCents + upchargeCents) > 0) {
+  shippingCents = SHIPPING_FLAT_CENTS; // $5.00
+}
+
+const total = gradingCents + upchargeCents + shippingCents - discountCents;
+b.estimated_cents = total > 0 ? total : null;
+
 
       console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
     } catch {
