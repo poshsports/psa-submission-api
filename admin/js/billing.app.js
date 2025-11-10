@@ -232,6 +232,8 @@ function normalizeBundle(b) {
 
   const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
 
+  const clientEstimate = estimateRowTotalCents(subs);
+
   return {
     id: 'cust:' + String(b.customer_email || '').toLowerCase(),
     customer_name: b.customer_name || '',
@@ -242,8 +244,10 @@ function normalizeBundle(b) {
     cards,
     returned_newest: toIso(returnedNewest),
     returned_oldest: toIso(returnedOldest),
-    est_total_cents: b.estimated_cents ?? null,
+    // Prefer server-provided estimate; else fall back to client estimate
+    est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
   };
+
 }
 
 // New: normalize invoice records from invoices-list into the same table shape
@@ -400,6 +404,34 @@ function extractEmailFromRow(tr) {
   if (cells.length) return (cells[1]?.textContent || cells[0]?.textContent || '').trim();
 
   return '';
+}
+// --- Estimate helpers (client-side fallback for "To send")
+function estimateCentsForServiceName(name = '') {
+  const s = String(name).toLowerCase();
+
+  // match by keywords in your PSA service labels
+  if (s.includes('regular'))        return 8500; // $85
+  if (s.includes('value - $35') ||
+      s.includes('value—$35')   ||  // tolerate different hyphens
+      s.includes('value $35'))      return 3500; // $35
+  if (s.includes('value bulk') ||
+      s.includes('bulk - $28') ||
+      s.includes('bulk—$28')  ||
+      s.includes('$28/card'))       return 2800; // $28
+
+  return 0; // unknown service → 0
+}
+
+function estimateRowTotalCents(subs = []) {
+  let total = 0;
+  for (const s of subs) {
+    const service =
+      s?.grading_service || s?.psa_grading || s?.service || '';
+    const rate = estimateCentsForServiceName(service);
+    const qty  = Number(s?.cards || 0);
+    total += rate * (Number.isFinite(qty) ? qty : 0);
+  }
+  return total > 0 ? total : null;
 }
 
 // ---------- Core UI wiring ----------
