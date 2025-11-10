@@ -174,6 +174,8 @@ async function addServerEstimates(bundles = []) {
       const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
       const j = await resp.json().catch(() => ({}));
       console.log('[addServerEstimates] cards-preview payload for', email, j);
+      console.table(j?.rows || []);
+
 
       const rows = Array.isArray(j?.rows) ? j.rows : [];
 
