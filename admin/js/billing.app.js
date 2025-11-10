@@ -190,8 +190,10 @@ const gradeKeys = ['grading_amount','grading_service_cents','grading_cents','uni
 
       for (const row of rows) {
         const g = gradeKeys.map(k => num(row?.[k])).find(n => n > 0) || 0;
-        const u = num(row?.upcharge_cents);
-        total += g + u;
+// upcharge field name in cards-preview is upcharge_amount
+const u = num(row?.upcharge_amount ?? row?.upcharge_cents ?? row?.upcharge);
+total += g + u;
+
       }
 
       // If the API exposes a roll-up, prefer it
