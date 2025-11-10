@@ -164,23 +164,22 @@ async function addServerEstimates(bundles = []) {
         continue;
       }
 
-      // 3) Otherwise, build from parts
-      const items = Array.isArray(pre?.items) ? pre.items : [];
+     // 3) Otherwise, build from parts
+const items = Array.isArray(pre?.items) ? pre.items : [];
 
+// Prefer grading_cents, but fall back to unit_cents (used by invoice builder)
 const serverGradingCents = items.reduce((sum, it) => {
   const g = Number(it?.grading_cents);
   const u = Number(it?.unit_cents);
-  // Prefer explicit grading_cents; else use unit_cents (builder per-card price)
   const val = Number.isFinite(g) && g > 0 ? g : (Number.isFinite(u) ? u : 0);
   return sum + val;
 }, 0);
 
-      const upchargeCents = items.reduce((sum, it) => {
-        const u = Number(it?.upcharge_cents) || 0;
-        return sum + u;
-      }, 0);
+const upchargeCents = items.reduce((sum, it) => {
+  const u = Number(it?.upcharge_cents) || 0;
+  return sum + u;
+}, 0);
 
-      // Optional (kept but 0 by default)
 let shippingCents = items.reduce((sum, it) => sum + (Number(it?.shipping_cents) || 0), 0);
 const discountCents = items.reduce((sum, it) => sum + (Number(it?.discount_cents) || 0), 0);
 
@@ -194,8 +193,7 @@ if (shippingCents === 0 && (gradingCents + upchargeCents) > 0) {
 const total = gradingCents + upchargeCents + shippingCents - discountCents;
 b.estimated_cents = total > 0 ? total : null;
 
-
-      console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
+console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
     } catch {
       // Fallback to client grading only
       b.estimated_cents = clientGradingCents || null;
