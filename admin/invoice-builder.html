@@ -316,79 +316,43 @@ function normalizeCardRow(r){return{
       const j=await r.json().catch(()=>({rows:[]}));
       return (j.rows||[]).map(normalizeCardRow);
     }
-// REPLACE the previous fetchShipTos with this resilient version
-async function fetchShipTos(subIds){
+async function fetchShipTos(subIds) {
   if (!Array.isArray(subIds) || subIds.length === 0) return [];
 
-  // Collect candidates here; we'll de-dupe at the end.
-  const out = [];
-
-  // Helper: normalize any object into our address shape
+  // normalize the API response shape into our UI shape
   const norm = (a) => {
     if (!a) return null;
-    const name   = a.name   || a.contact || a.full_name || a.first_last || a.attn || '';
-    const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
-    const line2  = a.line2  || a.address2 || a.addr2 || '';
-    const city   = a.city   || '';
-    const region = a.region || a.state || a.province || '';
-    const postal = a.postal || a.zip || a.postal_code || a.postcode || '';
-    const country= a.country|| 'US';
+    const name   = (a.name || a.contact || a.full_name || '').trim();
+    const line1  = (a.street || a.address1 || a.addr1 || '').trim();
+    const line2  = (a.address2 || a.addr2 || '').trim();
+    const city   = (a.city || '').trim();
+    const region = (a.state || a.region || a.province || '').trim();
+    const postal = (a.zip || a.postal || a.postal_code || '').trim();
+    const country= (a.country || 'US').trim();
     const any = name || line1 || line2 || city || region || postal || country;
     return any ? { name, line1, line2, city, region, postal, country } : null;
   };
 
-  // 1) Try the (optional) dedicated endpoint (ok if it 404s)
-  try {
-    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
-    const r  = await fetch(`/api/admin/billing/ship-to?${qs}`, { credentials: 'same-origin' });
-    if (r.ok) {
-      const j = await r.json().catch(()=> ({}));
-      const arr = Array.isArray(j?.addresses) ? j.addresses
-                : Array.isArray(j)            ? j
-                : j?.address ? [j.address] : [];
-      for (const a of arr) { const x = norm(a); if (x) out.push(x); }
-    }
-  } catch {}
-
-  // 2) Fall back to prefill (some builds include ship_to/ship_tos there)
-  if (out.length === 0) {
+  const out = [];
+  for (const id of subIds) {
     try {
-      const pre = await loadPrefill(subIds);
-      const arr = pre?.ship_tos ? pre.ship_tos
-               : pre?.ship_to  ? [pre.ship_to] : [];
-      for (const a of arr) { const x = norm(a); if (x) out.push(x); }
+      // This is the endpoint your drawer shows as 200 OK:
+      // e.g. /api/admin/submission?submission_id=psa-009
+      const url = `/api/admin/submission?submission_id=${encodeURIComponent(id)}`;
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if (!r.ok) continue;
+
+      const j = await r.json().catch(() => ({}));
+
+      // Based on your drawer payload: `shipping_address` holds the fields
+      // { name, street, address2, city, state, zip, country }
+      const ship = j?.shipping_address || j?.ship_to || j?.address;
+      const x = norm(ship);
+      if (x) out.push(x);
     } catch {}
   }
 
-  // 3) Last-resort: fetch each submission’s details like the drawer does.
-  // We probe a few common routes and accept whichever responds.
-  if (out.length === 0) {
-    const tryRoutes = (id) => ([
-      `/api/admin/submissions/${encodeURIComponent(id)}`,
-      `/api/admin/submissions/show?submission_id=${encodeURIComponent(id)}`,
-      `/api/admin/submissions/get?submission_id=${encodeURIComponent(id)}`
-    ]);
-
-    for (const id of subIds) {
-      const routes = tryRoutes(id);
-      let got = null;
-      for (const url of routes) {
-        try {
-          const r = await fetch(url, { credentials: 'same-origin' });
-          if (!r.ok) continue;
-          const j = await r.json().catch(()=> ({}));
-
-          // Look for ship-to-ish data in common places
-          const cand = j?.ship_to || j?.shipping || j?.address || j?.customer_address || j?.data?.ship_to;
-          const x = norm(cand);
-          if (x) { got = x; break; }
-        } catch {}
-      }
-      if (got) out.push(got);
-    }
-  }
-
-  // De-dupe (by a stable string representation) and return
+  // de-dupe
   const key = (a) => JSON.stringify([a.name,a.line1,a.line2,a.city,a.region,a.postal,a.country]);
   const uniq = [];
   const seen = new Set();
