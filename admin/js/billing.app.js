@@ -175,7 +175,11 @@ async function addServerEstimates(bundles = []) {
       if (Number.isFinite(cents)) {
         // attach as server estimate so normalizeBundle picks it up
         b.estimated_cents = cents;
+        console.log('[addServerEstimates] → computed cents:', cents, 'for', email);
+      } else {
+        console.log('[addServerEstimates] → no cents computed for', email, pre);
       }
+
     } catch {
       // ignore; we’ll just keep the row’s existing estimate (if any)
     }
@@ -295,6 +299,8 @@ function normalizeBundle(b) {
     returned_oldest: toIso(returnedOldest),
     // Prefer server-provided estimate; else fall back to client estimate
     est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
+    est_total:       (b.estimated_cents ?? clientEstimate ?? null),
+
   };
 
 }
@@ -334,6 +340,7 @@ function normalizeInvoiceRecord(rec) {
     returned_newest: null,
     returned_oldest: null,
     est_total_cents: Number.isFinite(rec.total_cents) ? rec.total_cents : null,
+    est_total:       Number.isFinite(rec.total_cents) ? rec.total_cents : null,
     __invoice_url: rec.invoice_url || null, // carry url for click-open
   };
 }
