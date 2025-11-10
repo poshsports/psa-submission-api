@@ -137,7 +137,6 @@ async function fetchInvoices(status /* 'awaiting' | 'paid' */) {
 }
 
 async function addServerEstimates(bundles = []) {
-  // For each bundle (customer row), ask PREFILL for the current draft and use its total
   const out = [];
   for (const b of bundles) {
     const email = (b?.customer_email || '').trim();
@@ -145,43 +144,52 @@ async function addServerEstimates(bundles = []) {
       .map(s => s?.submission_id)
       .filter(Boolean);
 
-    // default: push as-is if we don't have enough info
     if (!email || !subs.length) { out.push(b); continue; }
+
+    // 1) Compute client grading estimate (service × cards), no eval fees
+    const clientGradingCents = estimateRowTotalCents(b.submissions) || 0;
 
     try {
       const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(email)}`;
       const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
       console.log('[addServerEstimates]', email, '→ prefill:', pre);
 
-      // Prefer a server-computed total if present; else sum grading + upcharge
-      let cents = null;
-
-      if (Number.isFinite(Number(pre?.total_cents))) {
-        cents = Number(pre.total_cents);
-      } else {
-        const items = Array.isArray(pre?.items) ? pre.items : [];
-        cents = items.reduce((sum, it) => {
-          const grading  = Number(it?.grading_cents)  || 0;
-          const upcharge = Number(it?.upcharge_cents) || 0;
-          // optional fields (kept tolerant; eval fees are NOT included here)
-          const shipping = Number(it?.shipping_cents) || 0;
-          const discount = Number(it?.discount_cents) || 0;
-          return sum + grading + upcharge + shipping - discount;
-        }, 0);
-        if (!Number.isFinite(cents) || cents <= 0) cents = null;
+      // 2) If server has a full total, use it as-is.
+      if (Number.isFinite(Number(pre?.total_cents)) && Number(pre.total_cents) > 0) {
+        b.estimated_cents = Number(pre.total_cents);
+        out.push(b);
+        continue;
       }
 
+      // 3) Otherwise, build from parts
+      const items = Array.isArray(pre?.items) ? pre.items : [];
 
-      if (Number.isFinite(cents)) {
-        // attach as server estimate so normalizeBundle picks it up
-        b.estimated_cents = cents;
-        console.log('[addServerEstimates] → computed cents:', cents, 'for', email);
-      } else {
-        console.log('[addServerEstimates] → no cents computed for', email, pre);
-      }
+      const serverGradingCents = items.reduce((sum, it) => {
+        const g = Number(it?.grading_cents) || 0;
+        return sum + g;
+      }, 0);
 
+      const upchargeCents = items.reduce((sum, it) => {
+        const u = Number(it?.upcharge_cents) || 0;
+        return sum + u;
+      }, 0);
+
+      // Optional (kept but 0 by default)
+      const shippingCents = items.reduce((sum, it) => sum + (Number(it?.shipping_cents) || 0), 0);
+      const discountCents = items.reduce((sum, it) => sum + (Number(it?.discount_cents) || 0), 0);
+
+      // 4) Choose grading component:
+      //    - prefer non-zero server grading
+      //    - else use client grading estimate
+      const gradingCents = serverGradingCents > 0 ? serverGradingCents : clientGradingCents;
+
+      const total = gradingCents + upchargeCents + shippingCents - discountCents;
+      b.estimated_cents = total > 0 ? total : null;
+
+      console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
     } catch {
-      // ignore; we’ll just keep the row’s existing estimate (if any)
+      // Fallback to client grading only
+      b.estimated_cents = clientGradingCents || null;
     }
 
     out.push(b);
