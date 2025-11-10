@@ -151,6 +151,7 @@ async function addServerEstimates(bundles = []) {
     try {
       const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(email)}`;
       const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+      console.log('[addServerEstimates]', email, '→ prefill:', pre);
 
       // Prefer a server-computed total if present
       let cents = Number(pre?.total_cents);
