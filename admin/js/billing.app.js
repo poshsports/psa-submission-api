@@ -141,6 +141,7 @@ async function fetchInvoices(status /* 'awaiting' | 'paid' */) {
 
 async function addServerEstimates(bundles = []) {
   const out = [];
+
   for (const b of bundles) {
     const email = (b?.customer_email || '').trim();
     const subs  = (Array.isArray(b?.submissions) ? b.submissions : [])
@@ -149,60 +150,52 @@ async function addServerEstimates(bundles = []) {
 
     if (!email || !subs.length) { out.push(b); continue; }
 
-    // 1) Compute client grading estimate (service × cards), no eval fees
-    const clientGradingCents = estimateRowTotalCents(b.submissions) || 0;
-
+    // --- STEP 1: call prefill to get invoice id ---
+    let pre = null;
     try {
       const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(email)}`;
-      const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+      pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
       console.log('[addServerEstimates]', email, '→ prefill:', pre);
+    } catch (err) {
+      console.warn('[addServerEstimates] prefill failed:', err);
+    }
 
-      // 2) If server has a full total, use it as-is.
-      if (Number.isFinite(Number(pre?.total_cents)) && Number(pre.total_cents) > 0) {
-        b.estimated_cents = Number(pre.total_cents);
-        out.push(b);
-        continue;
+    // --- STEP 2: if we already have total_cents, use it directly ---
+    if (Number.isFinite(Number(pre?.total_cents)) && Number(pre.total_cents) > 0) {
+      b.estimated_cents = Number(pre.total_cents);
+      out.push(b);
+      continue;
+    }
+
+    // --- STEP 3: otherwise fetch /api/admin/billing/cards-preview to compute manually ---
+    let total = 0;
+    try {
+      const qs = new URLSearchParams({ subs: subs.join(',') }).toString();
+      const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
+      const j = await resp.json().catch(() => ({}));
+      const rows = Array.isArray(j?.rows) ? j.rows : [];
+
+      for (const row of rows) {
+        const g = Number(row?.grading_cents) || Number(row?.unit_cents) || 0;
+        const u = Number(row?.upcharge_cents) || 0;
+        total += g + u;
       }
 
-     // 3) Otherwise, build from parts
-const items = Array.isArray(pre?.items) ? pre.items : [];
-
-// Prefer grading_cents, but fall back to unit_cents (used by invoice builder)
-const serverGradingCents = items.reduce((sum, it) => {
-  const g = Number(it?.grading_cents);
-  const u = Number(it?.unit_cents);
-  const val = Number.isFinite(g) && g > 0 ? g : (Number.isFinite(u) ? u : 0);
-  return sum + val;
-}, 0);
-
-const upchargeCents = items.reduce((sum, it) => {
-  const u = Number(it?.upcharge_cents) || 0;
-  return sum + u;
-}, 0);
-
-let shippingCents = items.reduce((sum, it) => sum + (Number(it?.shipping_cents) || 0), 0);
-const discountCents = items.reduce((sum, it) => sum + (Number(it?.discount_cents) || 0), 0);
-
-const gradingCents = serverGradingCents > 0 ? serverGradingCents : clientGradingCents;
-
-// If no shipping from server but there is something to bill, add the flat $5
-if (shippingCents === 0 && (gradingCents + upchargeCents) > 0) {
-  shippingCents = SHIPPING_FLAT_CENTS; // $5.00
-}
-
-const total = gradingCents + upchargeCents + shippingCents - discountCents;
-b.estimated_cents = total > 0 ? total : null;
-
-console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
-    } catch {
-      // Fallback to client grading only
-      b.estimated_cents = clientGradingCents || null;
+      // add $5 shipping flat if any billable card exists
+      if (total > 0) total += SHIPPING_FLAT_CENTS;
+    } catch (err) {
+      console.warn('[addServerEstimates] cards-preview failed:', err);
     }
+
+    b.estimated_cents = total > 0 ? total : null;
+    console.log('[addServerEstimates] → computed cents:', b.estimated_cents, 'for', email);
 
     out.push(b);
   }
+
   return out;
 }
+
 
 async function fetchDraftBundleByEmail(email) {
   const url = `/api/admin/billing/to-bill?q=${encodeURIComponent(email)}`;
