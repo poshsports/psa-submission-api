@@ -153,19 +153,24 @@ async function addServerEstimates(bundles = []) {
       const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
       console.log('[addServerEstimates]', email, '→ prefill:', pre);
 
-      // Prefer a server-computed total if present
-      let cents = Number(pre?.total_cents);
-      if (!Number.isFinite(cents)) {
-        // Fallback: sum item unit cents + upcharges if provided
+      // Prefer a server-computed total if present; else sum grading + upcharge
+      let cents = null;
+
+      if (Number.isFinite(Number(pre?.total_cents))) {
+        cents = Number(pre.total_cents);
+      } else {
         const items = Array.isArray(pre?.items) ? pre.items : [];
         cents = items.reduce((sum, it) => {
-          const unit = Number(it?.unit_cents);      // unit grading fee
-          const up   = Number(it?.upcharge_cents);  // upcharge if any
-          const n = (Number.isFinite(unit) ? unit : 0) + (Number.isFinite(up) ? up : 0);
-          return sum + n;
+          const grading  = Number(it?.grading_cents)  || 0;
+          const upcharge = Number(it?.upcharge_cents) || 0;
+          // optional fields (kept tolerant; eval fees are NOT included here)
+          const shipping = Number(it?.shipping_cents) || 0;
+          const discount = Number(it?.discount_cents) || 0;
+          return sum + grading + upcharge + shipping - discount;
         }, 0);
-        if (cents <= 0) cents = null;
+        if (!Number.isFinite(cents) || cents <= 0) cents = null;
       }
+
 
       if (Number.isFinite(cents)) {
         // attach as server estimate so normalizeBundle picks it up
