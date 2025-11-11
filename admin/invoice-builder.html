@@ -60,21 +60,26 @@
                 <div class="muted" style="font-size:12px;">Customer</div>
                 <div class="js-email" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
               </div>
-                <div class="panel" id="shipToPanel" style="border:1px solid #eee;border-radius:12px;padding:12px;margin-top:12px;">
-                  <div style="font-weight:600;margin-bottom:6px;">Ship-to</div>
-                  <div id="shipToBody" class="mono small" style="white-space:pre-line">—</div>
-                
-                  <!-- Shown only when multiple addresses are present -->
-                  <div id="shipToChooser" class="hide" style="margin-top:10px">
-                    <label for="shipToSelect" class="small" style="display:block;margin-bottom:6px">
-                      Multiple shipping addresses detected — choose which one this invoice should use:
-                    </label>
-                    <select id="shipToSelect"></select>
-                    <div class="note muted" style="margin-top:6px;font-size:12px;">
-                      To invoice separately per address, create/send one invoice per selection.
-                    </div>
-                  </div>
-                </div>
+<div class="panel" id="shipToPanel"
+     style="border:1px solid #e6e8ec;border-radius:10px;padding:10px;margin-top:8px;background:#fbfbfc">
+  <div style="font-weight:600;margin:0 0 6px;font-size:13px;">Ship-to</div>
+
+  <!-- tighter type + line-height -->
+  <div id="shipToBody" class="mono small"
+       style="white-space:pre-line;font-size:12px;line-height:1.35;">—</div>
+
+  <!-- Only shown when multiple addresses -->
+  <div id="shipToChooser" class="hide" style="margin-top:8px">
+    <label for="shipToSelect" class="small" style="display:block;margin-bottom:6px;font-size:12px;">
+      Multiple shipping addresses detected — choose which one this invoice should use:
+    </label>
+    <select id="shipToSelect"
+            style="width:100%;padding:6px 8px;border:1px solid #e6e8ec;border-radius:8px;font-size:12px;"></select>
+    <div class="note muted" style="margin-top:6px;font-size:11px;">
+      To invoice separately per address, create/send one invoice per selection.
+    </div>
+  </div>
+</div>
               <!-- Received range -->
               <div class="js-range muted" style="margin-top:4px;font-size:12px;"></div>
             </div>
