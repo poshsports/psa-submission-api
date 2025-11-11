@@ -363,21 +363,21 @@ async function fetchShipTos(subIds){
   const map = new Map();
 
   // Try direct endpoint first (may return many addresses but without sub mapping)
-  try {
-    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
-    const r  = await fetch(`/api/admin/billing/ship-to?${qs}`, { credentials: 'same-origin' });
-    if (r.ok) {
-      const j = await r.json().catch(()=> ({}));
-      const arr = Array.isArray(j?.addresses) ? j.addresses
-                : Array.isArray(j)            ? j
-                : j?.address ? [j.address] : [];
-      for (const a of arr) {
-        const nx = norm(a); if (!nx) continue;
-        const k = addressKey(nx);
-        if (!map.has(k)) map.set(k, { addr: nx, subs: [] });
-      }
-    }
-  } catch {}
+ // try {
+   //  const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
+  //   const r  = await fetch(`/api/admin/billing/ship-to?${qs}`, { credentials: 'same-origin' });
+  //   if (r.ok) {
+     //  const j = await r.json().catch(()=> ({}));
+     //  const arr = Array.isArray(j?.addresses) ? j.addresses
+              //   : Array.isArray(j)            ? j
+             //    : j?.address ? [j.address] : [];
+    //   for (const a of arr) {
+      //   const nx = norm(a); if (!nx) continue;
+      //   const k = addressKey(nx);
+      //   if (!map.has(k)) map.set(k, { addr: nx, subs: [] });
+     //  }
+   //  }
+ //  } catch {}
 
   // Fallback: probe each submission; these include the actual shipping_address
   const tryRoutes = (id) => ([
