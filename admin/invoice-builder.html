@@ -408,11 +408,9 @@ async function fetchShipTos(subIds){
   return [...map.values()];
 }
 
-    function ensureSplitByAddressButton(groups){
+function ensureSplitByAddressButton(groups){
   const chooser = document.getElementById('shipToChooser');
   if (!chooser) return;
-
-  // avoid duplicating the button
   if (chooser.querySelector('.js-split-invoices')) return;
 
   const btn = document.createElement('button');
@@ -421,18 +419,49 @@ async function fetchShipTos(subIds){
   btn.style.marginTop = '8px';
   btn.textContent = 'Split invoices by address';
 
-  btn.onclick = () => {
-    const base = location.pathname; // /admin/invoice-builder.html
-    const email = encodeURIComponent((lastBundle?.customer_email || '').trim());
-    groups.forEach(g => {
-      const subsParam = encodeURIComponent((g.subs || []).join(','));
-      const url = `${base}?subs=${subsParam}&email=${email}`;
-      window.open(url, '_blank', 'noopener');
-    });
+  btn.onclick = async () => {
+    const email = (lastBundle?.customer_email || '').trim();
+    const subIds = (lastBundle?.submissions || []).map(s => s.submission_id);
+
+    if (!email || !subIds.length) {
+      alert('Missing customer email or submissions.');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Splitting…';
+
+    try {
+      const r = await fetch('/api/admin/billing/split-by-address', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ subs: subIds, email })
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) {
+        console.error('[split-by-address] failed', j);
+        alert('Split failed.');
+        btn.disabled = false;
+        btn.textContent = 'Split invoices by address';
+        return;
+      }
+
+      // Simple toast then navigate
+      alert(`Split into ${j.created || 0} invoice${(j.created|0)===1?'':'s'}.`);
+      window.location.href = '/admin/billing.html';
+    } catch (e) {
+      console.error(e);
+      alert('Split failed.');
+      btn.disabled = false;
+      btn.textContent = 'Split invoices by address';
+    }
   };
 
   chooser.appendChild(btn);
 }
+
 
 
 async function loadPrefill(submissionIds){
@@ -743,6 +772,16 @@ $("btnSendConfirm")?.addEventListener("click", async () => {
   await sendInvoice();
 });
 
+// Optional safety: warn if multiple addresses exist before sending
+const chooserVisible = !document.getElementById('shipToChooser')?.classList.contains('hide');
+if (chooserVisible) {
+  $("btnDraftSend")?.addEventListener("click", (e) => {
+    if (confirm("Multiple shipping addresses detected. Split invoices by address first?")) {
+      document.querySelector('.js-split-invoices')?.click();
+      e.preventDefault();
+    }
+  });
+}
 
       // Enable dirty-leave protection
       installDirtyLeaveGuards();
