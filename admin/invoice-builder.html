@@ -230,27 +230,6 @@ function priceCentsForService(name){
       return span;
     }
 // ---- Ship-to rendering helpers ----
-function formatShipTo(a){
-  // Accepts { name, line1, line2, city, region, postal, country } or similarly named fields
-  if (!a) return '—';
-  const name   = a.name   || a.contact || a.full_name || '';
-  const line1  = a.line1  || a.address1 || a.addr1 || '';
-  const line2  = a.line2  || a.address2 || a.addr2 || '';
-  const city   = a.city   || '';
-  const region = a.region || a.state || a.province || '';
-  const postal = a.postal || a.zip || a.postal_code || '';
-  const country= a.country|| 'US';
-
-  const lines = [
-    name,
-    line1,
-    line2,
-    [city, region, postal].filter(Boolean).join(', '),
-    country
-  ].filter(Boolean);
-
-  return lines.join('\n');
-}
 
 function formatShipTo(a){
   if (!a) return '—';
