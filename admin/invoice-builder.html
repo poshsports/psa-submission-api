@@ -319,33 +319,7 @@ function normalizeCardRow(r){return{
 async function fetchShipTos(subIds){
   if (!Array.isArray(subIds) || subIds.length === 0) return [];
 
-  // pull a ship-to-ish object from any response shape
-  const extractShip = (j) => {
-    if (!j || typeof j !== 'object') return null;
-
-    // common fields we’ve seen
-    if (j.shipping_address || j.ship_to || j.address || j.customer_address) {
-      return j.shipping_address || j.ship_to || j.address || j.customer_address;
-    }
-
-    // drawer-style envelope: { ok:true, item:{ ... } }
-    if (j.item) return extractShip(j.item);
-
-    // some builds: { items:[ {...}, {...} ] }
-    if (Array.isArray(j.items)) {
-      for (const it of j.items) {
-        const got = extractShip(it);
-        if (got) return got;
-      }
-    }
-
-    // nested data
-    if (j.data) return extractShip(j.data);
-
-    return null;
-  };
-
-  // normalize to our UI shape
+  // Turn any raw object into our UI shape
   const norm = (a) => {
     if (!a) return null;
     const name   = (a.name || a.contact || a.full_name || '').trim();
@@ -359,25 +333,48 @@ async function fetchShipTos(subIds){
     return any ? { name, line1, line2, city, region, postal, country } : null;
   };
 
-  const out = [];
+  // Pull a ship-to-ish object from common server envelopes
+  const extractShip = (j) => {
+    if (!j || typeof j !== 'object') return null;
+
+    // ✅ our drawer response: { ok:true, item:{ shipping_address: {...} } }
+    if (j.item) {
+      const i = j.item;
+      return i.shipping_address || i.ship_to || i.address || i.customer_address || null;
+    }
+
+    // Other shapes we might see
+    if (j.shipping_address || j.ship_to || j.address || j.customer_address) {
+      return j.shipping_address || j.ship_to || j.address || j.customer_address;
+    }
+    if (j.data) return extractShip(j.data);
+    if (Array.isArray(j.items)) {
+      for (const it of j.items) {
+        const got = extractShip(it);
+        if (got) return got;
+      }
+    }
+    return null;
+  };
+
+  const found = [];
   for (const id of subIds) {
     try {
       const url = `/api/admin/submission?submission_id=${encodeURIComponent(id)}`;
       const r = await fetch(url, { credentials: 'same-origin' });
       if (!r.ok) continue;
-
       const j = await r.json().catch(() => ({}));
       const raw = extractShip(j);
-      const x = norm(raw);
-      if (x) out.push(x);
+      const addr = norm(raw);
+      if (addr) found.push(addr);
     } catch {}
   }
 
-  // de-dupe
+  // De-dupe
   const key = (a) => JSON.stringify([a.name,a.line1,a.line2,a.city,a.region,a.postal,a.country]);
   const uniq = [];
   const seen = new Set();
-  for (const a of out) {
+  for (const a of found) {
     const k = key(a);
     if (!seen.has(k)) { seen.add(k); uniq.push(a); }
   }
@@ -639,6 +636,7 @@ async function save(silent = false){
       // Load and render ship-to before table so the user sees it right away
 try {
   const shipTos = await fetchShipTos(subIds);
+  console.log('[invoice-builder] shipTos', shipTos);
   renderShipTo(shipTos);
 } catch {
   renderShipTo([]); // graceful fallback
