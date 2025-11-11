@@ -316,56 +316,55 @@ function normalizeCardRow(r){return{
       const j=await r.json().catch(()=>({rows:[]}));
       return (j.rows||[]).map(normalizeCardRow);
     }
-// STRICT: only read /api/admin/submission?submission_id=... and item.shipping_address
+// --- Ship-to: single authoritative source ---
+// Pull shipping addresses directly from the submission drawer endpoint
+// /api/admin/submission?id=<id>&full=1
 async function fetchShipTos(subIds) {
   if (!Array.isArray(subIds) || subIds.length === 0) return [];
 
-  // Normalize specifically from the drawer's shipping_address shape
+  // normalizer → our UI shape
   const norm = (a) => {
     if (!a) return null;
-    const name    = (a.name || '').trim();
-    const line1   = (a.street || '').trim();          // drawer key is "street"
-    const line2   = (a.address2 || '').trim();
-    const city    = (a.city || '').trim();
-    const region  = (a.state || '').trim();
-    const postal  = (a.zip || '').trim();
-    const country = (a.country || 'US').trim();
+    const name    = a.name || '';
+    const line1   = a.street || a.address1 || '';
+    const line2   = a.address2 || '';
+    const city    = a.city || '';
+    const region  = a.state || a.region || '';
+    const postal  = a.zip || a.postal || a.postal_code || '';
+    const country = a.country || 'US';
     const any = name || line1 || line2 || city || region || postal || country;
     return any ? { name, line1, line2, city, region, postal, country } : null;
   };
 
-  const results = [];
+  const out = [];
 
+  // hit exactly one known-good route per submission id
   for (const id of subIds) {
+    const url = `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`;
     try {
-      const r = await fetch(`/api/admin/submission?submission_id=${encodeURIComponent(id)}`, {
-        credentials: 'same-origin'
-      });
-      if (!r.ok) {
-        console.warn('[invoice-builder] submission fetch failed', id, r.status);
-        continue;
-      }
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if (!r.ok) continue;
       const j = await r.json().catch(() => ({}));
-      const addr = norm(j?.item?.shipping_address);
-      if (addr) results.push(addr);
-      else console.warn('[invoice-builder] no shipping_address on item for', id, j);
-    } catch (e) {
-      console.error('[invoice-builder] submission fetch error', id, e);
-    }
+      const addr = j?.item?.shipping_address;
+      const n = norm(addr);
+      if (n) out.push(n);
+    } catch {}
   }
 
-  // De-dupe identical addresses
-  const key  = (a) => JSON.stringify([a.name,a.line1,a.line2,a.city,a.region,a.postal,a.country]);
+  // de-dupe
+  const key = (a) => JSON.stringify([a.name,a.line1,a.line2,a.city,a.region,a.postal,a.country]);
   const seen = new Set();
   const uniq = [];
-  for (const a of results) {
+  for (const a of out) {
     const k = key(a);
     if (!seen.has(k)) { seen.add(k); uniq.push(a); }
   }
 
+  // Debug (optional): comment out if noisy
+  console.log('[invoice-builder] shipTos', uniq);
+
   return uniq;
 }
-
 
 async function loadPrefill(submissionIds){
   if (!submissionIds?.length) return { invoice_id: null, items: [] };
@@ -620,7 +619,6 @@ async function save(silent = false){
       // Load and render ship-to before table so the user sees it right away
 try {
   const shipTos = await fetchShipTos(subIds);
-  console.log('[invoice-builder] shipTos', shipTos);
   renderShipTo(shipTos);
 } catch {
   renderShipTo([]); // graceful fallback
