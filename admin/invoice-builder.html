@@ -252,55 +252,96 @@ function formatShipTo(a){
   return lines.join('\n');
 }
 
-function renderShipTo(addresses){
-  const body    = $('shipToBody');
-  const chooser = $('shipToChooser');
-  const select  = $('shipToSelect');
+function formatShipTo(a){
+  if (!a) return '—';
+  const name   = a.name   || a.contact || a.full_name || '';
+  const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
+  const line2  = a.line2  || a.address2 || a.addr2 || '';
+  const city   = a.city   || '';
+  const region = a.region || a.state || a.province || '';
+  const postal = a.postal || a.zip || a.postal_code || '';
+  const country= a.country|| 'US';
+
+  const lines = [name, line1, line2, [city, region, postal].filter(Boolean).join(', '), country]
+                .filter(Boolean);
+  return lines.join('\n');
+}
+
+function shortShipTo(a){
+  const name   = a.name   || a.contact || a.full_name || '';
+  const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
+  const city   = a.city   || '';
+  const region = a.region || a.state || a.province || '';
+  const postal = a.postal || a.zip || a.postal_code || '';
+  const core   = [line1, [city, region, postal].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  return [name, core].filter(Boolean).join(' — ');
+}
+
+// stable key to group identical addresses
+function addressKey(a){
+  return JSON.stringify({
+    n:(a.name||'').trim().toLowerCase(),
+    l1:(a.line1||a.address1||a.addr1||a.street||'').trim().toLowerCase(),
+    l2:(a.line2||a.address2||a.addr2||'').trim().toLowerCase(),
+    c:(a.city||'').trim().toLowerCase(),
+    r:(a.region||a.state||a.province||'').trim().toLowerCase(),
+    p:(a.postal||a.zip||a.postal_code||'').toString().trim(),
+    co:(a.country||'US').trim().toLowerCase()
+  });
+}
+
+function renderShipTo(addressGroups){
+  // addressGroups = [{ addr: {…}, subs: ['psa-010', ...] }, ...]
+  const body    = document.getElementById('shipToBody');
+  const chooser = document.getElementById('shipToChooser');
+  const select  = document.getElementById('shipToSelect');
   if (!body) return;
 
-  const list = Array.isArray(addresses) ? addresses.filter(Boolean) : [];
+  const list = Array.isArray(addressGroups) ? addressGroups : [];
+
+  // No addresses
   if (list.length === 0){
-    // hide chooser, show dash
-    if (chooser) chooser.classList.add('hide');
     body.textContent = '—';
+    chooser?.classList.add('hide');
     return;
   }
 
-  // If only one address: show it, hide chooser
+  // One address
   if (list.length === 1){
-    if (chooser) chooser.classList.add('hide');
-    body.textContent = formatShipTo(list[0]);
-    // remember selection on the bundle so it can be reused if needed
+    body.textContent = formatShipTo(list[0].addr);
     lastBundle.selected_ship_to = list[0];
+    chooser?.classList.add('hide');
     return;
   }
 
-  // Multiple addresses: populate select + show chooser
+  // Multiple addresses → show dropdown with full address label
   if (select){
     select.innerHTML = '';
-    list.forEach((addr, idx) => {
+    list.forEach((g, i) => {
       const opt = document.createElement('option');
-      // First line of the address or the name as the short label
-      const label = (addr.name || addr.contact || addr.full_name || addr.line1 || addr.address1 || `Address ${idx+1}`);
-      opt.value = String(idx);
-      opt.textContent = label;
+      opt.value = String(i);
+      opt.textContent = shortShipTo(g.addr);   // << address in dropdown
       select.appendChild(opt);
     });
 
     // default to first
-    body.textContent = formatShipTo(list[0]);
+    body.textContent = formatShipTo(list[0].addr);
     lastBundle.selected_ship_to = list[0];
 
     select.onchange = () => {
-      const i = Number(select.value);
+      const i = Number(select.value) || 0;
       const chosen = list[i] || list[0];
-      body.textContent = formatShipTo(chosen);
+      body.textContent = formatShipTo(chosen.addr);
       lastBundle.selected_ship_to = chosen;
     };
 
-    if (chooser) chooser.classList.remove('hide');
+    chooser?.classList.remove('hide');
+
+    // Optional: also render a small "Split invoices by address" helper button
+    ensureSplitByAddressButton(list);
   }
 }
+
 
 function normalizeCardRow(r){return{
       id:r.id||r.card_id||r.uuid||null,
@@ -320,55 +361,100 @@ function normalizeCardRow(r){return{
       const j=await r.json().catch(()=>({rows:[]}));
       return (j.rows||[]).map(normalizeCardRow);
     }
-// --- Ship-to: single authoritative source ---
-// Pull shipping addresses directly from the submission drawer endpoint
-// /api/admin/submission?id=<id>&full=1
-async function fetchShipTos(subIds) {
+async function fetchShipTos(subIds){
   if (!Array.isArray(subIds) || subIds.length === 0) return [];
 
-  // normalizer → our UI shape
+  // helper to normalize raw address
   const norm = (a) => {
     if (!a) return null;
-    const name    = a.name || '';
-    const line1   = a.street || a.address1 || '';
-    const line2   = a.address2 || '';
-    const city    = a.city || '';
-    const region  = a.state || a.region || '';
-    const postal  = a.zip || a.postal || a.postal_code || '';
-    const country = a.country || 'US';
-    const any = name || line1 || line2 || city || region || postal || country;
-    return any ? { name, line1, line2, city, region, postal, country } : null;
+    const obj = {
+      name   : a.name   || a.contact || a.full_name || a.first_last || a.attn || '',
+      line1  : a.line1  || a.address1 || a.addr1 || a.street || '',
+      line2  : a.line2  || a.address2 || a.addr2 || '',
+      city   : a.city   || '',
+      region : a.region || a.state || a.province || '',
+      postal : a.postal || a.zip || a.postal_code || a.postcode || '',
+      country: a.country|| 'US'
+    };
+    const any = Object.values(obj).some(Boolean);
+    return any ? obj : null;
   };
 
-  const out = [];
+  // We will fill this map: key(address) -> { addr, subs: [] }
+  const map = new Map();
 
-  // hit exactly one known-good route per submission id
+  // Try direct endpoint first (may return many addresses but without sub mapping)
+  try {
+    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
+    const r  = await fetch(`/api/admin/billing/ship-to?${qs}`, { credentials: 'same-origin' });
+    if (r.ok) {
+      const j = await r.json().catch(()=> ({}));
+      const arr = Array.isArray(j?.addresses) ? j.addresses
+                : Array.isArray(j)            ? j
+                : j?.address ? [j.address] : [];
+      for (const a of arr) {
+        const nx = norm(a); if (!nx) continue;
+        const k = addressKey(nx);
+        if (!map.has(k)) map.set(k, { addr: nx, subs: [] });
+      }
+    }
+  } catch {}
+
+  // Fallback: probe each submission; these include the actual shipping_address
+  const tryRoutes = (id) => ([
+    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,
+    `/api/admin/submissions/${encodeURIComponent(id)}`,
+    `/api/admin/submissions/show?submission_id=${encodeURIComponent(id)}`
+  ]);
+
   for (const id of subIds) {
-    const url = `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`;
-    try {
-      const r = await fetch(url, { credentials: 'same-origin' });
-      if (!r.ok) continue;
-      const j = await r.json().catch(() => ({}));
-      const addr = j?.item?.shipping_address;
-      const n = norm(addr);
-      if (n) out.push(n);
-    } catch {}
+    let got = null;
+    for (const url of tryRoutes(id)) {
+      try {
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) continue;
+        const j = await r.json().catch(()=> ({}));
+        const cand = j?.item?.shipping_address || j?.ship_to || j?.shipping || j?.address || j?.customer_address;
+        const nx = norm(cand);
+        if (nx) { got = nx; break; }
+      } catch {}
+    }
+    if (got) {
+      const k = addressKey(got);
+      if (!map.has(k)) map.set(k, { addr: got, subs: [] });
+      map.get(k).subs.push(id);
+    }
   }
 
-  // de-dupe
-  const key = (a) => JSON.stringify([a.name,a.line1,a.line2,a.city,a.region,a.postal,a.country]);
-  const seen = new Set();
-  const uniq = [];
-  for (const a of out) {
-    const k = key(a);
-    if (!seen.has(k)) { seen.add(k); uniq.push(a); }
-  }
-
-  // Debug (optional): comment out if noisy
-  console.log('[invoice-builder] shipTos', uniq);
-
-  return uniq;
+  return [...map.values()];
 }
+
+    function ensureSplitByAddressButton(groups){
+  const chooser = document.getElementById('shipToChooser');
+  if (!chooser) return;
+
+  // avoid duplicating the button
+  if (chooser.querySelector('.js-split-invoices')) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn js-split-invoices';
+  btn.style.marginTop = '8px';
+  btn.textContent = 'Split invoices by address';
+
+  btn.onclick = () => {
+    const base = location.pathname; // /admin/invoice-builder.html
+    const email = encodeURIComponent((lastBundle?.customer_email || '').trim());
+    groups.forEach(g => {
+      const subsParam = encodeURIComponent((g.subs || []).join(','));
+      const url = `${base}?subs=${subsParam}&email=${email}`;
+      window.open(url, '_blank', 'noopener');
+    });
+  };
+
+  chooser.appendChild(btn);
+}
+
 
 async function loadPrefill(submissionIds){
   if (!submissionIds?.length) return { invoice_id: null, items: [] };
