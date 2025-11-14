@@ -227,17 +227,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
-      const saveBody: any = { customer_email: customerEmail, items };
-      if (g.addr) saveBody.ship_to = g.addr;
+// Build body to force NEW invoice for this group
+const saveBody: any = {
+  customer_email: customerEmail,
+  items,
+  invoice_id: null,   // VERY IMPORTANT: treat as a new invoice, not update
+  force_new: true     // VERY IMPORTANT: override reuse logic
+};
 
-      const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
-        method: 'POST',
-        headers: {
-          ...baseHeaders,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(saveBody),
-      });
+if (g.addr) saveBody.ship_to = g.addr;
+
+const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
+  method: 'POST',
+  headers: {
+    ...baseHeaders,
+    'content-type': 'application/json'
+  },
+  body: JSON.stringify(saveBody)
+});
+
+groupInfo.saveStatus = sr.status;
+
+if (!sr.ok) {
+  const txt = await sr.text().catch(() => '');
+  groupInfo.saveError = txt.slice(0, 400);
+  debug.groupDebug.push(groupInfo);
+  continue;
+}
+
+const sj = await sr.json().catch(() => ({} as { invoice_id?: string }));
+if (sj?.invoice_id) {
+  created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
+} else {
+  groupInfo.saveError = 'No invoice_id in response';
+  debug.groupDebug.push(groupInfo);
+}
 
       groupInfo.saveStatus = sr.status;
 
