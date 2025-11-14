@@ -585,6 +585,22 @@ async function save(silent = false){
     if (!draftInvoiceId) { alert('Could not determine invoice id.'); return; }
   }
 
+      // If we detected multiple ship-to addresses and the user hasn't split yet,
+// give them a heads-up. We can reuse shipToChooser visibility as the signal.
+const chooser = document.getElementById('shipToChooser');
+if (chooser && !chooser.classList.contains('hide')) {
+  const confirmed = window.confirm(
+    'Multiple shipping addresses were detected for these submissions.\n\n' +
+    'If you want one invoice per address, click Cancel and use "Split invoices by address" first.\n\n' +
+    'Continue sending a single combined invoice anyway?'
+  );
+  if (!confirmed) {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+    return;
+  }
+}
+
   try {
     btn.disabled = true;
     btn.textContent = 'Sending…';
