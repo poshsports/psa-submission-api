@@ -263,27 +263,16 @@ if (sj?.invoice_id) {
   debug.groupDebug.push(groupInfo);
 }
 
-      groupInfo.saveStatus = sr.status;
+// record group debug after finishing this group
+debug.groupDebug.push(groupInfo);
 
-      if (!sr.ok) {
-        const txt = await sr.text().catch(() => '');
-        groupInfo.saveError = txt.slice(0, 400);
-        debug.groupDebug.push(groupInfo);
-        continue;
-      }
+} // ← CLOSE for (const g of groups)
 
-      const sj = await sr.json().catch(() => ({} as { invoice_id?: string }));
-      if (sj?.invoice_id) {
-        created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
-      } else {
-        groupInfo.saveError = 'No invoice_id in response';
-        debug.groupDebug.push(groupInfo);
-      }
-    }
+return res.status(200).json({ ok: true, created, debug });
 
-    return res.status(200).json({ ok: true, created, debug });
-  } catch (err: any) {
-    console.error('[split-by-address] error', err);
-    return res.status(500).json({ ok: false, error: 'Server error', detail: err?.message ?? String(err) });
-  }
+} catch (err: any) {   // ← CLOSE try
+  console.error('[split-by-address] error', err);
+  return res.status(500).json({ ok: false, error: 'Server error', detail: err?.message ?? String(err) });
 }
+
+} 
