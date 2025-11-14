@@ -444,6 +444,8 @@ function ensureSplitByAddressButton(addressGroups){
       return;
     }
 
+    const email = (lastBundle?.customer_email || '').trim();
+
     btn.disabled = true;
     const originalLabel = btn.textContent;
     btn.textContent = 'Splitting…';
@@ -453,16 +455,24 @@ function ensureSplitByAddressButton(addressGroups){
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ subs: allSubs })
+        body: JSON.stringify({
+          // new payload shape the API expects
+          submissions: allSubs,
+          addressGroups: groups,
+          // optional, API can derive but we pass it if we know it
+          customer_email: email || undefined
+        })
       });
 
       const j = await res.json().catch(() => ({}));
-      const created = Number(j.created || j.count || 0);
+      // New route returns: { ok: true, created: [ { invoice_id, subs }, ... ] }
+      const createdArr = Array.isArray(j.created) ? j.created : [];
+      const count = createdArr.length;
 
-      alert(`Split into ${created} invoices.`);
+      alert(`Split into ${count} invoice${count === 1 ? '' : 's'}.`);
 
       // If we actually created some, go back to Billing → To send
-      if (created > 0) {
+      if (count > 0) {
         window.location.href = '/admin/billing.html?tab=to-send';
       }
     } catch (err) {
