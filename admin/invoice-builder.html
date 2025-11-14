@@ -408,10 +408,13 @@ async function fetchShipTos(subIds){
   return [...map.values()];
 }
 
-function ensureSplitByAddressButton(groups){
+function ensureSplitByAddressButton(addressGroups){
   const chooser = document.getElementById('shipToChooser');
   if (!chooser) return;
-  if (chooser.querySelector('.js-split-invoices')) return;
+
+  // avoid duplicates
+  let existing = chooser.querySelector('.js-split-invoices');
+  if (existing) return;
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -419,49 +422,60 @@ function ensureSplitByAddressButton(groups){
   btn.style.marginTop = '8px';
   btn.textContent = 'Split invoices by address';
 
-  btn.onclick = async () => {
-    const email = (lastBundle?.customer_email || '').trim();
-    const subIds = (lastBundle?.submissions || []).map(s => s.submission_id);
+  // We keep the groups so the button knows what it’s splitting
+  const groups = Array.isArray(addressGroups) ? addressGroups : [];
 
-    if (!email || !subIds.length) {
-      alert('Missing customer email or submissions.');
+  btn.onclick = async () => {
+    // If we somehow only have 1 address, nothing to do
+    if (groups.length < 2) {
+      alert('Nothing to split – only one shipping address found.');
+      return;
+    }
+
+    // Collect all submission ids that participate in this invoice
+    const allSubs = Array.from(
+      new Set(
+        groups.flatMap(g => Array.isArray(g.subs) ? g.subs : [])
+      )
+    );
+
+    if (!allSubs.length) {
+      alert('Could not determine which submissions to split.');
       return;
     }
 
     btn.disabled = true;
+    const originalLabel = btn.textContent;
     btn.textContent = 'Splitting…';
 
     try {
-      const r = await fetch('/api/admin/billing/split-by-address', {
+      const res = await fetch('/api/admin/billing/split-by-address', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ subs: subIds, email })
+        body: JSON.stringify({ subs: allSubs })
       });
 
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.ok) {
-        console.error('[split-by-address] failed', j);
-        alert('Split failed.');
-        btn.disabled = false;
-        btn.textContent = 'Split invoices by address';
-        return;
-      }
+      const j = await res.json().catch(() => ({}));
+      const created = Number(j.created || j.count || 0);
 
-      // Simple toast then navigate
-      alert(`Split into ${j.created || 0} invoice${(j.created|0)===1?'':'s'}.`);
-      window.location.href = '/admin/billing.html';
-    } catch (e) {
-      console.error(e);
-      alert('Split failed.');
+      alert(`Split into ${created} invoices.`);
+
+      // If we actually created some, go back to Billing → To send
+      if (created > 0) {
+        window.location.href = '/admin/billing.html?tab=to-send';
+      }
+    } catch (err) {
+      console.error('[split-by-address] failed', err);
+      alert('Failed to split invoices by address.');
+    } finally {
       btn.disabled = false;
-      btn.textContent = 'Split invoices by address';
+      btn.textContent = originalLabel;
     }
   };
 
   chooser.appendChild(btn);
 }
-
 
 
 async function loadPrefill(submissionIds){
