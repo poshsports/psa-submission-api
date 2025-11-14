@@ -422,17 +422,18 @@ function ensureSplitByAddressButton(addressGroups){
   btn.style.marginTop = '8px';
   btn.textContent = 'Split invoices by address';
 
-  // We keep the groups so the button knows what it’s splitting
+  // keep the groups for the split operation
   const groups = Array.isArray(addressGroups) ? addressGroups : [];
 
   btn.onclick = async () => {
-    // If we somehow only have 1 address, nothing to do
+
+    // If only one address → nothing to split
     if (groups.length < 2) {
       alert('Nothing to split – only one shipping address found.');
       return;
     }
 
-    // Collect all submission ids that participate in this invoice
+    // Collect all unique submission IDs involved in these groups
     const allSubs = Array.from(
       new Set(
         groups.flatMap(g => Array.isArray(g.subs) ? g.subs : [])
@@ -456,25 +457,27 @@ function ensureSplitByAddressButton(addressGroups){
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          // new payload shape the API expects
           submissions: allSubs,
           addressGroups: groups,
-          // optional, API can derive but we pass it if we know it
           customer_email: email || undefined
         })
       });
 
       const j = await res.json().catch(() => ({}));
-      // New route returns: { ok: true, created: [ { invoice_id, subs }, ... ] }
+
+      // 🔥 DEBUG LOG SO WE CAN SEE THE CREATED INVOICE IDS
+      console.log('[split-by-address response]', j);
+
       const createdArr = Array.isArray(j.created) ? j.created : [];
       const count = createdArr.length;
 
       alert(`Split into ${count} invoice${count === 1 ? '' : 's'}.`);
 
-      // If we actually created some, go back to Billing → To send
+      // On success → go back to Billing
       if (count > 0) {
         window.location.href = '/admin/billing.html?tab=to-send';
       }
+
     } catch (err) {
       console.error('[split-by-address] failed', err);
       alert('Failed to split invoices by address.');
@@ -486,6 +489,7 @@ function ensureSplitByAddressButton(addressGroups){
 
   chooser.appendChild(btn);
 }
+
 
 
 async function loadPrefill(submissionIds){
