@@ -33,7 +33,6 @@ type IncomingAddressGroup = {
 function normAddr(a?: ShipAddr | ReturnType<typeof normAddr> | null) {
   if (!a) return null;
 
-  // Already normalized?
   if ('name' in (a as any) && 'line1' in (a as any) && 'city' in (a as any)) {
     const na = a as any;
     const name   = String(na.name ?? '').trim();
@@ -87,27 +86,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     subs?: string[]; // legacy
   };
 
-  // --- Normalize submissions ---
+  // ---- normalize submissions ----
   let submissions: string[] | undefined = body.submissions;
   if (!Array.isArray(submissions) || submissions.length === 0) {
     if (Array.isArray(body.subs) && body.subs.length > 0) {
       submissions = body.subs;
     }
   }
-
   if (!Array.isArray(submissions) || submissions.length === 0) {
     return res.status(400).json({ ok: false, error: 'Missing submissions/subs[]' });
   }
 
-  // --- Normalize customer email ---
+  // ---- normalize email ----
   let customerEmail: string | undefined =
     (typeof body.customer_email === 'string' && body.customer_email.trim()) ||
     (typeof body.email === 'string' && body.email.trim()) ||
     undefined;
 
+  // base URL + auth headers for internal calls
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
   const host  = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string);
   const base  = `${proto}://${host}`;
+
+  const cookie = req.headers.cookie as string | undefined;
+  const auth   = req.headers.authorization as string | undefined;
+  const xAdmin = req.headers['x-admin-token'] as string | undefined;
+
+  const baseHeaders: Record<string,string> = {
+    accept: 'application/json',
+  };
+  if (cookie) baseHeaders.cookie = cookie;
+  if (auth) baseHeaders.authorization = auth;
+  if (xAdmin) baseHeaders['x-admin-token'] = xAdmin;
 
   const debug: any = {
     submissions,
@@ -116,12 +126,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   try {
-    // If no email provided, derive from first submission
+    // derive email from first submission if needed
     if (!customerEmail) {
       const firstId = submissions[0];
       const sr = await fetch(
         `${base}/api/admin/submission?id=${encodeURIComponent(firstId)}&full=1`,
-        { headers: { accept: 'application/json' } }
+        { headers: baseHeaders }
       );
       if (sr.ok) {
         const sj = (await sr.json()) as SubmissionResp;
@@ -131,13 +141,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           undefined;
         if (fromSub) customerEmail = fromSub;
       }
-
       if (!customerEmail) {
         return res.status(400).json({ ok: false, error: 'Missing customer email', debug });
       }
     }
 
-    // --- Build groups ---
+    // ---- build groups ----
     let groups: { addr: ReturnType<typeof normAddr> | null; subs: string[] }[] = [];
 
     if (Array.isArray(body.addressGroups) && body.addressGroups.length > 0) {
@@ -149,11 +158,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .filter((g) => g.subs.length > 0);
     } else {
       const map = new Map<string, { addr: ReturnType<typeof normAddr>; subs: string[] }>();
-
       for (const id of submissions) {
         const r = await fetch(
           `${base}/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,
-          { headers: { accept: 'application/json' } }
+          { headers: baseHeaders }
         );
         if (!r.ok) continue;
         const j = (await r.json()) as SubmissionResp;
@@ -164,7 +172,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         map.get(key)!.subs.push(id);
       }
-
       groups = [...map.values()];
     }
 
@@ -188,10 +195,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         saveError: null as null | string,
       };
 
-      // --- cards-preview for this group ---
+      // ---- cards-preview for this group ----
       const qs = new URLSearchParams({ subs: subsForGroup.join(',') }).toString();
       const cr = await fetch(`${base}/api/admin/billing/cards-preview?${qs}`, {
-        headers: { accept: 'application/json' },
+        headers: baseHeaders,
       });
 
       groupInfo.cardsPreviewStatus = cr.status;
@@ -226,8 +233,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
         method: 'POST',
         headers: {
+          ...baseHeaders,
           'content-type': 'application/json',
-          accept: 'application/json',
         },
         body: JSON.stringify(saveBody),
       });
