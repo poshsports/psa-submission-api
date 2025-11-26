@@ -228,7 +228,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // ⭐ FORCE NEW INVOICE + GROUP CODE OVERRIDE
-      const syntheticCode = `${originalGroupCode}-${groups.indexOf(g) + 1}`;
+      const syntheticCode = `${originalGroupCode}-SPLIT-${groups.indexOf(g) + 1}-${Date.now()}`;
       const saveBody: any = {
         customer_email: customerEmail,
         items,
