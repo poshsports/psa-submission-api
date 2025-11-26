@@ -7,7 +7,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// Utility: coerce to timestamp (ms) or null
+// Utility: coerce a value to a numeric timestamp (ms) or null
 const ts = (v) => {
   if (!v) return null;
   const n = Date.parse(v);
@@ -21,9 +21,9 @@ export default async function handler(req, res) {
   }
 
   const ok = await requireAdmin(req, res);
-  if (!ok) return;
+  if (!ok) return; // 401 already sent
 
-  // Inputs
+  // Inputs (optional)
   const limit = Math.min(Math.max(Number(req.query.limit) || 800, 1), 2000);
   const q = String(req.query.q || "").trim().toLowerCase();
   const groupFilter = String(req.query.group || "").trim().toLowerCase();
@@ -32,60 +32,33 @@ export default async function handler(req, res) {
   const fromMs = from && !isNaN(from) ? from.getTime() : null;
   const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
 
-  // ✅ 1) Fetch OPEN invoices
-  const { data: invoices, error: invErr } = await supabase
-    .from("billing_invoices")
-    .select(`
-      id,
-      shopify_customer_id,
-      group_code,
-      status,
-      subtotal_cents,
-      shipping_cents,
-      total_cents,
-      created_at,
-      updated_at
-    `)
-    .in("status", ["pending", "draft"])
+  // 1) Pull candidate submissions from the admin view
+  //    Only those received from PSA.
+  const { data: subs, error: subsErr } = await supabase
+    .from("admin_submissions_v")
+    .select("submission_id, status, customer_email, group_code, cards, created_at")
+    .eq("status", "received_from_psa")
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (invErr) {
-    console.error("[to-bill] invErr:", invErr);
-    return res.status(500).json({ error: "Failed to read invoices" });
+  if (subsErr) {
+    console.error("[to-bill] subsErr:", subsErr);
+    return res.status(500).json({ error: "Failed to read submissions" });
   }
 
-  if (!invoices || invoices.length === 0) {
+  if (!subs || subs.length === 0) {
     return res.status(200).json({ items: [] });
   }
 
-  // ✅ 2) Submission counts per invoice
-  const invoiceIds = invoices.map((i) => i.id);
-
-  let submissionCounts = {};
-  if (invoiceIds.length) {
-    const { data: links } = await supabase
-      .from("billing_invoice_submissions")
-      .select("invoice_id, submission_code")
-      .in("invoice_id", invoiceIds);
-
-    if (links && links.length) {
-      for (const l of links) {
-        submissionCounts[l.invoice_id] =
-          (submissionCounts[l.invoice_id] || 0) + 1;
-      }
-    }
-  }
-
-  // ✅ 3) Apply filters
-  let filtered = invoices;
+  // 2) Optional in-memory filters (search / group / date)
+  let filtered = subs;
 
   if (q) {
     filtered = filtered.filter((r) => {
       const hay = [
-        r.id,
-        r.shopify_customer_id,
-        r.group_code
+        r.customer_email,
+        r.submission_id,
+        r.group_code,
       ]
         .filter(Boolean)
         .join(" ")
@@ -110,17 +83,117 @@ export default async function handler(req, res) {
     });
   }
 
-  // ✅ 4) Final UI rows — ONE ROW PER INVOICE, ONLY IF IT HAS SUBMISSIONS
-  const items = filtered
-    .filter(inv => (submissionCounts[inv.id] || 0) > 0)  // ✅ hide empty invoices
-    .map((inv) => ({
-      invoice_id: inv.id,
-      customer_email: inv.shopify_customer_id,
-      group_code: inv.group_code,
-      submissions_count: submissionCounts[inv.id] || 0,
-      total_cents: inv.total_cents,
-      created_at: inv.created_at,
-    }));
+  // 3) Invoice awareness: exclude subs already on open invoices
+  const ids = Array.from(new Set(filtered.map((r) => r.submission_id))).filter(Boolean);
+  const exclude = new Set();
+
+  if (ids.length) {
+    const { data: links, error: linkErr } = await supabase
+      .from("billing_invoice_submissions")
+      .select("invoice_id, submission_code")
+      .in("submission_code", ids);
+
+    if (linkErr) {
+      console.error("[to-bill] linkErr:", linkErr);
+      // fail-safe: if this errors, we just won't exclude anything
+    } else if (links && links.length) {
+      const invoiceIds = Array.from(
+        new Set(links.map((r) => r.invoice_id))
+      ).filter(Boolean);
+
+      if (invoiceIds.length) {
+        const { data: invs, error: invErr } = await supabase
+          .from("billing_invoices")
+          .select("id, status")
+          .in("id", invoiceIds);
+
+        if (invErr) {
+          console.error("[to-bill] invErr:", invErr);
+        } else {
+          // ✅ Treat pending + draft (and sent/paid) as "open for our purposes"
+          const openStatuses = new Set(["pending", "draft", "sent", "paid"]);
+          const open = new Set(
+            (invs || [])
+              .filter((inv) =>
+                openStatuses.has(String(inv.status || "").toLowerCase())
+              )
+              .map((inv) => inv.id)
+          );
+
+          for (const l of links) {
+            if (open.has(l.invoice_id)) {
+              exclude.add(l.submission_code);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const eligible = filtered.filter((r) => !exclude.has(r.submission_id));
+
+  // 4) Bundle by customer_email (same as old behavior)
+  const bundles = new Map(); // key = customer_email (lower)
+
+  for (const r of eligible) {
+    const email = (r.customer_email || "").trim().toLowerCase();
+    if (!email) continue; // need an anchor to invoice
+
+    const receivedAt = r.created_at || null;
+
+    let b = bundles.get(email);
+    if (!b) {
+      b = {
+        customer_email: email,
+        customer_name: "", // not used right now
+        submissions: [],
+        groups: new Set(),
+        cards: 0,
+        _newest: null,
+        _oldest: null,
+      };
+      bundles.set(email, b);
+    }
+
+    b.submissions.push({
+      submission_id: r.submission_id,
+      group_code: r.group_code || null,
+      cards: Number(r.cards) || 0,
+      returned_at: receivedAt,
+    });
+
+    if (r.group_code) b.groups.add(r.group_code);
+    b.cards += Number(r.cards) || 0;
+
+    const t = ts(receivedAt);
+    if (t != null) {
+      if (b._newest == null || t > b._newest) b._newest = t;
+      if (b._oldest == null || t < b._oldest) b._oldest = t;
+    }
+  }
+
+  // 5) Shape output for the UI (same structure as before)
+  const items = Array.from(bundles.values()).map((b) => {
+    const submission_ids = (b.submissions || [])
+      .map((s) => s.submission_id)
+      .filter(Boolean);
+    const group_codes = Array.from(b.groups || []);
+
+    return {
+      customer_email: b.customer_email,
+      customer_name: b.customer_name,
+      submissions: b.submissions || [],
+      submission_ids,
+      groups: group_codes,
+      group_codes,
+      submissions_count: submission_ids.length,
+      groups_count: group_codes.length,
+      cards: b.cards,
+      returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
+      returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
+      estimated_cents: null, // filled in by addServerEstimates on the client
+    };
+  });
 
   return res.status(200).json({ items });
 }
