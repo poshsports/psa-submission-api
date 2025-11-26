@@ -1,6 +1,7 @@
 // /api/admin/billing/create-drafts.js  (ESM)
-// Creates combined per-customer Draft Orders for a Returned group.
-// Uses your sb() and requireAdmin() helpers as provided.
+// Creates Draft Orders either:
+//   1) Per explicit billing invoice id(s) (invoice_ids[] path)  ✅ invoice-aware
+//   2) Per group_code (legacy flow)                            ✅ unchanged behavior
 
 import { sb } from '../../_util/supabase.js';
 import { requireAdmin } from '../../_util/adminAuth.js';
@@ -40,95 +41,106 @@ async function shopifyFetch(path, method = 'GET', body) {
   return resp.json();
 }
 
-// Creates/attaches a Shopify draft for a single billing invoice id.
-// Uses existing links if present; otherwise pulls *all* eligible submissions
-// for the same customer (status='received_from_psa') that aren't already on an
-// open invoice, then builds the draft and persists DB rows.
-// Creates/attaches a Shopify draft for a single billing invoice id.
-// Includes saved upcharges and shipping in the draft.
-async function createDraftForInvoice(client, invoiceId, RATE_CENTS) {
-  const DEFAULT_SHIPPING_CENTS = 500; // fallback $5 if no row exists
+// Build a Shopify shipping_address object from invoice ship_to_* columns
+function buildShippingAddressFromInvoice(inv) {
+  const hasAny =
+    inv.ship_to_name ||
+    inv.ship_to_line1 ||
+    inv.ship_to_city ||
+    inv.ship_to_region ||
+    inv.ship_to_postal;
 
-  // 1) Load invoice
+  if (!hasAny) return null;
+
+  return {
+    name:     inv.ship_to_name   || '',
+    address1: inv.ship_to_line1  || '',
+    address2: inv.ship_to_line2  || '',
+    city:     inv.ship_to_city   || '',
+    province: inv.ship_to_region || '',
+    zip:      inv.ship_to_postal || '',
+    country:  inv.ship_to_country || 'US'
+  };
+}
+
+// Creates/attaches a Shopify draft for a single billing invoice id.
+// STRICTLY invoice-aware: uses billing_invoice_items + invoice shipping,
+// and existing billing_invoice_submissions links for metadata.
+async function createDraftForInvoice(client, invoiceId /*, RATE_CENTS (unused) */) {
+  const DEFAULT_SHIPPING_CENTS = 500; // fallback $5 if nothing else is set
+
+  // 1) Load invoice, including shipping + ship_to_* fields
   const { data: inv, error: invErr } = await client
     .from('billing_invoices')
-    .select('id, shopify_customer_id, status, draft_id')
+    .select(`
+      id,
+      shopify_customer_id,
+      status,
+      draft_id,
+      group_code,
+      shipping_cents,
+      subtotal_cents,
+      total_cents,
+      ship_to_name,
+      ship_to_line1,
+      ship_to_line2,
+      ship_to_city,
+      ship_to_region,
+      ship_to_postal,
+      ship_to_country
+    `)
     .eq('id', invoiceId)
     .single();
+
   if (invErr || !inv) return { ok: false, error: 'invoice-not-found' };
-  if (inv.draft_id) {
-    return { ok: true, data: { invoice_id: inv.id, draft_id: inv.draft_id, already: true } };
+
+  if (!inv.shopify_customer_id) {
+    return { ok: false, error: 'missing-shopify-customer-id' };
   }
 
-  // 2) Existing linked submissions?
+  // If it already has a draft, just reuse it
+  if (inv.draft_id) {
+    return {
+      ok: true,
+      data: {
+        invoice_id: inv.id,
+        draft_id: inv.draft_id,
+        invoice_url: inv.invoice_url || null,
+        already: true
+      }
+    };
+  }
+
+  // 2) Existing submission links for this invoice (for notes only)
   const { data: links, error: linkErr } = await client
     .from('billing_invoice_submissions')
     .select('submission_code')
     .eq('invoice_id', inv.id);
-  if (linkErr) return { ok: false, error: 'load-links-failed', details: linkErr.message };
 
-  let codes = (links || []).map(l => l.submission_code).filter(Boolean);
-
-  // 3) If no links, collect eligible submissions for this customer that aren’t already on open invoices
-  let subs = [];
-  if (!codes.length) {
-    const { data: allForCustomer, error: sErr } = await client
-      .from('psa_submissions')
-      .select('submission_id, grading_service, cards')
-      .eq('shopify_customer_id', inv.shopify_customer_id)
-      .eq('status', 'received_from_psa');
-    if (sErr) return { ok: false, error: 'load-subs-failed', details: sErr.message };
-    subs = Array.isArray(allForCustomer) ? allForCustomer : [];
-
-    const { data: openInvs, error: openErr } = await client
-      .from('billing_invoices')
-      .select('id')
-      .eq('shopify_customer_id', inv.shopify_customer_id)
-      .in('status', ['pending', 'draft', 'sent']);
-    if (openErr) return { ok: false, error: 'load-open-invs-failed', details: openErr.message };
-
-    const openIds = (openInvs || []).map(i => i.id);
-    let used = [];
-    if (openIds.length) {
-      const { data: usedLinks, error: usedErr } = await client
-        .from('billing_invoice_submissions')
-        .select('submission_code')
-        .in('invoice_id', openIds);
-      if (usedErr) return { ok: false, error: 'load-used-links-failed', details: usedErr.message };
-      used = (usedLinks || []).map(u => u.submission_code);
-    }
-    const usedSet = new Set(used);
-    subs = subs.filter(s => !usedSet.has(s.submission_id));
-    codes = subs.map(s => s.submission_id);
-  }
-  if (!codes.length) return { ok: false, error: 'no-eligible-submissions' };
-
-  // 4) Ensure details for each submission code (cards/service)
-  if (!subs.length) {
-    const { data: forCodes, error: detErr } = await client
-      .from('psa_submissions')
-      .select('submission_id, grading_service, cards')
-      .in('submission_id', codes);
-    if (detErr) return { ok: false, error: 'load-sub-details-failed', details: detErr.message };
-    subs = Array.isArray(forCodes) ? forCodes : [];
+  if (linkErr) {
+    return { ok: false, error: 'load-links-failed', details: linkErr.message };
   }
 
-  // 5) Build line_items from DB (authoritative)
-  // Read saved invoice items (service + upcharge + shipping)
-const { data: items, error: itemsErr } = await client
-  .from('billing_invoice_items')
-  .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
-  .eq('invoice_id', inv.id);
-if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+  const codes = (links || []).map(l => l.submission_code).filter(Boolean);
+
+  // 3) Read saved invoice items (service + upcharge + shipping)
+  const { data: items, error: itemsErr } = await client
+    .from('billing_invoice_items')
+    .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
+    .eq('invoice_id', inv.id);
+
+  if (itemsErr) {
+    return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+  }
+
+  const serviceItems  = (items || []).filter(x => x.kind === 'service');
+  const upchargeItems = (items || []).filter(x => x.kind === 'upcharge');
+  const shippingItem  = (items || []).find(x => x.kind === 'shipping');
 
   const line_items = [];
   let subtotal = 0;
 
-  const serviceItems  = (items || []).filter(x => x.kind === 'service');
-  const upchargeItems = (items || []).filter(x => x.kind === 'upcharge');
-  const shippingRow   = (items || []).find(x => x.kind === 'shipping');
-
-  // Group service items by unit_cents to avoid dozens of lines at the same price
+  // Group service items by unit_cents to avoid dozens of identical lines
   const groupedService = new Map(); // key: unit_cents -> { qty }
   for (const it of serviceItems) {
     const unit = Math.max(0, Number(it.unit_cents || it.amount_cents || 0));
@@ -139,18 +151,19 @@ if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.
     groupedService.set(unit, g);
   }
 
-  // Push grouped service lines
   for (const [unit, g] of groupedService.entries()) {
     line_items.push({
       title: 'PSA Grading',
       quantity: g.qty,
       price: moneyStrFromCents(unit),
-      properties: [{ name: 'Kind', value: 'Service' }]
+      properties: [
+        { name: 'Kind', value: 'Service' }
+      ]
     });
     subtotal += g.qty * unit;
   }
 
-  // Push each saved upcharge as its own line (preserves your existing behavior/titles)
+  // Each upcharge stays as its own line (preserves card description titles)
   for (const u of upchargeItems) {
     const cents = Math.max(0, Number(u.amount_cents ?? u.unit_cents ?? 0));
     if (!cents) continue;
@@ -158,92 +171,109 @@ if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.
       title: u.title || 'PSA Upcharge',
       quantity: 1,
       price: moneyStrFromCents(cents),
-      properties: [{ name: 'Kind', value: 'Upcharge' }]
+      properties: [
+        { name: 'Kind', value: 'Upcharge' }
+      ]
     });
     subtotal += cents;
   }
 
-  // Shipping: prefer saved shipping row, else default once (and persist)
-  if (shippingRow) {
-    const cents = Math.max(0, Number(shippingRow.amount_cents ?? shippingRow.unit_cents ?? 0));
-    if (cents) {
-      line_items.push({
-        title: shippingRow.title || 'Shipping (flat)',
-        quantity: 1,
-        price: moneyStrFromCents(cents),
-        properties: [{ name: 'Kind', value: 'Shipping' }]
-      });
-      subtotal += cents;
-    }
-  } else {
-    // fallback
-    line_items.push({
-      title: 'Shipping (flat)',
-      quantity: 1,
-      price: moneyStrFromCents(DEFAULT_SHIPPING_CENTS),
-      properties: [{ name: 'Kind', value: 'Shipping' }]
-    });
-    subtotal += DEFAULT_SHIPPING_CENTS;
+  // Shipping: prefer explicit shipping item, else invoice.shipping_cents, else fallback
+  let shippingCents = 0;
 
-    // persist fallback so DB matches Shopify
-    await client.from('billing_invoice_items').insert([{
-      invoice_id: inv.id,
-      submission_code: null,
-      kind: 'shipping',
-      title: 'Shipping (flat)',
-      qty: 1,
-      unit_cents: DEFAULT_SHIPPING_CENTS,
-      amount_cents: DEFAULT_SHIPPING_CENTS,
-      meta: {}
-    }]);
+  if (shippingItem) {
+    shippingCents = Math.max(
+      0,
+      Number(shippingItem.amount_cents ?? shippingItem.unit_cents ?? 0)
+    );
+  } else if (Number.isFinite(Number(inv.shipping_cents)) && Number(inv.shipping_cents) > 0) {
+    shippingCents = Number(inv.shipping_cents);
+  } else {
+    shippingCents = DEFAULT_SHIPPING_CENTS;
   }
 
-  // 7) Create Shopify Draft Order
+  if (shippingCents > 0) {
+    line_items.push({
+      title: shippingItem?.title || 'Shipping (flat)',
+      quantity: 1,
+      price: moneyStrFromCents(shippingCents),
+      properties: [
+        { name: 'Kind', value: 'Shipping' }
+      ]
+    });
+    subtotal += shippingCents;
+
+    // If we had no shipping row, persist the fallback so DB matches Shopify
+    if (!shippingItem) {
+      await client.from('billing_invoice_items').insert([{
+        invoice_id: inv.id,
+        submission_code: null,
+        kind: 'shipping',
+        title: 'Shipping (flat)',
+        qty: 1,
+        unit_cents: shippingCents,
+        amount_cents: shippingCents,
+        meta: {}
+      }]);
+    }
+  }
+
+  if (!line_items.length) {
+    return { ok: false, error: 'no-invoice-items' };
+  }
+
+  // 4) Build shipping address from invoice ship_to_* (if present)
+  const shipping_address = buildShippingAddressFromInvoice(inv);
+
+  // 5) Create Shopify Draft Order
+  const cleanedCustomerId =
+    Number(String(inv.shopify_customer_id).replace(/\D/g, '')) ||
+    inv.shopify_customer_id;
+
+  const note = `PSA Invoice ${inv.id}` + (codes.length ? `: ${codes.join(', ')}` : '');
+  const note_attributes = [
+    { name: 'psa_invoice_id', value: inv.id },
+    { name: 'psa_submission_codes', value: codes.join('|') }
+  ];
+
   const draftPayload = {
     draft_order: {
-      customer: { id: Number(String(inv.shopify_customer_id).replace(/\D/g, '')) || inv.shopify_customer_id },
+      customer: { id: cleanedCustomerId },
       currency: 'USD',
-      tags: 'PSA Billing',
-      note: `PSA Invoice ${inv.id}: ${codes.join(', ')}`,
-      note_attributes: [
-        { name: 'psa_invoice_id', value: inv.id },
-        { name: 'psa_submission_codes', value: codes.join('|') }
-      ],
+      tags: inv.group_code
+        ? `PSA Billing, Group:${inv.group_code}`
+        : 'PSA Billing',
+      note,
+      note_attributes,
       line_items,
-      use_customer_default_address: true
+      ...(shipping_address
+        ? { shipping_address }
+        : { use_customer_default_address: true })
     }
   };
 
   const draftJson = await shopifyFetch('/draft_orders.json', 'POST', draftPayload);
   const draft = draftJson?.draft_order;
-  if (!draft?.id) return { ok: false, error: 'draft-create-failed' };
+  if (!draft || !draft.id) return { ok: false, error: 'draft-create-failed' };
 
-  // 8) Update invoice totals & ids
+  const now = new Date().toISOString();
+  const total_cents = subtotal;
+
+  // 6) Update invoice totals & IDs
   await client.from('billing_invoices')
     .update({
       status: 'draft',
       draft_id: String(draft.id),
       invoice_url: draft.invoice_url || null,
+      shipping_cents: shippingCents,
       subtotal_cents: subtotal,
-      total_cents: subtotal
+      total_cents,
+      updated_at: now
     })
     .eq('id', inv.id);
 
-  // Insert link rows if we created from a fresh set
-  if (!(links && links.length)) {
-    const linkRows = codes.map(code => ({
-      invoice_id: inv.id,
-      submission_code: code,
-      submission_uuid: null
-    }));
-    if (linkRows.length) {
-      await client.from('billing_invoice_submissions').insert(linkRows);
-    }
-  }
-
-// NOTE: Do NOT change submission status here.
-// We flip to 'balance_due' only after a successful send in /api/admin/billing/send-invoice.js
-
+  // If this invoice had no links yet, we DON'T auto-add new submissions here.
+  // Split/preview flows are responsible for billing_invoice_submissions.
 
   return {
     ok: true,
@@ -257,38 +287,37 @@ if (itemsErr) return { ok: false, error: 'load-items-failed', details: itemsErr.
   };
 }
 
-
 // ---- main handler ----
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-const ok = await requireAdmin(req, res);
-if (!ok) return;
+    const ok = await requireAdmin(req, res);
+    if (!ok) return;
     assertEnv();
 
-const { group_code, invoice_ids, rate_cents } = (await readBody(req));
-const ids = Array.isArray(invoice_ids) ? invoice_ids.filter(Boolean) : [];
-const RATE_CENTS = Number.isFinite(rate_cents) ? Math.max(0, rate_cents) : 2000; // default $20
+    const { group_code, invoice_ids, rate_cents } = (await readBody(req));
+    const ids = Array.isArray(invoice_ids) ? invoice_ids.filter(Boolean) : [];
+    const RATE_CENTS = Number.isFinite(rate_cents) ? Math.max(0, rate_cents) : 2000; // default $20
 
-// New path: ensure/create drafts by explicit invoice id(s)
-if (ids.length) {
-  const client = sb();
-  const created = [];
-  const skipped = [];
+    // New path: ensure/create drafts by explicit invoice id(s)
+    if (ids.length) {
+      const client = sb();
+      const created = [];
+      const skipped = [];
 
-  for (const iid of ids) {
-    const out = await createDraftForInvoice(client, iid, RATE_CENTS);
-    if (out.ok) created.push(out.data);
-    else skipped.push({ invoice_id: iid, reason: out.error || 'unknown' });
-  }
+      for (const iid of ids) {
+        const out = await createDraftForInvoice(client, iid, RATE_CENTS);
+        if (out.ok) created.push(out.data);
+        else skipped.push({ invoice_id: iid, reason: out.error || 'unknown' });
+      }
 
-  return json(res, 200, { ok: true, created, skipped });
-}
+      return json(res, 200, { ok: true, created, skipped });
+    }
 
-// Legacy/group path remains unchanged below
-if (!group_code || typeof group_code !== 'string') {
-  return json(res, 400, { error: 'group_code is required (or pass invoice_ids[])' });
-}
+    // ---- Legacy/group path below (unchanged from your existing behavior) ----
+    if (!group_code || typeof group_code !== 'string') {
+      return json(res, 400, { error: 'group_code is required (or pass invoice_ids[])' });
+    }
 
     const client = sb();
 
@@ -417,7 +446,6 @@ if (!group_code || typeof group_code !== 'string') {
       // Create Shopify Draft Order
       const draftPayload = {
         draft_order: {
-          // Shopify Admin REST expects numeric customer id; coerce if string
           customer: { id: Number(String(customerId).replace(/\D/g, '')) || customerId },
           currency: 'USD',
           tags: `PSA Billing, Group:${group_code}`,
@@ -433,16 +461,16 @@ if (!group_code || typeof group_code !== 'string') {
       if (!draft || !draft.id) throw new Error('Draft order create returned no id');
 
       const subtotal = list.reduce((sum, s) => sum + (Number(s.cards || 0) * RATE_CENTS), 0);
-  // Persist invoice details + links + items
-  await client.from('billing_invoices')
-    .update({
-      status: 'draft',
-      draft_id: String(draft.id),
-      invoice_url: draft.invoice_url || null,
-      subtotal_cents: subtotal,
-      total_cents: subtotal
-    })
-    .eq('id', invoiceRow.id);
+      // Persist invoice details + links + items
+      await client.from('billing_invoices')
+        .update({
+          status: 'draft',
+          draft_id: String(draft.id),
+          invoice_url: draft.invoice_url || null,
+          subtotal_cents: subtotal,
+          total_cents: subtotal
+        })
+        .eq('id', invoiceRow.id);
 
       // link submissions
       const linkRows = list.map(s => ({
@@ -454,8 +482,7 @@ if (!group_code || typeof group_code !== 'string') {
         await client.from('billing_invoice_submissions').insert(linkRows);
       }
 
-// NOTE: do not flip here; send-invoice.js will mark balance_due after a successful email send
-
+      // NOTE: do not flip here; send-invoice.js will mark balance_due after a successful email send
 
       results.push({
         group_code,
