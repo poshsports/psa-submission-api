@@ -149,7 +149,7 @@ export default async function handler(req, res) {
     if (typeof group_code_override === 'string' && group_code_override.trim()) {
       group_code = group_code_override.trim();
     }
-
+    
     // ===== Resolve or create invoice =====
     // Normal flow: reuse an open invoice per customer+group.
     // If force_new === true, we SKIP reuse logic and always create a new row.
