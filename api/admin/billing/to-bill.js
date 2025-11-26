@@ -31,14 +31,14 @@ export default async function handler(req, res) {
   const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
 
   // 1) Pull candidate submissions from the admin view (keeps parity with Active UI)
-  //    We only want submissions that are back from PSA and not yet invoiced.
+  //    We only want submissions that are back from PSA and not yet fully invoiced.
   //    Columns chosen to avoid over-fetching.
-const { data: subs, error: subsErr } = await supabase
-  .from("admin_submissions_v")
-  .select("submission_id, status, customer_email, group_code, cards, created_at")
-  .eq("status", "received_from_psa")
-  .order("created_at", { ascending: false })
-  .limit(limit);
+  const { data: subs, error: subsErr } = await supabase
+    .from("admin_submissions_v")
+    .select("submission_id, status, customer_email, group_code, cards, created_at")
+    .eq("status", "received_from_psa")
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
   if (subsErr) {
     console.error("[to-bill] subsErr:", subsErr);
@@ -68,19 +68,24 @@ const { data: subs, error: subsErr } = await supabase
       String(r.group_code || "").toLowerCase().includes(groupFilter)
     );
   }
-if (fromMs != null || toMs != null) {
-  filtered = filtered.filter((r) => {
-    const t = ts(r.created_at);
-    if (t == null) return false;
-    if (fromMs != null && t < fromMs) return false;
-    if (toMs   != null && t > toMs)   return false;
-    return true;
-  });
-}
+  if (fromMs != null || toMs != null) {
+    filtered = filtered.filter((r) => {
+      const t = ts(r.created_at);
+      if (t == null) return false;
+      if (fromMs != null && t < fromMs) return false;
+      if (toMs   != null && t > toMs)   return false;
+      return true;
+    });
+  }
 
-  // 2) Exclude submissions already linked to invoices with status in ('draft','sent','paid')
+  // 2) Inspect invoice links:
+  //    - Exclude subs linked to invoices in (draft, sent, paid)
+  //    - Record subs linked to *pending* invoices so we can group by invoice
   const ids = Array.from(new Set(filtered.map((r) => r.submission_id))).filter(Boolean);
-  let exclude = new Set();
+
+  const exclude = new Set();                 // submission_ids to hide
+  const subToPending = new Map();            // submission_id -> pending invoice_id
+
   if (ids.length) {
     const { data: links, error: linkErr } = await supabase
       .from("billing_invoice_submissions")
@@ -89,10 +94,10 @@ if (fromMs != null || toMs != null) {
 
     if (linkErr) {
       console.error("[to-bill] linkErr:", linkErr);
-      // If links fail, fail safe (treat as none linked)
+      // Fail-safe: treat as if there were no links (no exclusion, no pending map)
     } else if (links && links.length) {
       const invoiceIds = Array.from(new Set(links.map((r) => r.invoice_id))).filter(Boolean);
-      let good = new Set();
+
       if (invoiceIds.length) {
         const { data: invs, error: invErr } = await supabase
           .from("billing_invoices")
@@ -102,83 +107,105 @@ if (fromMs != null || toMs != null) {
         if (invErr) {
           console.error("[to-bill] invErr:", invErr);
         } else {
+          const statusById = new Map();
           for (const inv of invs || []) {
-            if (["draft", "sent", "paid"].includes(String(inv?.status || "").toLowerCase())) {
-              good.add(inv.id);
+            const st = String(inv?.status || "").toLowerCase();
+            statusById.set(inv.id, st);
+          }
+
+          // classify each link
+          for (const l of links) {
+            const st = statusById.get(l.invoice_id);
+            if (!st) continue;
+
+            if (["draft", "sent", "paid"].includes(st)) {
+              // fully handled → do not show this submission on "To send"
+              exclude.add(l.submission_code);
+            } else if (st === "pending") {
+              // open invoice-in-progress → group by this invoice id
+              subToPending.set(l.submission_code, l.invoice_id);
             }
+            // other statuses (e.g. cancelled) are treated as "no invoice"
           }
         }
-      }
-      for (const l of links) {
-        if (good.has(l.invoice_id)) exclude.add(l.submission_code);
       }
     }
   }
 
   const eligible = filtered.filter((r) => !exclude.has(r.submission_id));
 
-  // 3) Bundle by customer (combine across groups by default)
-  const bundles = new Map(); // key = customer_email (lower)
-for (const r of eligible) {
-  const email = (r.customer_email || r.email || "").trim().toLowerCase();
-  if (!email) continue; // need an anchor to invoice
+  // 3) Bundle by invoice (if pending exists) or by customer email
+  //    - key = "inv:<invoice_id>" for pending invoices
+  //    - key = "cust:<email>"     when no invoice exists yet
+  const bundles = new Map();
 
-  const name = r.customer_name || "";
-  const receivedAt = r.created_at || null;
+  for (const r of eligible) {
+    const email = (r.customer_email || r.email || "").trim().toLowerCase();
+    if (!email) continue; // need an anchor to invoice
 
-  let b = bundles.get(email);
-  if (!b) {
-    b = {
-      customer_email: email,
-      customer_name: name,
-      submissions: [],
-      groups: new Set(),
-      cards: 0,
-      _newest: null,
-      _oldest: null,
+    const name = r.customer_name || "";
+    const receivedAt = r.created_at || null;
+    const pendingId = subToPending.get(r.submission_id) || null;
+
+    const key = pendingId ? `inv:${pendingId}` : `cust:${email}`;
+
+    let b = bundles.get(key);
+    if (!b) {
+      b = {
+        invoice_id: pendingId,  // null = no invoice yet
+        customer_email: email,
+        customer_name: name,
+        submissions: [],
+        groups: new Set(),
+        cards: 0,
+        _newest: null,
+        _oldest: null,
+      };
+      bundles.set(key, b);
+    }
+
+    b.submissions.push({
+      submission_id: r.submission_id,
+      group_code: r.group_code || null,
+      cards: Number(r.cards) || 0,
+      returned_at: receivedAt,
+      invoice_id: pendingId,
+    });
+
+    if (r.group_code) b.groups.add(r.group_code);
+    b.cards += Number(r.cards) || 0;
+
+    const t = ts(receivedAt);
+    if (t != null) {
+      if (b._newest == null || t > b._newest) b._newest = t;
+      if (b._oldest == null || t < b._oldest) b._oldest = t;
+    }
+  }
+
+  // 4) Shape output (add aliases & counts for UI)
+  const items = Array.from(bundles.values()).map((b) => {
+    const submission_ids = (b.submissions || []).map((s) => s.submission_id).filter(Boolean);
+    const group_codes = Array.from(b.groups || []);
+    return {
+      invoice_id: b.invoice_id || null,   // NEW: expose invoice if pending
+      customer_email: b.customer_email,
+      customer_name: b.customer_name,
+      // arrays
+      submissions: b.submissions || [],
+      submission_ids,
+      groups: group_codes,
+      group_codes,
+      // counts
+      submissions_count: submission_ids.length,
+      groups_count: group_codes.length,
+      // metrics
+      cards: b.cards,
+      returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
+      returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
+      // pricing placeholder (filled by front-end estimates)
+      estimated_cents: null,
     };
-    bundles.set(email, b);
-  }
-
-  b.submissions.push({
-    submission_id: r.submission_id,
-    group_code: r.group_code || null,
-    cards: Number(r.cards) || 0,
-    returned_at: receivedAt,
   });
-  if (r.group_code) b.groups.add(r.group_code);
-  b.cards += Number(r.cards) || 0;
 
-  const t = ts(receivedAt);
-  if (t != null) {
-    if (b._newest == null || t > b._newest) b._newest = t;
-    if (b._oldest == null || t < b._oldest) b._oldest = t;
-  }
-}
-
-// 4) Shape output (add aliases & counts for UI)
-const items = Array.from(bundles.values()).map((b) => {
-  const submission_ids = (b.submissions || []).map(s => s.submission_id).filter(Boolean);
-  const group_codes = Array.from(b.groups || []);
-  return {
-    customer_email: b.customer_email,
-    customer_name: b.customer_name,
-    // arrays
-    submissions: b.submissions || [],
-    submission_ids,
-    groups: group_codes,
-    group_codes,
-    // counts
-    submissions_count: submission_ids.length,
-    groups_count: group_codes.length,
-    // metrics
-    cards: b.cards,
-    returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
-    returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
-    // pricing placeholder
-    estimated_cents: null,
-  };
-});
-
-return res.status(200).json({ items });
+  return res.status(200).json({ items });
 }
