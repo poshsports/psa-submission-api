@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  // Inputs (optional)
+  // Inputs
   const limit = Math.min(Math.max(Number(req.query.limit) || 800, 1), 2000);
   const q = String(req.query.q || "").trim().toLowerCase();
   const groupFilter = String(req.query.group || "").trim().toLowerCase();
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   const fromMs = from && !isNaN(from) ? from.getTime() : null;
   const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
 
-  // ✅ 1) Fetch OPEN invoices (each invoice = one row)
+  // ✅ 1) Fetch OPEN invoices
   const { data: invoices, error: invErr } = await supabase
     .from("billing_invoices")
     .select(`
@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ items: [] });
   }
 
-  // ✅ Fetch submission counts for each invoice
+  // ✅ 2) Submission counts per invoice
   const invoiceIds = invoices.map((i) => i.id);
 
   let submissionCounts = {};
@@ -77,10 +77,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // ✅ 2) Optional in-memory filters
+  // ✅ 3) Apply filters
   let filtered = invoices;
 
-  // Search by invoice id, shopify customer id, or group code
   if (q) {
     filtered = filtered.filter((r) => {
       const hay = [
@@ -95,14 +94,12 @@ export default async function handler(req, res) {
     });
   }
 
-  // Filter by group code
   if (groupFilter) {
     filtered = filtered.filter((r) =>
       String(r.group_code || "").toLowerCase().includes(groupFilter)
     );
   }
 
-  // Filter by created_at date
   if (fromMs != null || toMs != null) {
     filtered = filtered.filter((r) => {
       const t = ts(r.created_at);
@@ -113,18 +110,17 @@ export default async function handler(req, res) {
     });
   }
 
-  // ✅ 3) Shape output for UI — ONE ROW PER INVOICE
+  // ✅ 4) Final UI rows — ONE ROW PER INVOICE, ONLY IF IT HAS SUBMISSIONS
   const items = filtered
-  .filter(inv => (submissionCounts[inv.id] || 0) > 0) // ✅ hide empty invoices
-  .map((inv) => ({
-    invoice_id: inv.id,
-    // Temporary placeholder — later we can fetch actual email if needed
-    customer_email: inv.shopify_customer_id,
-    group_code: inv.group_code,
-    submissions_count: submissionCounts[inv.id] || 0,
-    total_cents: inv.total_cents,
-    created_at: inv.created_at,
-  }));
+    .filter(inv => (submissionCounts[inv.id] || 0) > 0)  // ✅ hide empty invoices
+    .map((inv) => ({
+      invoice_id: inv.id,
+      customer_email: inv.shopify_customer_id,
+      group_code: inv.group_code,
+      submissions_count: submissionCounts[inv.id] || 0,
+      total_cents: inv.total_cents,
+      created_at: inv.created_at,
+    }));
 
   return res.status(200).json({ items });
 }
