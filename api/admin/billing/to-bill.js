@@ -114,7 +114,9 @@ export default async function handler(req, res) {
   }
 
   // ✅ 3) Shape output for UI — ONE ROW PER INVOICE
-  const items = filtered.map((inv) => ({
+  const items = filtered
+  .filter(inv => (submissionCounts[inv.id] || 0) > 0) // ✅ hide empty invoices
+  .map((inv) => ({
     invoice_id: inv.id,
     // Temporary placeholder — later we can fetch actual email if needed
     customer_email: inv.shopify_customer_id,
