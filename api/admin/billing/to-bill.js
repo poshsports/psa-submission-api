@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   const fromMs = from && !isNaN(from) ? from.getTime() : null;
   const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
 
-  // ✅ 1) Fetch OPEN invoices (this is the new core logic)
+  // ✅ 1) Fetch OPEN invoices — one per row
   const { data: invoices, error: invErr } = await supabase
     .from("billing_invoices")
     .select(`
@@ -45,8 +45,7 @@ export default async function handler(req, res) {
       shipping_cents,
       total_cents,
       created_at,
-      updated_at,
-      billing_invoice_submissions ( submission_code )
+      updated_at
     `)
     .in("status", ["pending", "draft"])
     .order("created_at", { ascending: false })
@@ -61,10 +60,28 @@ export default async function handler(req, res) {
     return res.status(200).json({ items: [] });
   }
 
+  // ✅ Fetch submission counts
+  const invoiceIds = invoices.map((i) => i.id);
+
+  let submissionCounts = {};
+  if (invoiceIds.length) {
+    const { data: links } = await supabase
+      .from("billing_invoice_submissions")
+      .select("invoice_id, submission_code")
+      .in("invoice_id", invoiceIds);
+
+    if (links && links.length) {
+      for (const l of links) {
+        submissionCounts[l.invoice_id] =
+          (submissionCounts[l.invoice_id] || 0) + 1;
+      }
+    }
+  }
+
   // ✅ 2) Optional in-memory filters
   let filtered = invoices;
 
-  // Search by email, invoice id, group code
+  // Search by email, invoice id, or group code
   if (q) {
     filtered = filtered.filter((r) => {
       const hay = [
@@ -79,7 +96,7 @@ export default async function handler(req, res) {
     });
   }
 
-  // Filter by group
+  // Filter by group code
   if (groupFilter) {
     filtered = filtered.filter((r) =>
       String(r.group_code || "").toLowerCase().includes(groupFilter)
@@ -102,7 +119,7 @@ export default async function handler(req, res) {
     invoice_id: inv.id,
     customer_email: inv.customer_email,
     group_code: inv.group_code,
-    submissions_count: inv.billing_invoice_submissions?.length || 0,
+    submissions_count: submissionCounts[inv.id] || 0,
     total_cents: inv.total_cents,
     created_at: inv.created_at,
   }));
