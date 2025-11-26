@@ -158,7 +158,7 @@ export default async function handler(req, res) {
     if (!invoice_id) {
       let existing = null;
 
-      if (!forceNew) {
+      if (!forceNew && !incomingInvoiceId) {
         // A) Try to reuse via existing links (any of the submissions already linked to an open invoice)
         const { data: links, error: linkErr } = await client
           .from('billing_invoice_submissions')
