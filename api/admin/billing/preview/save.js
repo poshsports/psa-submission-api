@@ -36,12 +36,14 @@ export default async function handler(req, res) {
     if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
 
     // 👇 NEW: accept force_new from callers (e.g. split-by-address)
-    const {
-      customer_email,
-      items,
-      invoice_id: incomingInvoiceId,
-      force_new
-    } = await readBody(req);
+const {
+  customer_email,
+  items,
+  invoice_id: incomingInvoiceId,
+  force_new,
+  group_code_override   // 👈 NEW: optional override from split-by-address
+} = await readBody(req);
+
 
     const email = String(customer_email || '').trim().toLowerCase();
     const list = Array.isArray(items) ? items : [];
@@ -115,6 +117,10 @@ export default async function handler(req, res) {
         const codes = uniq((grps || []).map(g => g.code).filter(Boolean));
         if (codes.length === 1) group_code = codes[0];
       }
+    }
+    // If caller (split-by-address) provides a synthetic group code, use it.
+    if (typeof group_code_override === 'string' && group_code_override.trim()) {
+      group_code = group_code_override.trim();
     }
 
     // ===== Resolve or create invoice =====
