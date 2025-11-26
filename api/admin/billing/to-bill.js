@@ -32,12 +32,11 @@ export default async function handler(req, res) {
   const fromMs = from && !isNaN(from) ? from.getTime() : null;
   const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
 
-  // ✅ 1) Fetch OPEN invoices — one per row
+  // ✅ 1) Fetch OPEN invoices (each invoice = one row)
   const { data: invoices, error: invErr } = await supabase
     .from("billing_invoices")
     .select(`
       id,
-      customer_email,
       shopify_customer_id,
       group_code,
       status,
@@ -60,7 +59,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ items: [] });
   }
 
-  // ✅ Fetch submission counts
+  // ✅ Fetch submission counts for each invoice
   const invoiceIds = invoices.map((i) => i.id);
 
   let submissionCounts = {};
@@ -81,13 +80,13 @@ export default async function handler(req, res) {
   // ✅ 2) Optional in-memory filters
   let filtered = invoices;
 
-  // Search by email, invoice id, or group code
+  // Search by invoice id, shopify customer id, or group code
   if (q) {
     filtered = filtered.filter((r) => {
       const hay = [
-        r.customer_email,
         r.id,
-        r.group_code,
+        r.shopify_customer_id,
+        r.group_code
       ]
         .filter(Boolean)
         .join(" ")
@@ -103,7 +102,7 @@ export default async function handler(req, res) {
     );
   }
 
-  // Filter by date
+  // Filter by created_at date
   if (fromMs != null || toMs != null) {
     filtered = filtered.filter((r) => {
       const t = ts(r.created_at);
@@ -117,7 +116,8 @@ export default async function handler(req, res) {
   // ✅ 3) Shape output for UI — ONE ROW PER INVOICE
   const items = filtered.map((inv) => ({
     invoice_id: inv.id,
-    customer_email: inv.customer_email,
+    // Temporary placeholder — later we can fetch actual email if needed
+    customer_email: inv.shopify_customer_id,
     group_code: inv.group_code,
     submissions_count: submissionCounts[inv.id] || 0,
     total_cents: inv.total_cents,
