@@ -110,7 +110,7 @@ export default async function handler(req, res) {
         if (invErr) {
           console.error("[to-bill] invErr:", invErr);
         } else {
-          const openStatuses = new Set(["pending", "draft", "sent"]);
+          const openStatuses = new Set(["draft", "sent", "paid"]);
           const open = new Set(
             (invs || [])
               .filter((inv) =>
