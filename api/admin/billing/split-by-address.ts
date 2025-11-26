@@ -17,6 +17,7 @@ type SubmissionResp = {
     customer_email?: string;
     email?: string;
     shipping_address?: ShipAddr;
+    group_code?: string;
   };
 };
 
@@ -32,7 +33,6 @@ type IncomingAddressGroup = {
 
 function normAddr(a?: ShipAddr | ReturnType<typeof normAddr> | null) {
   if (!a) return null;
-
   if ('name' in (a as any) && 'line1' in (a as any) && 'city' in (a as any)) {
     const na = a as any;
     const name   = String(na.name ?? '').trim();
@@ -45,7 +45,6 @@ function normAddr(a?: ShipAddr | ReturnType<typeof normAddr> | null) {
     if (!name && !line1 && !line2 && !city && !region && !postal && !country) return null;
     return { name, line1, line2, city, region, postal, country };
   }
-
   const sh = a as ShipAddr;
   const name   = (sh.name ?? sh.contact ?? sh.full_name ?? sh.first_last ?? sh.attn ?? '').trim();
   const line1  = (sh.line1 ?? sh.address1 ?? sh.addr1 ?? sh.street ?? '').trim();
@@ -54,9 +53,7 @@ function normAddr(a?: ShipAddr | ReturnType<typeof normAddr> | null) {
   const region = (sh.region ?? sh.state ?? sh.province ?? '').trim();
   const postal = String(sh.postal ?? sh.zip ?? sh.postal_code ?? sh.postcode ?? '').trim();
   const country= (sh.country ?? 'US').trim();
-
   if (!name && !line1 && !line2 && !city && !region && !postal && !country) return null;
-
   return { name, line1, line2, city, region, postal, country };
 }
 
@@ -83,27 +80,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     addressGroups?: IncomingAddressGroup[];
     customer_email?: string;
     email?: string;
-    subs?: string[]; // legacy
+    subs?: string[];
   };
 
-  // ---- normalize submissions ----
+  // normalize subs
   let submissions: string[] | undefined = body.submissions;
   if (!Array.isArray(submissions) || submissions.length === 0) {
-    if (Array.isArray(body.subs) && body.subs.length > 0) {
-      submissions = body.subs;
-    }
+    if (Array.isArray(body.subs) && body.subs.length > 0) submissions = body.subs;
   }
   if (!Array.isArray(submissions) || submissions.length === 0) {
     return res.status(400).json({ ok: false, error: 'Missing submissions/subs[]' });
   }
 
-  // ---- normalize email ----
+  // normalize email
   let customerEmail: string | undefined =
     (typeof body.customer_email === 'string' && body.customer_email.trim()) ||
     (typeof body.email === 'string' && body.email.trim()) ||
     undefined;
 
-  // base URL + auth headers for internal calls
+  // Build base URL + pass admin auth headers
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
   const host  = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string);
   const base  = `${proto}://${host}`;
@@ -112,9 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth   = req.headers.authorization as string | undefined;
   const xAdmin = req.headers['x-admin-token'] as string | undefined;
 
-  const baseHeaders: Record<string,string> = {
-    accept: 'application/json',
-  };
+  const baseHeaders: Record<string,string> = { accept: 'application/json' };
   if (cookie) baseHeaders.cookie = cookie;
   if (auth) baseHeaders.authorization = auth;
   if (xAdmin) baseHeaders['x-admin-token'] = xAdmin;
@@ -122,11 +115,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const debug: any = {
     submissions,
     addressGroupsReceived: Array.isArray(body.addressGroups) ? body.addressGroups.length : 0,
-    groupDebug: [] as any[],
+    groupDebug: [],
   };
 
   try {
-    // derive email from first submission if needed
+    // resolve email from first submission
     if (!customerEmail) {
       const firstId = submissions[0];
       const sr = await fetch(
@@ -134,28 +127,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         { headers: baseHeaders }
       );
       if (sr.ok) {
-        const sj = (await sr.json()) as SubmissionResp;
-        const fromSub =
-          sj?.item?.customer_email ||
-          sj?.item?.email ||
-          undefined;
+        const sj = await sr.json() as SubmissionResp;
+        const fromSub = sj?.item?.customer_email || sj?.item?.email;
         if (fromSub) customerEmail = fromSub;
       }
       if (!customerEmail) {
-        return res.status(400).json({ ok: false, error: 'Missing customer email', debug });
+        return res.status(400).json({ ok:false, error:'Missing customer email', debug });
       }
     }
 
-    // ---- build groups ----
+    // ⭐ NEW: fetch original group_code
+    let originalGroupCode = 'MULTI';
+    try {
+      const gr = await fetch(
+        `${base}/api/admin/submission?id=${encodeURIComponent(submissions[0])}&full=1`,
+        { headers: baseHeaders }
+      );
+      if (gr.ok) {
+        const gj = await gr.json();
+        if (gj?.item?.group_code) {
+          originalGroupCode = gj.item.group_code;
+        }
+      }
+    } catch (e) {
+      console.error('[split] failed to fetch group_code', e);
+    }
+
+    // Build address groups
     let groups: { addr: ReturnType<typeof normAddr> | null; subs: string[] }[] = [];
 
     if (Array.isArray(body.addressGroups) && body.addressGroups.length > 0) {
       groups = body.addressGroups
-        .map((g) => ({
+        .map(g => ({
           addr: normAddr(g.addr ?? null),
           subs: Array.isArray(g.subs) ? g.subs.filter(Boolean) : [],
         }))
-        .filter((g) => g.subs.length > 0);
+        .filter(g => g.subs.length > 0);
     } else {
       const map = new Map<string, { addr: ReturnType<typeof normAddr>; subs: string[] }>();
       for (const id of submissions) {
@@ -164,43 +171,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           { headers: baseHeaders }
         );
         if (!r.ok) continue;
-        const j = (await r.json()) as SubmissionResp;
+        const j = await r.json() as SubmissionResp;
         const addr = normAddr(j?.item?.shipping_address ?? null);
         const key  = addrKey(addr);
-        if (!map.has(key)) {
-          map.set(key, { addr, subs: [] });
-        }
+        if (!map.has(key)) map.set(key, { addr, subs: [] });
         map.get(key)!.subs.push(id);
       }
       groups = [...map.values()];
     }
 
-    if (groups.length === 0) {
-      groups = [{ addr: null, subs: submissions }];
-    }
-
+    if (!groups.length) groups = [{ addr: null, subs: submissions }];
     debug.groupCount = groups.length;
 
     const created: { invoice_id: string; subs: string[] }[] = [];
 
+    // Loop each group = 1 new invoice
     for (const g of groups) {
       const subsForGroup = g.subs.length ? g.subs : submissions;
 
       const groupInfo: any = {
         subs: subsForGroup,
-        cardsPreviewStatus: null as null | number,
-        cardsPreviewRows: null as null | number,
-        saveStatus: null as null | number,
-        saveBodyItems: null as null | number,
-        saveError: null as null | string,
+        cardsPreviewStatus: null,
+        cardsPreviewRows: null,
+        saveStatus: null,
+        saveBodyItems: null,
+        saveError: null,
       };
 
-      // ---- cards-preview for this group ----
+      // fetch cards
       const qs = new URLSearchParams({ subs: subsForGroup.join(',') }).toString();
       const cr = await fetch(`${base}/api/admin/billing/cards-preview?${qs}`, {
-        headers: baseHeaders,
+        headers: baseHeaders
       });
-
       groupInfo.cardsPreviewStatus = cr.status;
 
       if (!cr.ok) {
@@ -208,71 +210,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         continue;
       }
 
-      const cj = await cr.json().catch(() => ({} as { rows?: CardsPreviewRow[] }));
-      const rows = Array.isArray((cj as any)?.rows) ? ((cj as any).rows as CardsPreviewRow[]) : [];
-
+      const cj = await cr.json().catch(() => ({}));
+      const rows = Array.isArray(cj?.rows) ? cj.rows as CardsPreviewRow[] : [];
       groupInfo.cardsPreviewRows = rows.length;
 
       const items = rows
-        .map((r) => {
+        .map(r => {
           const id = String((r.card_id ?? r.id) || '');
           return id ? { card_id: id, upcharge_cents: 0 } : null;
         })
         .filter(Boolean) as { card_id: string; upcharge_cents: number }[];
 
       groupInfo.saveBodyItems = items.length;
-
       if (items.length === 0) {
         debug.groupDebug.push(groupInfo);
         continue;
       }
 
-// Build body to force NEW invoice for this group
-const saveBody: any = {
-  customer_email: customerEmail,
-  items,
-  invoice_id: null,   // VERY IMPORTANT: treat as a new invoice, not update
-  force_new: true     // VERY IMPORTANT: override reuse logic
-};
+      // ⭐ FORCE NEW INVOICE + GROUP CODE OVERRIDE
+      const syntheticCode = `${originalGroupCode}-${created.length + 1}`;
+      const saveBody: any = {
+        customer_email: customerEmail,
+        items,
+        invoice_id: null,
+        force_new: true,
+        group_code_override: syntheticCode
+      };
+      if (g.addr) saveBody.ship_to = g.addr;
 
-if (g.addr) saveBody.ship_to = g.addr;
+      const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
+        method: 'POST',
+        headers: { ...baseHeaders, 'content-type': 'application/json' },
+        body: JSON.stringify(saveBody),
+      });
 
-const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
-  method: 'POST',
-  headers: {
-    ...baseHeaders,
-    'content-type': 'application/json'
-  },
-  body: JSON.stringify(saveBody)
-});
+      groupInfo.saveStatus = sr.status;
 
-groupInfo.saveStatus = sr.status;
+      if (!sr.ok) {
+        const t = await sr.text().catch(() => '');
+        groupInfo.saveError = t.slice(0, 400);
+        debug.groupDebug.push(groupInfo);
+        continue;
+      }
 
-if (!sr.ok) {
-  const txt = await sr.text().catch(() => '');
-  groupInfo.saveError = txt.slice(0, 400);
-  debug.groupDebug.push(groupInfo);
-  continue;
+      const sj = await sr.json().catch(() => ({}));
+      if (sj?.invoice_id) {
+        created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
+      } else {
+        groupInfo.saveError = 'No invoice_id in response';
+      }
+
+      debug.groupDebug.push(groupInfo);
+    }
+
+    return res.status(200).json({ ok:true, created, debug });
+
+  } catch (err: any) {
+    console.error('[split-by-address] error', err);
+    return res.status(500).json({ ok:false, error:'Server error', detail: err?.message });
+  }
 }
-
-const sj = await sr.json().catch(() => ({} as { invoice_id?: string }));
-if (sj?.invoice_id) {
-  created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
-} else {
-  groupInfo.saveError = 'No invoice_id in response';
-  debug.groupDebug.push(groupInfo);
-}
-
-// record group debug after finishing this group
-debug.groupDebug.push(groupInfo);
-
-} // ← CLOSE for (const g of groups)
-
-return res.status(200).json({ ok: true, created, debug });
-
-} catch (err: any) {   // ← CLOSE try
-  console.error('[split-by-address] error', err);
-  return res.status(500).json({ ok: false, error: 'Server error', detail: err?.message ?? String(err) });
-}
-
-} 
