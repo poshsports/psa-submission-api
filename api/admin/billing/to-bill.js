@@ -134,7 +134,7 @@ export default async function handler(req, res) {
   // ===========================================================
   const { data: submissions, error: subErr } = await supabase
     .from("admin_submissions_v")
-    .select("submission_id, customer_email, group_code, cards, last_updated_at, status")
+    .select("submission_id, customer_email, group_code, cards, created_at, last_updated_at, status")
     .eq("status", "received_from_psa"); // ORIGINAL LOGIC
 
   if (subErr) {
@@ -170,7 +170,7 @@ export default async function handler(req, res) {
     if (s.group_code) b.groups.add(s.group_code);
     b.cards += Number(s.cards) || 0;
 
-    const t = ts(s.last_updated_at);
+    const t = ts(s.last_updated_at || s.created_at);
     if (t != null) {
       if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
       if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
