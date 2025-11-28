@@ -42,15 +42,18 @@ export default async function handler(req, res) {
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  // Read tab, default to "to-send" (we may use this later for filters)
+  // we only actually have the "to-send" tab here, but keep this for future use
   const tab = (req.query.tab || "to-send").toString();
 
-  // =====================================================
-  // 1) INVOICE-BASED MODE (pending billing_invoices)
-  // =====================================================
-  let invoices = [];
+  // -------------------------------------------------------
+  // 1) PENDING INVOICES: one bundle per invoice
+  // -------------------------------------------------------
+  let invoiceBundles = [];
+  let invoiceAttachedSubIds = new Set();
+
   try {
-    const { data, error } = await supabase
+    // pending = unsent invoices that should appear on the "To send" tab
+    const { data: invoices, error: invErr } = await supabase
       .from("billing_invoices")
       .select(`
         id,
@@ -64,91 +67,170 @@ export default async function handler(req, res) {
       .eq("status", "pending")
       .order("created_at", { ascending: false });
 
-    if (!error && Array.isArray(data)) {
-      invoices = data;
-    } else if (error) {
-      console.warn("[to-bill] invoice read failed, falling back to submissions:", error);
-      invoices = [];
+    if (invErr) {
+      console.warn("[to-bill] invoice read failed, will fall back to submissions only:", invErr);
+    }
+
+    if (Array.isArray(invoices) && invoices.length > 0) {
+      const invoiceIds = invoices.map((i) => i.id);
+
+      const { data: links, error: linkErr } = await supabase
+        .from("billing_invoice_submissions")
+        .select("invoice_id, submission_code")
+        .in("invoice_id", invoiceIds);
+
+      if (linkErr) {
+        console.error("[to-bill] linkErr (invoice mode):", linkErr);
+      } else if (Array.isArray(links) && links.length > 0) {
+        const subCodes = links.map((l) => l.submission_code);
+
+        const { data: subs, error: subsErr } = await supabase
+          .from("admin_submissions_v")
+          .select(
+            "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
+          )
+          .in("submission_id", subCodes);
+
+        if (subsErr) {
+          console.error("[to-bill] subsErr (invoice mode):", subsErr);
+        } else {
+          const byId = new Map();
+          for (const s of subs || []) {
+            byId.set(s.submission_id, s);
+          }
+
+          // mark which submissions are already attached to an invoice
+          invoiceAttachedSubIds = new Set(subCodes.filter(Boolean));
+
+          const map = new Map();
+          for (const inv of invoices) {
+            map.set(inv.id, {
+              invoice_id: inv.id,
+              customer_email: inv.customer_email,
+              submissions: [],
+              submission_ids: [],
+              groupsSet: new Set(),
+              cards: 0,
+              returned_newest: null,
+              returned_oldest: null,
+              estimated_cents: inv.total_cents ?? inv.subtotal_cents ?? null,
+              is_split: inv.metadata?.is_split === true,
+            });
+          }
+
+          for (const l of links) {
+            const bundle = map.get(l.invoice_id);
+            const s = byId.get(l.submission_code);
+            if (!bundle || !s) continue;
+
+            bundle.submission_ids.push(s.submission_id);
+            bundle.submissions.push({
+              submission_id: s.submission_id,
+              group_code: s.group_code,
+              cards: s.cards,
+              created_at: s.created_at,
+              last_updated_at: s.last_updated_at,
+              status: s.status,
+            });
+
+            bundle.cards += Number(s.cards) || 0;
+            if (s.group_code) bundle.groupsSet.add(s.group_code);
+
+            const dt = pickReceivedAt(s);
+            if (dt) {
+              if (isNewer(dt, bundle.returned_newest)) bundle.returned_newest = dt;
+              if (isOlder(dt, bundle.returned_oldest)) bundle.returned_oldest = dt;
+            }
+          }
+
+          invoiceBundles = [...map.values()].map((b) => ({
+            invoice_id: b.invoice_id,
+            customer_email: b.customer_email,
+            submissions: b.submissions,
+            submission_ids: b.submission_ids,
+            groups: Array.from(b.groupsSet),
+            group_codes: Array.from(b.groupsSet),
+            cards: b.cards,
+            returned_newest: b.returned_newest,
+            returned_oldest: b.returned_oldest,
+            estimated_cents: b.estimated_cents,
+            is_split: b.is_split,
+          }));
+        }
+      }
     }
   } catch (err) {
-    console.warn("[to-bill] unexpected invoice read error, falling back:", err);
-    invoices = [];
+    console.warn("[to-bill] unexpected invoice mode error:", err);
   }
 
-  // If we *successfully* loaded some pending invoices, return invoice bundles.
-  if (invoices.length > 0) {
-    const invoiceIds = invoices.map((i) => i.id);
+  // -------------------------------------------------------
+  // 2) RAW SUBMISSIONS NOT ATTACHED TO ANY PENDING INVOICE
+  //    → group by customer_email (original behavior)
+  // -------------------------------------------------------
+  let emailBundles = [];
 
-    const { data: links, error: linkErr } = await supabase
-      .from("billing_invoice_submissions")
-      .select("invoice_id, submission_code")
-      .in("invoice_id", invoiceIds);
-
-    if (linkErr) {
-      console.error("[to-bill] linkErr (invoice mode):", linkErr);
-      // safer to show empty than 500
-      return res.status(200).json({ items: [] });
-    }
-
-    // Fetch submission info for those invoice-linked subs
-    const codes = links.map((l) => l.submission_code);
-    const { data: subs, error: subsErr } = await supabase
+  try {
+    const { data: submissions, error: subErr } = await supabase
       .from("admin_submissions_v")
-      .select("submission_id, group_code, cards, created_at, last_updated_at")
-      .in("submission_id", codes);
+      .select(
+        "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
+      )
+      .eq("status", "received_from_psa");
 
-    if (subsErr) {
-      console.error("[to-bill] subsErr (invoice mode):", subsErr);
-      return res.status(200).json({ items: [] });
+    if (subErr) {
+      console.error("[to-bill] subsErr (combined mode):", subErr);
+      return res.status(500).json({ error: "Failed to read submissions" });
     }
 
-    const byId = new Map();
-    for (const s of subs || []) {
-      byId.set(s.submission_id, s);
+    if (!submissions || submissions.length === 0) {
+      // no submissions at all; just return any invoice bundles we might have
+      return res.status(200).json({ items: invoiceBundles });
     }
 
-    // Build bundles keyed by invoice
-    const map = new Map();
-    for (const inv of invoices) {
-      map.set(inv.id, {
-        invoice_id: inv.id,
-        customer_email: inv.customer_email,
-        submissions: [],
-        submission_ids: [],
-        groupsSet: new Set(),
-        cards: 0,
-        returned_newest: null,
-        returned_oldest: null,
-        // estimate used by UI for "Est. Total"
-        estimated_cents: inv.total_cents ?? inv.subtotal_cents ?? null,
-        is_split: inv.metadata?.is_split === true,
-      });
-    }
+    const grouped = new Map();
 
-    for (const l of links) {
-      const bundle = map.get(l.invoice_id);
-      const s = byId.get(l.submission_code);
-      if (!bundle || !s) continue;
+    for (const s of submissions) {
+      // If this submission is already on a pending invoice,
+      // we do NOT include it in the email-grouped bundles.
+      if (invoiceAttachedSubIds.has(s.submission_id)) continue;
 
-      bundle.submission_ids.push(s.submission_id);
-      bundle.submissions.push({
+      const email = s.customer_email || "";
+      if (!grouped.has(email)) {
+        grouped.set(email, {
+          customer_email: email,
+          submissions: [],
+          submission_ids: [],
+          groupsSet: new Set(),
+          cards: 0,
+          returned_newest: null,
+          returned_oldest: null,
+          is_split: false, // these are un-split email bundles
+        });
+      }
+
+      const b = grouped.get(email);
+
+      b.submission_ids.push(s.submission_id);
+      b.submissions.push({
         submission_id: s.submission_id,
         group_code: s.group_code,
         cards: s.cards,
+        created_at: s.created_at,
+        last_updated_at: s.last_updated_at,
+        status: s.status,
       });
 
-      bundle.cards += Number(s.cards) || 0;
-      if (s.group_code) bundle.groupsSet.add(s.group_code);
+      if (s.group_code) b.groupsSet.add(s.group_code);
+      b.cards += Number(s.cards) || 0;
 
       const dt = pickReceivedAt(s);
       if (dt) {
-        if (isNewer(dt, bundle.returned_newest)) bundle.returned_newest = dt;
-        if (isOlder(dt, bundle.returned_oldest)) bundle.returned_oldest = dt;
+        if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
+        if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
       }
     }
 
-    const items = [...map.values()].map((b) => ({
-      invoice_id: b.invoice_id,
+    emailBundles = [...grouped.values()].map((b) => ({
       customer_email: b.customer_email,
       submissions: b.submissions,
       submission_ids: b.submission_ids,
@@ -157,82 +239,20 @@ export default async function handler(req, res) {
       cards: b.cards,
       returned_newest: b.returned_newest,
       returned_oldest: b.returned_oldest,
-      estimated_cents: b.estimated_cents,
       is_split: b.is_split,
     }));
-
-    return res.status(200).json({ items });
+  } catch (err) {
+    console.error("[to-bill] unexpected combined-mode error:", err);
+    // worst case: at least return invoice bundles so the page isn’t blank
+    return res.status(200).json({ items: invoiceBundles });
   }
 
-  // ===========================================================
-  // 2) NO PENDING INVOICES OR INVOICE READ FAILED:
-  //    COMBINED MODE: admin_submissions_v (received_from_psa)
-  // ===========================================================
-  const { data: submissions, error: subErr } = await supabase
-    .from("admin_submissions_v")
-    .select("submission_id, customer_email, group_code, cards, created_at, last_updated_at, status")
-    .eq("status", "received_from_psa");
-
-  if (subErr) {
-    console.error("[to-bill] subsErr:", subErr);
-    return res.status(500).json({ error: "Failed to read submissions" });
-  }
-
-  if (!submissions || submissions.length === 0) {
-    return res.status(200).json({ items: [] });
-  }
-
-  // Group by customer_email (original behavior)
-  const grouped = new Map();
-
-  for (const s of submissions) {
-    const email = s.customer_email || '';
-    if (!grouped.has(email)) {
-      grouped.set(email, {
-        customer_email: email,
-        submissions: [],
-        submission_ids: [],
-        groupsSet: new Set(),
-        cards: 0,
-        returned_newest: null,
-        returned_oldest: null,
-        is_split: false, // combined mode
-      });
-    }
-
-    const b = grouped.get(email);
-
-    b.submission_ids.push(s.submission_id);
-    b.submissions.push({
-      submission_id: s.submission_id,
-      group_code: s.group_code,
-      cards: s.cards,
-      created_at: s.created_at,
-      last_updated_at: s.last_updated_at,
-      status: s.status,
-    });
-
-    if (s.group_code) b.groupsSet.add(s.group_code);
-    b.cards += Number(s.cards) || 0;
-
-    const dt = pickReceivedAt(s);
-    if (dt) {
-      if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
-      if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
-    }
-  }
-
-  const items = [...grouped.values()].map((b) => ({
-    customer_email: b.customer_email,
-    submissions: b.submissions,
-    submission_ids: b.submission_ids,
-    groups: Array.from(b.groupsSet),
-    group_codes: Array.from(b.groupsSet),
-    cards: b.cards,
-    returned_newest: b.returned_newest,
-    returned_oldest: b.returned_oldest,
-    is_split: b.is_split,
-  }));
+  // -------------------------------------------------------
+  // 3) FINAL RESULT
+  //    - one row per pending invoice (already split)
+  //    - plus one row per customer_email for the rest
+  // -------------------------------------------------------
+  const items = [...invoiceBundles, ...emailBundles];
 
   return res.status(200).json({ items });
 }
