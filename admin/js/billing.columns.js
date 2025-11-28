@@ -80,17 +80,28 @@ export const COLUMNS = [
   },
 
   // Groups: 1 -> chip; many -> count pill with hover listing
-  {
-    key: 'groups',
-    label: 'Groups',
-    sortable: false,
-    format: (_val, r) => {
-      const gs = Array.isArray(r.groups) ? r.groups.filter(Boolean) : [];
-      if (gs.length === 1) return chip(gs[0]);
-      if (gs.length > 1) return countPill(gs.length, gs.join(', '));
-      return '—';
-    },
+{
+  key: 'groups',
+  label: 'Groups',
+  sortable: false,
+  format: (_val, r) => {
+    const gs = Array.isArray(r.groups) ? r.groups.filter(Boolean) : [];
+
+    // base group display (same logic as before)
+    let base =
+      gs.length === 1 ? chip(gs[0]) :
+      gs.length > 1   ? countPill(gs.length, gs.join(', ')) :
+      '—';
+
+    // ⭐ NEW: append "Split" badge if flagged
+    if (r.is_split) {
+      base += ` <span class="badge-split">Split</span>`;
+    }
+
+    return base;
   },
+},
+
 
   // Cards: total across submissions
   {
