@@ -103,7 +103,11 @@ function openBuilder(bundle) {
 
   const subs = (bundle.submissions || []).map(s => s.submission_id).filter(Boolean);
   const email = (bundle.customer_email || '').trim();
-  const groups = (bundle.groups || bundle.group_codes || []).filter(Boolean);
+  const rawGroups = bundle.groups || bundle.group_codes || [];
+const groups = Array.isArray(rawGroups)
+  ? rawGroups.filter(Boolean)
+  : [rawGroups].filter(Boolean);
+
 
   const qp = new URLSearchParams();
   if (subs.length) qp.set('subs', subs.join(','));
