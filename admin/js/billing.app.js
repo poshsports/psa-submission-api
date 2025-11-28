@@ -444,27 +444,51 @@ function installGlobalDelegates() {
       e.target.closest('[data-action="draft"]') ||
       e.target.closest('.js-open-draft'); // legacy
 
-    if (draftBtn) {
-      // legacy button may carry a data-bundle with JSON
-      const bundleJson = draftBtn.getAttribute('data-bundle');
-      const explicitEmail = (draftBtn.getAttribute('data-email') || '').trim();
+if (draftBtn) {
+  const tr = draftBtn.closest('tr[data-id]');
+  if (!tr) return;
 
-      if (bundleJson) {
-        try {
-          const bundle = JSON.parse(bundleJson);
-          openBuilder(bundle);
-          return;
-        } catch {}
+  const rowId = String(tr.dataset.id || '');
+
+  // -------- INVOICE-BASED ROW --------
+  if (rowId.startsWith('inv:')) {
+    const invoiceId = rowId.slice(4);
+    draftBtn.disabled = true;
+    try {
+      const resp = await fetch('/api/admin/billing/create-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ invoice_ids: [invoiceId] })
+      });
+
+      const j = await resp.json().catch(() => null);
+
+      if (resp.ok && j?.created?.length) {
+        const url = j.created[0].invoice_url;
+        if (url) window.open(url, '_blank');
+      } else {
+        alert('Failed to create draft: ' + (j?.error || 'Unknown error'));
       }
-
-      const tr = draftBtn.closest('tr[data-id]');
-      const email = explicitEmail || extractEmailFromRow(tr);
-      if (!email) return;
-      draftBtn.disabled = true;
-      try { const item = await fetchDraftBundleByEmail(email); if (item) openBuilder(item); }
-      finally { draftBtn.disabled = false; }
-      return;
+    } finally {
+      draftBtn.disabled = false;
     }
+    return;
+  }
+
+  // -------- LEGACY CUSTOMER-BUNDLE ROW (to-send tab) --------
+  const email = extractEmailFromRow(tr);
+  if (!email) return;
+  draftBtn.disabled = true;
+  try {
+    const item = await fetchDraftBundleByEmail(email);
+    if (item) openBuilder(item);
+  } finally {
+    draftBtn.disabled = false;
+  }
+  return;
+}
+
 
 // Row click (ignore controls)
 const tr = e.target.closest('tr[data-id]');
