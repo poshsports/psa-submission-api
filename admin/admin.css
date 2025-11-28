@@ -492,3 +492,12 @@ tr.drop-below { box-shadow: 0  2px 0 0 var(--primary, #2563eb) inset; }
 #confirmCloseModal { display: none; }
 #confirmCloseModal.open { display: flex; }
 
+.badge-split {
+  background: #c400ff;
+  color: white;
+  padding: 2px 6px;
+  margin-left: 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
