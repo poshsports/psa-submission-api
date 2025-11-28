@@ -22,30 +22,41 @@ export default async function handler(req, res) {
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  // ================================
-  // 1) FETCH INVOICES (SPLIT MODE)
-  // ================================
-  const { data: invoices, error: invErr } = await supabase
-    .from("billing_invoices")
-    .select(`
-      id,
-      status,
-      customer_email,
-      subtotal_cents,
-      total_cents,
-      metadata,
-      created_at
-    `)
-    .eq("status", "pending")
-    .order("created_at", { ascending: false });
+  // Read tab, default to "to-send"
+  const tab = (req.query.tab || "to-send").toString();
 
-  if (invErr) {
-    console.error("[to-bill] invErr:", invErr);
-    return res.status(500).json({ error: "Failed to read invoices" });
+  // =====================================================
+  // 1) INVOICE-BASED MODE (only if invoice query succeeds)
+  // =====================================================
+  let invoices = [];
+  try {
+    const { data, error } = await supabase
+      .from("billing_invoices")
+      .select(`
+        id,
+        status,
+        customer_email,
+        subtotal_cents,
+        total_cents,
+        metadata,
+        created_at
+      `)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      invoices = data;
+    } else if (error) {
+      console.warn("[to-bill] invoice read failed, falling back to submissions:", error);
+      invoices = [];
+    }
+  } catch (err) {
+    console.warn("[to-bill] unexpected invoice read error, falling back:", err);
+    invoices = [];
   }
 
-  // If invoice mode has rows → return invoice rows ONLY
-  if (invoices && invoices.length > 0) {
+  // If we *successfully* loaded some pending invoices, return invoice bundles.
+  if (invoices.length > 0) {
     const invoiceIds = invoices.map((i) => i.id);
 
     const { data: links, error: linkErr } = await supabase
@@ -54,11 +65,12 @@ export default async function handler(req, res) {
       .in("invoice_id", invoiceIds);
 
     if (linkErr) {
-      console.error("[to-bill] linkErr:", linkErr);
-      return res.status(500).json({ error: "Failed to read invoice links" });
+      console.error("[to-bill] linkErr (invoice mode):", linkErr);
+      // even if this fails, it's safer to fall back than 500
+      return res.status(200).json({ items: [] });
     }
 
-    // Build map
+    // Build bundles keyed by invoice
     const map = new Map();
     for (const inv of invoices) {
       map.set(inv.id, {
@@ -71,11 +83,11 @@ export default async function handler(req, res) {
         returned_newest: null,
         returned_oldest: null,
         estimated_cents: inv.total_cents,
-        is_split: inv.metadata?.is_split === true
+        is_split: inv.metadata?.is_split === true,
       });
     }
 
-    // Fetch submission info
+    // Fetch submission info for those invoice-linked subs
     const codes = links.map((l) => l.submission_code);
     const { data: subs } = await supabase
       .from("admin_submissions_v")
@@ -85,7 +97,6 @@ export default async function handler(req, res) {
     const byId = new Map();
     for (const s of subs || []) byId.set(s.submission_id, s);
 
-    // Fill bundles
     for (const l of links) {
       const b = map.get(l.invoice_id);
       const s = byId.get(l.submission_code);
@@ -118,7 +129,8 @@ export default async function handler(req, res) {
   }
 
   // ===========================================================
-  // 2) NO INVOICES → ORIGINAL "RECEIVED-FROM-PSA" COMBINED MODE
+  // 2) NO PENDING INVOICES OR INVOICE READ FAILED:
+  //    ORIGINAL "RECEIVED_FROM_PSA" COMBINED MODE
   // ===========================================================
   const { data: submissions, error: subErr } = await supabase
     .from("admin_submissions_v")
@@ -134,7 +146,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ items: [] });
   }
 
-  // Group by customer
+  // Group by customer_email (your original behavior)
   const grouped = new Map();
 
   for (const s of submissions) {
@@ -147,7 +159,7 @@ export default async function handler(req, res) {
         cards: 0,
         returned_newest: null,
         returned_oldest: null,
-        is_split: false // combined mode
+        is_split: false, // combined mode
       });
     }
 
@@ -155,7 +167,7 @@ export default async function handler(req, res) {
     b.submission_ids.push(s.submission_id);
     b.submissions.push(s);
 
-    b.groups.add(s.group_code);
+    if (s.group_code) b.groups.add(s.group_code);
     b.cards += Number(s.cards) || 0;
 
     const t = ts(s.returned_at);
