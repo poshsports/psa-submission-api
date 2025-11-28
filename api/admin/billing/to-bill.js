@@ -170,7 +170,12 @@ export default async function handler(req, res) {
     if (s.group_code) b.groups.add(s.group_code);
     b.cards += Number(s.cards) || 0;
 
-    const t = ts(s.last_updated_at || s.created_at);
+    // Normalized timestamp of when the sub was received from PSA
+const t = ts(
+  s.returned_at ||          // future-proof: if we add returned_at later
+  s.last_updated_at ||      // your current source of truth
+  s.created_at              // final fallback
+);
     if (t != null) {
       if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
       if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
