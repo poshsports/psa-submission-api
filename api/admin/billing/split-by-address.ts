@@ -262,6 +262,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       debug.groupDebug.push(groupInfo);
     }
+// ⭐ After creating split invoices, mark the original invoice as superseded
+try {
+  // Find the original invoice by querying invoice_submissions
+  const firstSub = submissions[0];
+
+  const origResp = await fetch(`${base}/api/admin/billing/find-invoice-by-sub`, {
+    method: "POST",
+    headers: { ...baseHeaders, "content-type": "application/json" },
+    body: JSON.stringify({ submission_id: firstSub }),
+  });
+
+  const origJson = await origResp.json().catch(() => null);
+  const originalInvoiceId = origJson?.invoice_id;
+
+  if (originalInvoiceId) {
+    // Update the original invoice to superseded so it leaves "To send"
+    await fetch(`${base}/api/admin/billing/update-invoice-status`, {
+      method: "POST",
+      headers: { ...baseHeaders, "content-type": "application/json" },
+      body: JSON.stringify({
+        invoice_id: originalInvoiceId,
+        status: "superseded",
+      }),
+    });
+    debug.originalInvoiceUpdated = originalInvoiceId;
+  } else {
+    debug.originalInvoiceNotFound = true;
+  }
+} catch (e) {
+  console.error("[split] failed to update original invoice", e);
+  debug.originalInvoiceErr = String(e);
+}
 
     return res.status(200).json({ ok:true, created, debug });
 
