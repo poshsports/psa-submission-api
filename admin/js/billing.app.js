@@ -344,7 +344,10 @@ function normalizeBundle(b) {
     // Prefer server-provided estimate; else fall back to client estimate
     est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
     est_total:       (b.estimated_cents ?? clientEstimate ?? null),
-
+    // ⭐ NEW — detect split
+    is_split: (b.group_codes || groups).some(g =>
+      String(g || '').toLowerCase().includes('split')
+    ),
   };
 
 }
