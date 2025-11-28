@@ -315,14 +315,16 @@ function normalizeBundle(b) {
   const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
   const cards = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
 
+  // FIXED: use actual existing fields from admin_submissions_v
+  // We use last_updated_at → created_at (same fallback as API)
   const returnedNewest = subs.reduce((acc, s) => {
-    const t = Date.parse(s.returned_at || s.returned || '');
+    const t = Date.parse(s.last_updated_at || s.created_at || '');
     if (Number.isNaN(t)) return acc;
     return (acc == null || t > acc) ? t : acc;
   }, null);
 
   const returnedOldest = subs.reduce((acc, s) => {
-    const t = Date.parse(s.returned_at || s.returned || '');
+    const t = Date.parse(s.last_updated_at || s.created_at || '');
     if (Number.isNaN(t)) return acc;
     return (acc == null || t < acc) ? t : acc;
   }, null);
@@ -341,16 +343,16 @@ function normalizeBundle(b) {
     cards,
     returned_newest: toIso(returnedNewest),
     returned_oldest: toIso(returnedOldest),
-    // Prefer server-provided estimate; else fall back to client estimate
     est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
     est_total:       (b.estimated_cents ?? clientEstimate ?? null),
-    // ⭐ NEW — detect split
+
+    // Split detection stays the same
     is_split: (b.group_codes || groups).some(g =>
       String(g || '').toLowerCase().includes('split')
     ),
   };
-
 }
+
 
 // New: normalize invoice records from invoices-list into the same table shape
 function normalizeInvoiceRow(rec) {
