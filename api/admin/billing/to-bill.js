@@ -7,11 +7,31 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const ts = (v) => {
-  if (!v) return null;
-  const n = Date.parse(v);
-  return Number.isNaN(n) ? null : n;
-};
+// Pick the best "received from PSA" timestamp as a string
+function pickReceivedAt(row) {
+  // your real schema: last_updated_at is the best proxy
+  return row.last_updated_at || row.created_at || null;
+}
+
+// Compare two date strings safely using Date.parse
+function isNewer(a, b) {
+  if (!a) return false;
+  if (!b) return true;
+  const na = Date.parse(a);
+  const nb = Date.parse(b);
+  if (Number.isNaN(na)) return false;
+  if (Number.isNaN(nb)) return true;
+  return na > nb;
+}
+function isOlder(a, b) {
+  if (!a) return false;
+  if (!b) return true;
+  const na = Date.parse(a);
+  const nb = Date.parse(b);
+  if (Number.isNaN(na)) return false;
+  if (Number.isNaN(nb)) return true;
+  return na < nb;
+}
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -22,11 +42,11 @@ export default async function handler(req, res) {
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  // Read tab, default to "to-send"
+  // Read tab, default to "to-send" (we may use this later for filters)
   const tab = (req.query.tab || "to-send").toString();
 
   // =====================================================
-  // 1) INVOICE-BASED MODE (only if invoice query succeeds)
+  // 1) INVOICE-BASED MODE (pending billing_invoices)
   // =====================================================
   let invoices = [];
   try {
@@ -66,8 +86,25 @@ export default async function handler(req, res) {
 
     if (linkErr) {
       console.error("[to-bill] linkErr (invoice mode):", linkErr);
-      // even if this fails, it's safer to fall back than 500
+      // safer to show empty than 500
       return res.status(200).json({ items: [] });
+    }
+
+    // Fetch submission info for those invoice-linked subs
+    const codes = links.map((l) => l.submission_code);
+    const { data: subs, error: subsErr } = await supabase
+      .from("admin_submissions_v")
+      .select("submission_id, group_code, cards, created_at, last_updated_at")
+      .in("submission_id", codes);
+
+    if (subsErr) {
+      console.error("[to-bill] subsErr (invoice mode):", subsErr);
+      return res.status(200).json({ items: [] });
+    }
+
+    const byId = new Map();
+    for (const s of subs || []) {
+      byId.set(s.submission_id, s);
     }
 
     // Build bundles keyed by invoice
@@ -78,51 +115,50 @@ export default async function handler(req, res) {
         customer_email: inv.customer_email,
         submissions: [],
         submission_ids: [],
-        groups: new Set(),
+        groupsSet: new Set(),
         cards: 0,
         returned_newest: null,
         returned_oldest: null,
-        estimated_cents: inv.total_cents,
+        // estimate used by UI for "Est. Total"
+        estimated_cents: inv.total_cents ?? inv.subtotal_cents ?? null,
         is_split: inv.metadata?.is_split === true,
       });
     }
 
-    // Fetch submission info for those invoice-linked subs
-    const codes = links.map((l) => l.submission_code);
-    const { data: subs } = await supabase
-      .from("admin_submissions_v")
-      .select("submission_id, group_code, cards, created_at")
-      .in("submission_id", codes);
-
-    const byId = new Map();
-    for (const s of subs || []) byId.set(s.submission_id, s);
-
     for (const l of links) {
-      const b = map.get(l.invoice_id);
+      const bundle = map.get(l.invoice_id);
       const s = byId.get(l.submission_code);
-      if (!b || !s) continue;
+      if (!bundle || !s) continue;
 
-      b.submission_ids.push(s.submission_id);
-      b.submissions.push({
+      bundle.submission_ids.push(s.submission_id);
+      bundle.submissions.push({
         submission_id: s.submission_id,
         group_code: s.group_code,
         cards: s.cards,
       });
 
-      b.cards += Number(s.cards) || 0;
-      if (s.group_code) b.groups.add(s.group_code);
+      bundle.cards += Number(s.cards) || 0;
+      if (s.group_code) bundle.groupsSet.add(s.group_code);
 
-      const t = ts(s.created_at);
-      if (t != null) {
-        if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
-        if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
+      const dt = pickReceivedAt(s);
+      if (dt) {
+        if (isNewer(dt, bundle.returned_newest)) bundle.returned_newest = dt;
+        if (isOlder(dt, bundle.returned_oldest)) bundle.returned_oldest = dt;
       }
     }
 
     const items = [...map.values()].map((b) => ({
-      ...b,
-      group_codes: Array.from(b.groups),
-      groups: b.groups,
+      invoice_id: b.invoice_id,
+      customer_email: b.customer_email,
+      submissions: b.submissions,
+      submission_ids: b.submission_ids,
+      groups: Array.from(b.groupsSet),
+      group_codes: Array.from(b.groupsSet),
+      cards: b.cards,
+      returned_newest: b.returned_newest,
+      returned_oldest: b.returned_oldest,
+      estimated_cents: b.estimated_cents,
+      is_split: b.is_split,
     }));
 
     return res.status(200).json({ items });
@@ -130,12 +166,12 @@ export default async function handler(req, res) {
 
   // ===========================================================
   // 2) NO PENDING INVOICES OR INVOICE READ FAILED:
-  //    ORIGINAL "RECEIVED_FROM_PSA" COMBINED MODE
+  //    COMBINED MODE: admin_submissions_v (received_from_psa)
   // ===========================================================
   const { data: submissions, error: subErr } = await supabase
     .from("admin_submissions_v")
     .select("submission_id, customer_email, group_code, cards, created_at, last_updated_at, status")
-    .eq("status", "received_from_psa"); // ORIGINAL LOGIC
+    .eq("status", "received_from_psa");
 
   if (subErr) {
     console.error("[to-bill] subsErr:", subErr);
@@ -146,16 +182,17 @@ export default async function handler(req, res) {
     return res.status(200).json({ items: [] });
   }
 
-  // Group by customer_email (your original behavior)
+  // Group by customer_email (original behavior)
   const grouped = new Map();
 
   for (const s of submissions) {
-    if (!grouped.has(s.customer_email)) {
-      grouped.set(s.customer_email, {
-        customer_email: s.customer_email,
+    const email = s.customer_email || '';
+    if (!grouped.has(email)) {
+      grouped.set(email, {
+        customer_email: email,
         submissions: [],
         submission_ids: [],
-        groups: new Set(),
+        groupsSet: new Set(),
         cards: 0,
         returned_newest: null,
         returned_oldest: null,
@@ -163,29 +200,38 @@ export default async function handler(req, res) {
       });
     }
 
-    const b = grouped.get(s.customer_email);
-    b.submission_ids.push(s.submission_id);
-    b.submissions.push(s);
+    const b = grouped.get(email);
 
-    if (s.group_code) b.groups.add(s.group_code);
+    b.submission_ids.push(s.submission_id);
+    b.submissions.push({
+      submission_id: s.submission_id,
+      group_code: s.group_code,
+      cards: s.cards,
+      created_at: s.created_at,
+      last_updated_at: s.last_updated_at,
+      status: s.status,
+    });
+
+    if (s.group_code) b.groupsSet.add(s.group_code);
     b.cards += Number(s.cards) || 0;
 
-    // Normalized timestamp of when the sub was received from PSA
-const t = ts(
-  s.returned_at ||          // future-proof: if we add returned_at later
-  s.last_updated_at ||      // your current source of truth
-  s.created_at              // final fallback
-);
-    if (t != null) {
-      if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
-      if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
+    const dt = pickReceivedAt(s);
+    if (dt) {
+      if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
+      if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
     }
   }
 
   const items = [...grouped.values()].map((b) => ({
-    ...b,
-    group_codes: Array.from(b.groups),
-    groups: b.groups,
+    customer_email: b.customer_email,
+    submissions: b.submissions,
+    submission_ids: b.submission_ids,
+    groups: Array.from(b.groupsSet),
+    group_codes: Array.from(b.groupsSet),
+    cards: b.cards,
+    returned_newest: b.returned_newest,
+    returned_oldest: b.returned_oldest,
+    is_split: b.is_split,
   }));
 
   return res.status(200).json({ items });
