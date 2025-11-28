@@ -1,13 +1,12 @@
 // /api/admin/billing/to-bill.js
-import { createClient } from '@supabase/supabase-js';
-import { requireAdmin } from '../../_util/adminAuth.js';
+import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "../../_util/adminAuth.js";
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// Utility: coerce to timestamp (ms) or null
 const ts = (v) => {
   if (!v) return null;
   const n = Date.parse(v);
@@ -15,181 +14,162 @@ const ts = (v) => {
 };
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ error: 'Method Not Allowed' });
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method Not Allowed" });
   }
 
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  const limit = Math.min(Math.max(Number(req.query.limit) || 800, 1), 2000);
-  const q = String(req.query.q || '').trim().toLowerCase();
-  const groupFilter = String(req.query.group || '').trim().toLowerCase();
-
-  const from = req.query.from ? new Date(String(req.query.from)) : null;
-  const to   = req.query.to   ? new Date(String(req.query.to))   : null;
-  const fromMs = from && !isNaN(from) ? from.getTime() : null;
-  const toMs   = to   && !isNaN(to)   ? to.getTime()   : null;
-
-  // ---------------------------------------------------------------------------
-  // 1) Find submissions that are ready to bill (received_from_psa)
-  // ---------------------------------------------------------------------------
-  const { data: subs, error: subsErr } = await supabase
-    .from('admin_submissions_v')
-    .select('submission_id, customer_email, group_code, cards, created_at, returned_at, status')
-    .eq('status', 'received_from_psa')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (subsErr) {
-    console.error('[to-bill] subsErr:', subsErr);
-    return res.status(500).json({ error: 'Failed to read submissions' });
-  }
-
-  if (!subs || subs.length === 0) {
-    return res.status(200).json({ items: [] });
-  }
-
-  // ---------------------------------------------------------------------------
-  // 2) Exclude submissions already attached to an open invoice
-  // ---------------------------------------------------------------------------
-  const { data: openInvoices, error: invErr } = await supabase
-    .from('billing_invoices')
-    .select('id, status')
-    .in('status', ['pending', 'draft', 'sent']);
+  // ================================
+  // 1) FETCH INVOICES (SPLIT MODE)
+  // ================================
+  const { data: invoices, error: invErr } = await supabase
+    .from("billing_invoices")
+    .select(`
+      id,
+      status,
+      customer_email,
+      subtotal_cents,
+      total_cents,
+      metadata,
+      created_at
+    `)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
 
   if (invErr) {
-    console.error('[to-bill] invErr:', invErr);
-    return res.status(500).json({ error: 'Failed to read invoices' });
+    console.error("[to-bill] invErr:", invErr);
+    return res.status(500).json({ error: "Failed to read invoices" });
   }
 
-  let billedSet = new Set();
-  if (openInvoices && openInvoices.length) {
-    const ids = openInvoices.map((i) => i.id);
+  // If invoice mode has rows → return invoice rows ONLY
+  if (invoices && invoices.length > 0) {
+    const invoiceIds = invoices.map((i) => i.id);
+
     const { data: links, error: linkErr } = await supabase
-      .from('billing_invoice_submissions')
-      .select('submission_code, invoice_id')
-      .in('invoice_id', ids);
+      .from("billing_invoice_submissions")
+      .select("invoice_id, submission_code")
+      .in("invoice_id", invoiceIds);
 
     if (linkErr) {
-      console.error('[to-bill] linkErr:', linkErr);
-      // If this fails, just treat as "nothing billed yet" rather than nuking list
-    } else {
-      (links || []).forEach((l) => {
-        if (l.submission_code) billedSet.add(l.submission_code);
+      console.error("[to-bill] linkErr:", linkErr);
+      return res.status(500).json({ error: "Failed to read invoice links" });
+    }
+
+    // Build map
+    const map = new Map();
+    for (const inv of invoices) {
+      map.set(inv.id, {
+        invoice_id: inv.id,
+        customer_email: inv.customer_email,
+        submissions: [],
+        submission_ids: [],
+        groups: new Set(),
+        cards: 0,
+        returned_newest: null,
+        returned_oldest: null,
+        estimated_cents: inv.total_cents,
+        is_split: inv.metadata?.is_split === true
       });
     }
+
+    // Fetch submission info
+    const codes = links.map((l) => l.submission_code);
+    const { data: subs } = await supabase
+      .from("admin_submissions_v")
+      .select("submission_id, group_code, cards, created_at")
+      .in("submission_id", codes);
+
+    const byId = new Map();
+    for (const s of subs || []) byId.set(s.submission_id, s);
+
+    // Fill bundles
+    for (const l of links) {
+      const b = map.get(l.invoice_id);
+      const s = byId.get(l.submission_code);
+      if (!b || !s) continue;
+
+      b.submission_ids.push(s.submission_id);
+      b.submissions.push({
+        submission_id: s.submission_id,
+        group_code: s.group_code,
+        cards: s.cards,
+      });
+
+      b.cards += Number(s.cards) || 0;
+      if (s.group_code) b.groups.add(s.group_code);
+
+      const t = ts(s.created_at);
+      if (t != null) {
+        if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
+        if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
+      }
+    }
+
+    const items = [...map.values()].map((b) => ({
+      ...b,
+      group_codes: Array.from(b.groups),
+      groups: b.groups,
+    }));
+
+    return res.status(200).json({ items });
   }
 
-  const eligibleSubs = subs.filter(
-    (s) => !!s.submission_id && !billedSet.has(s.submission_id)
-  );
+  // ===========================================================
+  // 2) NO INVOICES → ORIGINAL "RECEIVED-FROM-PSA" COMBINED MODE
+  // ===========================================================
+  const { data: submissions, error: subErr } = await supabase
+    .from("admin_submissions_v")
+    .select("submission_id, customer_email, group_code, cards, returned_at, status")
+    .eq("status", "received_from_psa"); // ORIGINAL LOGIC
 
-  if (!eligibleSubs.length) {
+  if (subErr) {
+    console.error("[to-bill] subsErr:", subErr);
+    return res.status(500).json({ error: "Failed to read submissions" });
+  }
+
+  if (!submissions || submissions.length === 0) {
     return res.status(200).json({ items: [] });
   }
 
-  // ---------------------------------------------------------------------------
-  // 3) Group by customer_email → bundles (this is what Billing "To send" shows)
-  // ---------------------------------------------------------------------------
-  const bundlesByEmail = new Map();
+  // Group by customer
+  const grouped = new Map();
 
-  for (const s of eligibleSubs) {
-    const email = (s.customer_email || '').trim().toLowerCase();
-    if (!email) continue;
-
-    if (!bundlesByEmail.has(email)) {
-      bundlesByEmail.set(email, {
-        customer_email: email,
-        customer_name: '',
+  for (const s of submissions) {
+    if (!grouped.has(s.customer_email)) {
+      grouped.set(s.customer_email, {
+        customer_email: s.customer_email,
         submissions: [],
+        submission_ids: [],
         groups: new Set(),
         cards: 0,
-        _newest: null,
-        _oldest: null,
-        estimated_cents: null
+        returned_newest: null,
+        returned_oldest: null,
+        is_split: false // combined mode
       });
     }
 
-    const b = bundlesByEmail.get(email);
-    const when = ts(s.returned_at || s.created_at);
+    const b = grouped.get(s.customer_email);
+    b.submission_ids.push(s.submission_id);
+    b.submissions.push(s);
 
-    b.submissions.push({
-      submission_id: s.submission_id,
-      group_code: s.group_code,
-      cards: Number(s.cards) || 0,
-      returned_at: s.returned_at || s.created_at
-    });
-
-    if (s.group_code) b.groups.add(s.group_code);
+    b.groups.add(s.group_code);
     b.cards += Number(s.cards) || 0;
 
-    if (when != null) {
-      if (b._newest == null || when > b._newest) b._newest = when;
-      if (b._oldest == null || when < b._oldest) b._oldest = when;
+    const t = ts(s.returned_at);
+    if (t != null) {
+      if (!b.returned_newest || t > b.returned_newest) b.returned_newest = t;
+      if (!b.returned_oldest || t < b.returned_oldest) b.returned_oldest = t;
     }
   }
 
-  let bundles = Array.from(bundlesByEmail.values());
-
-  // ---------------------------------------------------------------------------
-  // 4) In-memory filters (search, group, date) – same UX as before
-  // ---------------------------------------------------------------------------
-  if (q) {
-    bundles = bundles.filter((b) => {
-      const hay = [
-        b.customer_email,
-        ...b.submissions.map((s) => s.submission_id),
-        ...Array.from(b.groups || [])
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }
-
-  if (groupFilter) {
-    bundles = bundles.filter((b) =>
-      Array.from(b.groups || []).some((g) =>
-        String(g || '').toLowerCase().includes(groupFilter)
-      )
-    );
-  }
-
-  if (fromMs != null || toMs != null) {
-    bundles = bundles.filter((b) => {
-      const t = b._newest;
-      if (t == null) return false;
-      if (fromMs != null && t < fromMs) return false;
-      if (toMs   != null && t > toMs)   return false;
-      return true;
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // 5) Shape response exactly like the old endpoint so the frontend still works
-  // ---------------------------------------------------------------------------
-  const items = bundles.map((b) => {
-    const submission_ids = (b.submissions || []).map((s) => s.submission_id);
-    const group_codes = Array.from(b.groups || []);
-
-    return {
-      customer_email: b.customer_email,
-      customer_name: b.customer_name,
-      submissions: b.submissions || [],
-      submission_ids,
-      groups: b.groups,
-      group_codes,
-      submissions_count: submission_ids.length,
-      groups_count: group_codes.length,
-      cards: b.cards,
-      returned_newest: b._newest ? new Date(b._newest).toISOString() : null,
-      returned_oldest: b._oldest ? new Date(b._oldest).toISOString() : null,
-      estimated_cents: b.estimated_cents // null for now; JS will fill via addServerEstimates
-    };
-  });
+  const items = [...grouped.values()].map((b) => ({
+    ...b,
+    group_codes: Array.from(b.groups),
+    groups: b.groups,
+  }));
 
   return res.status(200).json({ items });
 }
