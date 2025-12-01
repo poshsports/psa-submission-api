@@ -1,64 +1,63 @@
 // /api/admin/billing/split-by-address.ts
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 
+/**
+ * Utilities
+ */
 type ShipAddr = {
-  name?: string; contact?: string; full_name?: string; first_last?: string; attn?: string;
-  line1?: string; address1?: string; addr1?: string; street?: string;
-  line2?: string; address2?: string; addr2?: string;
-  city?: string; region?: string; state?: string; province?: string;
-  postal?: string; zip?: string; postal_code?: string; postcode?: string;
+  name?: string;
+  contact?: string;
+  full_name?: string;
+  first_last?: string;
+  attn?: string;
+
+  line1?: string;
+  address1?: string;
+  addr1?: string;
+  street?: string;
+
+  line2?: string;
+  address2?: string;
+  addr2?: string;
+
+  city?: string;
+  region?: string;
+  state?: string;
+  province?: string;
+
+  postal?: string;
+  zip?: string;
+  postal_code?: string;
+  postcode?: string;
+
   country?: string;
 };
 
-type SubmissionResp = {
-  ok?: boolean;
-  item?: {
-    submission_id: string;
-    customer_email?: string;
-    email?: string;
-    shipping_address?: ShipAddr;
-    group_code?: string;
-  };
-};
-
-type CardsPreviewRow = {
-  id?: string;
-  card_id?: string;
-};
-
-type IncomingAddressGroup = {
-  addr?: ShipAddr | ReturnType<typeof normAddr> | null;
-  subs: string[];
-};
-
-function normAddr(a?: ShipAddr | ReturnType<typeof normAddr> | null) {
+function normAddr(a?: ShipAddr | null) {
   if (!a) return null;
-  if ('name' in (a as any) && 'line1' in (a as any) && 'city' in (a as any)) {
-    const na = a as any;
-    const name   = String(na.name ?? '').trim();
-    const line1  = String(na.line1 ?? '').trim();
-    const line2  = String(na.line2 ?? '').trim();
-    const city   = String(na.city ?? '').trim();
-    const region = String(na.region ?? '').trim();
-    const postal = String(na.postal ?? '').trim();
-    const country= String(na.country ?? 'US').trim();
-    if (!name && !line1 && !line2 && !city && !region && !postal && !country) return null;
-    return { name, line1, line2, city, region, postal, country };
-  }
-  const sh = a as ShipAddr;
-  const name   = (sh.name ?? sh.contact ?? sh.full_name ?? sh.first_last ?? sh.attn ?? '').trim();
-  const line1  = (sh.line1 ?? sh.address1 ?? sh.addr1 ?? sh.street ?? '').trim();
-  const line2  = (sh.line2 ?? sh.address2 ?? sh.addr2 ?? '').trim();
-  const city   = (sh.city ?? '').trim();
-  const region = (sh.region ?? sh.state ?? sh.province ?? '').trim();
-  const postal = String(sh.postal ?? sh.zip ?? sh.postal_code ?? sh.postcode ?? '').trim();
-  const country= (sh.country ?? 'US').trim();
-  if (!name && !line1 && !line2 && !city && !region && !postal && !country) return null;
+  const name = (a.name ??
+    a.contact ??
+    a.full_name ??
+    a.first_last ??
+    a.attn ??
+    ""
+  ).trim();
+  const line1 = (a.line1 ?? a.address1 ?? a.addr1 ?? a.street ?? "").trim();
+  const line2 = (a.line2 ?? a.address2 ?? a.addr2 ?? "").trim();
+  const city = (a.city ?? "").trim();
+  const region = (a.region ?? a.state ?? a.province ?? "").trim();
+  const postal = (a.postal ??
+    a.zip ??
+    a.postal_code ??
+    a.postcode ??
+    ""
+  ).trim();
+  const country = (a.country ?? "US").trim();
   return { name, line1, line2, city, region, postal, country };
 }
 
 function addrKey(a: ReturnType<typeof normAddr>) {
-  if (!a) return '∅';
+  if (!a) return "∅";
   return JSON.stringify({
     n: a.name.toLowerCase(),
     l1: a.line1.toLowerCase(),
@@ -70,235 +69,187 @@ function addrKey(a: ReturnType<typeof normAddr>) {
   });
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+/**
+ * Resolve the original invoice containing these subs
+ */
+async function findParentInvoice(base: string, headers: any, sub: string) {
+  const resp = await fetch(`${base}/api/admin/billing/find-invoice-by-sub`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ submission_id: sub }),
+  });
+  if (!resp.ok) return null;
+  const j = await resp.json().catch(() => null);
+  return j?.invoice_id ?? null;
+}
+
+/**
+ * Update invoice status helper
+ */
+async function markInvoiceArchived(
+  base: string,
+  headers: any,
+  invoiceId: string
+) {
+  return fetch(`${base}/api/admin/billing/update-invoice-status`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ invoice_id: invoiceId, status: "superseded" }),
+  });
+}
+
+/**
+ * Main handler
+ */
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const body = (req.body || {}) as {
-    submissions?: string[];
-    addressGroups?: IncomingAddressGroup[];
-    customer_email?: string;
-    email?: string;
-    subs?: string[];
-  };
+  const body = req.body || {};
+  const submissions: string[] = body.submissions || body.subs || [];
 
-  // normalize subs
-  let submissions: string[] | undefined = body.submissions;
   if (!Array.isArray(submissions) || submissions.length === 0) {
-    if (Array.isArray(body.subs) && body.subs.length > 0) submissions = body.subs;
-  }
-  if (!Array.isArray(submissions) || submissions.length === 0) {
-    return res.status(400).json({ ok: false, error: 'Missing submissions/subs[]' });
+    return res.status(400).json({ ok: false, error: "Missing submissions[]" });
   }
 
-  // normalize email
-  let customerEmail: string | undefined =
-    (typeof body.customer_email === 'string' && body.customer_email.trim()) ||
-    (typeof body.email === 'string' && body.email.trim()) ||
-    undefined;
+  // Build base URL & headers
+  const proto = (req.headers["x-forwarded-proto"] as string) || "https";
+  const host =
+    (req.headers["x-forwarded-host"] as string) || (req.headers.host as string);
+  const base = `${proto}://${host}`;
 
-  // Build base URL + pass admin auth headers
-  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  const host  = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string);
-  const base  = `${proto}://${host}`;
+  const cookie = req.headers.cookie;
+  const auth = req.headers.authorization;
+  const xAdmin = req.headers["x-admin-token"];
 
-  const cookie = req.headers.cookie as string | undefined;
-  const auth   = req.headers.authorization as string | undefined;
-  const xAdmin = req.headers['x-admin-token'] as string | undefined;
-
-  const baseHeaders: Record<string,string> = { accept: 'application/json' };
+  const baseHeaders: Record<string, string> = { accept: "application/json" };
   if (cookie) baseHeaders.cookie = cookie;
   if (auth) baseHeaders.authorization = auth;
-  if (xAdmin) baseHeaders['x-admin-token'] = xAdmin;
+  if (xAdmin) baseHeaders["x-admin-token"] = xAdmin;
 
   const debug: any = {
     submissions,
-    addressGroupsReceived: Array.isArray(body.addressGroups) ? body.addressGroups.length : 0,
-    groupDebug: [],
+    groupsRaw: body.addressGroups,
+    groupsProcessed: [],
+    createdInvoices: [],
   };
 
-  try {
-    // resolve email from first submission
-    if (!customerEmail) {
-      const firstId = submissions[0];
-      const sr = await fetch(
-        `${base}/api/admin/submission?id=${encodeURIComponent(firstId)}&full=1`,
+  /**
+   * 1) Build address groups
+   */
+  let groups: { addr: ReturnType<typeof normAddr> | null; subs: string[] }[] =
+    [];
+
+  if (Array.isArray(body.addressGroups) && body.addressGroups.length > 0) {
+    groups = body.addressGroups
+      .map((g: any) => ({
+        addr: normAddr(g.addr ?? null),
+        subs: Array.isArray(g.subs) ? g.subs.filter(Boolean) : [],
+      }))
+      .filter((g: any) => g.subs.length > 0);
+  } else {
+    // auto-group by actual submission shipping addresses
+    const map = new Map<
+      string,
+      { addr: ReturnType<typeof normAddr>; subs: string[] }
+    >();
+    for (const id of submissions) {
+      const r = await fetch(
+        `${base}/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,
         { headers: baseHeaders }
       );
-      if (sr.ok) {
-        const sj = await sr.json() as SubmissionResp;
-        const fromSub = sj?.item?.customer_email || sj?.item?.email;
-        if (fromSub) customerEmail = fromSub;
-      }
-      if (!customerEmail) {
-        return res.status(400).json({ ok:false, error:'Missing customer email', debug });
-      }
+      if (!r.ok) continue;
+      const j = await r.json();
+      const addr = normAddr(j?.item?.shipping_address ?? null);
+      const key = addrKey(addr);
+      if (!map.has(key)) map.set(key, { addr, subs: [] });
+      map.get(key)!.subs.push(id);
     }
+    groups = [...map.values()];
+  }
 
-    // ⭐ NEW: fetch original group_code
-    let originalGroupCode = 'MULTI';
-    try {
-      const gr = await fetch(
-        `${base}/api/admin/submission?id=${encodeURIComponent(submissions[0])}&full=1`,
-        { headers: baseHeaders }
-      );
-      if (gr.ok) {
-        const gj = await gr.json();
-        if (gj?.item?.group_code) {
-          originalGroupCode = gj.item.group_code;
-        }
-      }
-    } catch (e) {
-      console.error('[split] failed to fetch group_code', e);
-    }
+  if (!groups.length) groups = [{ addr: null, subs: submissions }];
+  debug.groupsProcessed = groups;
 
-    // Build address groups
-    let groups: { addr: ReturnType<typeof normAddr> | null; subs: string[] }[] = [];
+  /**
+   * 2) Resolve parent invoice
+   */
+  const parentInvoiceId = await findParentInvoice(
+    base,
+    baseHeaders,
+    submissions[0]
+  );
+  debug.parentInvoice = parentInvoiceId;
 
-    if (Array.isArray(body.addressGroups) && body.addressGroups.length > 0) {
-      groups = body.addressGroups
-        .map(g => ({
-          addr: normAddr(g.addr ?? null),
-          subs: Array.isArray(g.subs) ? g.subs.filter(Boolean) : [],
-        }))
-        .filter(g => g.subs.length > 0);
-    } else {
-      const map = new Map<string, { addr: ReturnType<typeof normAddr>; subs: string[] }>();
-      for (const id of submissions) {
-        const r = await fetch(
-          `${base}/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,
-          { headers: baseHeaders }
-        );
-        if (!r.ok) continue;
-        const j = await r.json() as SubmissionResp;
-        const addr = normAddr(j?.item?.shipping_address ?? null);
-        const key  = addrKey(addr);
-        if (!map.has(key)) map.set(key, { addr, subs: [] });
-        map.get(key)!.subs.push(id);
-      }
-      groups = [...map.values()];
-    }
+  /**
+   * 3) Create all child invoices
+   */
+  const created: { invoice_id: string; subs: string[] }[] = [];
 
-    if (!groups.length) groups = [{ addr: null, subs: submissions }];
-    debug.groupCount = groups.length;
+  for (const [index, group] of groups.entries()) {
+    const subsForGroup = group.subs.length ? group.subs : submissions;
 
-    const created: { invoice_id: string; subs: string[] }[] = [];
+    // Fetch card rows
+    const qs = new URLSearchParams({
+      subs: subsForGroup.join(","),
+    }).toString();
+    const cr = await fetch(`${base}/api/admin/billing/cards-preview?${qs}`, {
+      headers: baseHeaders,
+    });
+    const cj = cr.ok ? await cr.json().catch(() => ({})) : {};
+    const rows = Array.isArray(cj.rows) ? cj.rows : [];
 
-    // Loop each group = 1 new invoice
-    for (const g of groups) {
-      const subsForGroup = g.subs.length ? g.subs : submissions;
+    const items = rows
+      .map((r: any) => ({
+        card_id: String(r.card_id ?? r.id ?? ""),
+        upcharge_cents: 0,
+      }))
+      .filter((r: any) => !!r.card_id);
 
-      const groupInfo: any = {
-        subs: subsForGroup,
-        cardsPreviewStatus: null,
-        cardsPreviewRows: null,
-        saveStatus: null,
-        saveBodyItems: null,
-        saveError: null,
-      };
+    if (!items.length) continue;
 
-      // fetch cards
-      const qs = new URLSearchParams({ subs: subsForGroup.join(',') }).toString();
-      const cr = await fetch(`${base}/api/admin/billing/cards-preview?${qs}`, {
-        headers: baseHeaders
-      });
-      groupInfo.cardsPreviewStatus = cr.status;
+    // Construct synthetic split group code
+    const synthetic = `${groups.length === 1 ? "GRP" : "GRP"}-SPLIT-${index + 1
+      }-${Date.now()}`;
 
-      if (!cr.ok) {
-        debug.groupDebug.push(groupInfo);
-        continue;
-      }
+    const saveBody: any = {
+      invoice_id: null,
+      force_new: true,
+      customer_email: body.customer_email,
+      items,
+      group_code_override: synthetic,
+    };
+    if (group.addr) saveBody.ship_to = group.addr;
 
-      const cj = await cr.json().catch(() => ({}));
-      const rows = Array.isArray(cj?.rows) ? cj.rows as CardsPreviewRow[] : [];
-      groupInfo.cardsPreviewRows = rows.length;
-
-      const items = rows
-        .map(r => {
-          const id = String((r.card_id ?? r.id) || '');
-          return id ? { card_id: id, upcharge_cents: 0 } : null;
-        })
-        .filter(Boolean) as { card_id: string; upcharge_cents: number }[];
-
-      groupInfo.saveBodyItems = items.length;
-      if (items.length === 0) {
-        debug.groupDebug.push(groupInfo);
-        continue;
-      }
-
-      // ⭐ FORCE NEW INVOICE + GROUP CODE OVERRIDE
-      const syntheticCode = `${originalGroupCode}-SPLIT-${groups.indexOf(g) + 1}-${Date.now()}`;
-      const saveBody: any = {
-        customer_email: customerEmail,
-        items,
-        invoice_id: null,
-        force_new: true,
-        group_code_override: syntheticCode
-      };
-      if (g.addr) saveBody.ship_to = g.addr;
-
-      const sr = await fetch(`${base}/api/admin/billing/preview/save`, {
-        method: 'POST',
-        headers: { ...baseHeaders, 'content-type': 'application/json' },
-        body: JSON.stringify(saveBody),
-      });
-
-      groupInfo.saveStatus = sr.status;
-
-      if (!sr.ok) {
-        const t = await sr.text().catch(() => '');
-        groupInfo.saveError = t.slice(0, 400);
-        debug.groupDebug.push(groupInfo);
-        continue;
-      }
-
-      const sj = await sr.json().catch(() => ({}));
-      if (sj?.invoice_id) {
-        created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
-      } else {
-        groupInfo.saveError = 'No invoice_id in response';
-      }
-
-      debug.groupDebug.push(groupInfo);
-    }
-// ⭐ After creating split invoices, mark the original invoice as superseded
-try {
-  // Find the original invoice by querying invoice_submissions
-  const firstSub = submissions[0];
-
-  const origResp = await fetch(`${base}/api/admin/billing/find-invoice-by-sub`, {
-    method: "POST",
-    headers: { ...baseHeaders, "content-type": "application/json" },
-    body: JSON.stringify({ submission_id: firstSub }),
-  });
-
-  const origJson = await origResp.json().catch(() => null);
-  const originalInvoiceId = origJson?.invoice_id;
-
-  if (originalInvoiceId) {
-    // Update the original invoice to superseded so it leaves "To send"
-    await fetch(`${base}/api/admin/billing/update-invoice-status`, {
+    const s = await fetch(`${base}/api/admin/billing/preview/save`, {
       method: "POST",
       headers: { ...baseHeaders, "content-type": "application/json" },
-      body: JSON.stringify({
-        invoice_id: originalInvoiceId,
-        status: "superseded",
-      }),
+      body: JSON.stringify(saveBody),
     });
-    debug.originalInvoiceUpdated = originalInvoiceId;
+
+    if (!s.ok) continue;
+    const sj = await s.json().catch(() => null);
+
+    if (sj?.invoice_id) {
+      created.push({ invoice_id: sj.invoice_id, subs: subsForGroup });
+    }
+  }
+
+  debug.createdInvoices = created;
+
+  /**
+   * 4) Archive the parent invoice
+   */
+  if (parentInvoiceId) {
+    await markInvoiceArchived(base, baseHeaders, parentInvoiceId);
+    debug.parentInvoiceArchived = true;
   } else {
-    debug.originalInvoiceNotFound = true;
+    debug.parentInvoiceArchived = false;
   }
-} catch (e) {
-  console.error("[split] failed to update original invoice", e);
-  debug.originalInvoiceErr = String(e);
-}
 
-    return res.status(200).json({ ok:true, created, debug });
-
-  } catch (err: any) {
-    console.error('[split-by-address] error', err);
-    return res.status(500).json({ ok:false, error:'Server error', detail: err?.message });
-  }
+  return res.status(200).json({ ok: true, created, debug });
 }
