@@ -436,8 +436,12 @@ function normalizeBundle(b) {
     is_split: (b.group_codes || groups).some(g =>
       String(g || '').toLowerCase().includes('split')
     ),
+
+    // ⭐ NEW: expose normalized ship_to for openBuilder()
+    ship_to: extractNormalizedShipTo(b) || null
   };
 }
+
 
 
 // New: normalize invoice records from invoices-list into the same table shape
