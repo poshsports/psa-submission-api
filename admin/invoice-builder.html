@@ -60,26 +60,15 @@
                 <div class="muted" style="font-size:12px;">Customer</div>
                 <div class="js-email" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
               </div>
-<div class="panel" id="shipToPanel"
-     style="border:1px solid #e6e8ec;border-radius:10px;padding:10px;margin-top:8px;background:#fbfbfc">
-  <div style="font-weight:600;margin:0 0 6px;font-size:13px;">Ship-to</div>
 
-  <!-- tighter type + line-height -->
-  <div id="shipToBody" class="mono small"
-       style="white-space:pre-line;font-size:12px;line-height:1.35;">—</div>
+              <!-- Ship-to (single address only) -->
+              <div class="panel" id="shipToPanel"
+                   style="border:1px solid #e6e8ec;border-radius:10px;padding:10px;margin-top:8px;background:#fbfbfc">
+                <div style="font-weight:600;margin:0 0 6px;font-size:13px;">Ship-to</div>
+                <div id="shipToBody" class="mono small"
+                     style="white-space:pre-line;font-size:12px;line-height:1.35;">—</div>
+              </div>
 
-  <!-- Only shown when multiple addresses -->
-  <div id="shipToChooser" class="hide" style="margin-top:8px">
-    <label for="shipToSelect" class="small" style="display:block;margin-bottom:6px;font-size:12px;">
-      Multiple shipping addresses detected — choose which one this invoice should use:
-    </label>
-    <select id="shipToSelect"
-            style="width:100%;padding:6px 8px;border:1px solid #e6e8ec;border-radius:8px;font-size:12px;"></select>
-    <div class="note muted" style="margin-top:6px;font-size:11px;">
-      To invoice separately per address, create/send one invoice per selection.
-    </div>
-  </div>
-</div>
               <!-- Received range -->
               <div class="js-range muted" style="margin-top:4px;font-size:12px;"></div>
             </div>
@@ -147,37 +136,34 @@
   </div>
 
   <!-- Send Confirmation Modal -->
-<div id="sendConfirmModal" role="dialog" aria-modal="true"
-     style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);z-index:1100;">
-  <div style="width:min(520px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
-    <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Send invoice?</div>
-    <div class="muted" style="font-size:13px;margin-bottom:12px;">
-      <div><strong>Customer:</strong> <span id="sendEmailTarget">—</span></div>
-      <div><strong>Cards:</strong> <span id="sendCardCount">0</span></div>
-      <div><strong>Estimated total:</strong> <span id="sendEstTotal">$—</span></div>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button type="button" id="btnSendCancel" class="btn">Cancel</button>
-      <button type="button" id="btnSendConfirm" class="btn primary">Confirm &amp; Send</button>
+  <div id="sendConfirmModal" role="dialog" aria-modal="true"
+       style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);z-index:1100;">
+    <div style="width:min(520px,92vw);background:#fff;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;">
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Send invoice?</div>
+      <div class="muted" style="font-size:13px;margin-bottom:12px;">
+        <div><strong>Customer:</strong> <span id="sendEmailTarget">—</span></div>
+        <div><strong>Cards:</strong> <span id="sendCardCount">0</span></div>
+        <div><strong>Estimated total:</strong> <span id="sendEstTotal">$—</span></div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="btnSendCancel" class="btn">Cancel</button>
+        <button type="button" id="btnSendConfirm" class="btn primary">Confirm &amp; Send</button>
+      </div>
     </div>
   </div>
-</div>
 
   <!-- Script -->
   <script type="module">
     const $ = (id) => document.getElementById(id);
     const DEFAULT_SETTINGS = { grade_fee: 20.00, shipping: 5.00 };
     let SETTINGS = { ...DEFAULT_SETTINGS };
-    const SAVE_ENDPOINT = '/api/admin/billing/preview/save';
-    const SEND_ENDPOINT = '/api/admin/billing/send-invoice';
-    const SHIPTO_ENDPOINT = '/api/admin/billing/ship-to';
+    const SAVE_ENDPOINT  = '/api/admin/billing/preview/save';
+    const SEND_ENDPOINT  = '/api/admin/billing/send-invoice';
 
-    let draftInvoiceId = null;
-    let hasUnsavedChanges = false;
-    let lastBundle = null;
-
-    // pending navigation target for dirty-leave modal
-    let pendingNavHref = null;
+    let draftInvoiceId      = null;
+    let hasUnsavedChanges   = false;
+    let lastBundle          = null;
+    let pendingNavHref      = null; // for dirty-leave modal
 
     async function loadSettings() {
       try {
@@ -193,464 +179,283 @@
       } catch {}
     }
 
-    function money(n){ const x=Number(n); return Number.isFinite(x)?x.toLocaleString(undefined,{style:'currency',currency:'USD'}):'$—'; }
-    function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    // Map PSA service → cents (fallback to default grade fee if unknown)
-function priceCentsForService(name){
-  const n = String(name || "").trim().toLowerCase();
-  const map = new Map([
-    ["psa value bulk", 2800],
-    ["psa value", 3500],
-    ["psa regular", 8500],
-    // add others here as needed (psa express, super express, etc.)
-  ]);
-  if (map.has(n)) return map.get(n);
-  // fallback to the UI default if service isn't recognized
-  return Math.round((Number(SETTINGS?.grade_fee ?? 20) || 20) * 100);
-}
+    function money(n) {
+      const x = Number(n);
+      return Number.isFinite(x)
+        ? x.toLocaleString(undefined, { style: 'currency', currency: 'USD' })
+        : '$—';
+    }
 
-    function pill(text){
-      const span=document.createElement("span");
-      span.textContent=text;
-      span.style.display="inline-block";
-      span.style.padding="4px 8px";
-      span.style.border="1px solid #e5e7eb";
-      span.style.borderRadius="999px";
-      span.style.fontSize="12px";
-      span.style.background="#f8fafc";
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[c]));
+    }
+
+    // Map PSA service → cents (fallback to default grade fee if unknown)
+    function priceCentsForService(name) {
+      const n = String(name || "").trim().toLowerCase();
+      const map = new Map([
+        ["psa value bulk", 2800],
+        ["psa value", 3500],
+        ["psa regular", 8500],
+        // add others here as needed
+      ]);
+      if (map.has(n)) return map.get(n);
+      return Math.round((Number(SETTINGS?.grade_fee ?? 20) || 20) * 100);
+    }
+
+    function pill(text) {
+      const span = document.createElement("span");
+      span.textContent = text;
+      span.style.display = "inline-block";
+      span.style.padding = "4px 8px";
+      span.style.border = "1px solid #e5e7eb";
+      span.style.borderRadius = "999px";
+      span.style.fontSize = "12px";
+      span.style.background = "#f8fafc";
       return span;
     }
 
-    // more visible pill for email
-    function emailPill(text){
-      const span=pill(text);
-      span.style.background = "#eef2ff";   // subtle indigo tint
+    function emailPill(text) {
+      const span = pill(text);
+      span.style.background = "#eef2ff";
       span.style.border     = "1px solid #c7d2fe";
       span.style.fontWeight = "600";
       return span;
     }
-// ---- Ship-to rendering helpers ----
 
-function formatShipTo(a){
-  if (!a) return '—';
-  const name   = a.name   || a.contact || a.full_name || '';
-  const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
-  const line2  = a.line2  || a.address2 || a.addr2 || '';
-  const city   = a.city   || '';
-  const region = a.region || a.state || a.province || '';
-  const postal = a.postal || a.zip || a.postal_code || '';
-  const country= a.country|| 'US';
+    // ---- Ship-to formatting (single address) ----
+    function formatShipTo(a) {
+      if (!a) return '—';
+      const name   = a.name   || a.contact || a.full_name || '';
+      const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
+      const line2  = a.line2  || a.address2 || a.addr2 || '';
+      const city   = a.city   || '';
+      const region = a.region || a.state || a.province || '';
+      const postal = a.postal || a.zip || a.postal_code || '';
+      const country= a.country|| 'US';
 
-  const lines = [name, line1, line2, [city, region, postal].filter(Boolean).join(', '), country]
-                .filter(Boolean);
-  return lines.join('\n');
-}
+      const lines = [
+        name,
+        line1,
+        line2,
+        [city, region, postal].filter(Boolean).join(', '),
+        country
+      ].filter(Boolean);
 
-function shortShipTo(a){
-  const name   = a.name   || a.contact || a.full_name || '';
-  const line1  = a.line1  || a.address1 || a.addr1 || a.street || '';
-  const city   = a.city   || '';
-  const region = a.region || a.state || a.province || '';
-  const postal = a.postal || a.zip || a.postal_code || '';
-  const core   = [line1, [city, region, postal].filter(Boolean).join(', ')].filter(Boolean).join(', ');
-  return [name, core].filter(Boolean).join(' — ');
-}
-
-// stable key to group identical addresses
-function addressKey(a){
-  return JSON.stringify({
-    n:(a.name||'').trim().toLowerCase(),
-    l1:(a.line1||a.address1||a.addr1||a.street||'').trim().toLowerCase(),
-    l2:(a.line2||a.address2||a.addr2||'').trim().toLowerCase(),
-    c:(a.city||'').trim().toLowerCase(),
-    r:(a.region||a.state||a.province||'').trim().toLowerCase(),
-    p:(a.postal||a.zip||a.postal_code||'').toString().trim(),
-    co:(a.country||'US').trim().toLowerCase()
-  });
-}
-
-function renderShipTo(addressGroups){
-  // addressGroups = [{ addr: {…}, subs: ['psa-010', ...] }, ...]
-  const body    = document.getElementById('shipToBody');
-  const chooser = document.getElementById('shipToChooser');
-  const select  = document.getElementById('shipToSelect');
-  if (!body) return;
-
-  const list = Array.isArray(addressGroups) ? addressGroups : [];
-
-  // No addresses
-  if (list.length === 0){
-    body.textContent = '—';
-    chooser?.classList.add('hide');
-    return;
-  }
-
-  // One address
-  if (list.length === 1){
-    body.textContent = formatShipTo(list[0].addr);
-    lastBundle.selected_ship_to = list[0];
-    chooser?.classList.add('hide');
-    return;
-  }
-
-  // Multiple addresses → show dropdown with full address label
-  if (select){
-    select.innerHTML = '';
-    list.forEach((g, i) => {
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = shortShipTo(g.addr);   // << address in dropdown
-      select.appendChild(opt);
-    });
-
-    // default to first
-    body.textContent = formatShipTo(list[0].addr);
-    lastBundle.selected_ship_to = list[0];
-
-    select.onchange = () => {
-      const i = Number(select.value) || 0;
-      const chosen = list[i] || list[0];
-      body.textContent = formatShipTo(chosen.addr);
-      lastBundle.selected_ship_to = chosen;
-    };
-
-    chooser?.classList.remove('hide');
-
-    // Optional: also render a small "Split invoices by address" helper button
-    ensureSplitByAddressButton(list);
-  }
-}
-
-
-function normalizeCardRow(r){return{
-      id:r.id||r.card_id||r.uuid||null,
-      submission:r.submission_id||r.submission_code||r.submission||"",
-      date:r.break_date||r.break_at||r.date_of_break||null,
-      channel:r.break_channel||r.channel||r.break||"",
-      breakNo:r.break_num||r.break_number||r.break_no||r.break_id||"",
-      desc:r.card_description||r.description||r.card||r.title||"",
-      service:r.grading_service||"",
-      grading_cents: Number(r.grading_amount ?? r.grading_cents ?? 0) || priceCentsForService(r.grading_service)
-    };}
-
-    async function fetchCardsForSubs(subIds){
-      if(!subIds.length)return[];
-      const qs=new URLSearchParams({subs:subIds.join(",")}).toString();
-      const r=await fetch(`/api/admin/billing/cards-preview?${qs}`,{credentials:"same-origin"});
-      const j=await r.json().catch(()=>({rows:[]}));
-      return (j.rows||[]).map(normalizeCardRow);
-    }
-async function fetchShipTos(subIds){
-  if (!Array.isArray(subIds) || subIds.length === 0) return [];
-
-  // helper to normalize raw address
-  const norm = (a) => {
-    if (!a) return null;
-    const obj = {
-      name   : a.name   || a.contact || a.full_name || a.first_last || a.attn || '',
-      line1  : a.line1  || a.address1 || a.addr1 || a.street || '',
-      line2  : a.line2  || a.address2 || a.addr2 || '',
-      city   : a.city   || '',
-      region : a.region || a.state || a.province || '',
-      postal : a.postal || a.zip || a.postal_code || a.postcode || '',
-      country: a.country|| 'US'
-    };
-    const any = Object.values(obj).some(Boolean);
-    return any ? obj : null;
-  };
-
-  // We will fill this map: key(address) -> { addr, subs: [] }
-  const map = new Map();
-
-  // Try direct endpoint first (may return many addresses but without sub mapping)
- // try {
-   //  const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
-  //   const r  = await fetch(`/api/admin/billing/ship-to?${qs}`, { credentials: 'same-origin' });
-  //   if (r.ok) {
-     //  const j = await r.json().catch(()=> ({}));
-     //  const arr = Array.isArray(j?.addresses) ? j.addresses
-              //   : Array.isArray(j)            ? j
-             //    : j?.address ? [j.address] : [];
-    //   for (const a of arr) {
-      //   const nx = norm(a); if (!nx) continue;
-      //   const k = addressKey(nx);
-      //   if (!map.has(k)) map.set(k, { addr: nx, subs: [] });
-     //  }
-   //  }
- //  } catch {}
-
-  // Fallback: probe each submission; these include the actual shipping_address
-  const tryRoutes = (id) => ([
-    `/api/admin/submission?id=${encodeURIComponent(id)}&full=1`,
-    `/api/admin/submissions/${encodeURIComponent(id)}`,
-    `/api/admin/submissions/show?submission_id=${encodeURIComponent(id)}`
-  ]);
-
-  for (const id of subIds) {
-    let got = null;
-    for (const url of tryRoutes(id)) {
-      try {
-        const r = await fetch(url, { credentials: 'same-origin' });
-        if (!r.ok) continue;
-        const j = await r.json().catch(()=> ({}));
-        const cand = j?.item?.shipping_address || j?.ship_to || j?.shipping || j?.address || j?.customer_address;
-        const nx = norm(cand);
-        if (nx) { got = nx; break; }
-      } catch {}
-    }
-    if (got) {
-      const k = addressKey(got);
-      if (!map.has(k)) map.set(k, { addr: got, subs: [] });
-      map.get(k).subs.push(id);
-    }
-  }
-
-  return [...map.values()];
-}
-
-function ensureSplitByAddressButton(addressGroups){
-  const chooser = document.getElementById('shipToChooser');
-  if (!chooser) return;
-
-  // avoid duplicates
-  let existing = chooser.querySelector('.js-split-invoices');
-  if (existing) return;
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'btn js-split-invoices';
-  btn.style.marginTop = '8px';
-  btn.textContent = 'Split invoices by address';
-
-  // keep the groups for the split operation
-  const groups = Array.isArray(addressGroups) ? addressGroups : [];
-
-  btn.onclick = async () => {
-
-    // If only one address → nothing to split
-    if (groups.length < 2) {
-      alert('Nothing to split – only one shipping address found.');
-      return;
+      return lines.length ? lines.join('\n') : '—';
     }
 
-    // Collect all unique submission IDs involved in these groups
-    const allSubs = Array.from(
-      new Set(
-        groups.flatMap(g => Array.isArray(g.subs) ? g.subs : [])
-      )
-    );
-
-    if (!allSubs.length) {
-      alert('Could not determine which submissions to split.');
-      return;
+    function renderShipToSingle(shipTo) {
+      const body = document.getElementById('shipToBody');
+      if (!body) return;
+      body.textContent = formatShipTo(shipTo);
     }
 
-    const email = (lastBundle?.customer_email || '').trim();
+    // ---- Card rows ----
+    function normalizeCardRow(r) {
+      return {
+        id:         r.id || r.card_id || r.uuid || null,
+        submission: r.submission_id || r.submission_code || r.submission || "",
+        date:       r.break_date || r.break_at || r.date_of_break || null,
+        channel:    r.break_channel || r.channel || r.break || "",
+        breakNo:    r.break_num || r.break_number || r.break_no || r.break_id || "",
+        desc:       r.card_description || r.description || r.card || r.title || "",
+        service:    r.grading_service || "",
+        grading_cents: Number(r.grading_amount ?? r.grading_cents ?? 0)
+                        || priceCentsForService(r.grading_service)
+      };
+    }
 
-    btn.disabled = true;
-    const originalLabel = btn.textContent;
-    btn.textContent = 'Splitting…';
+    async function fetchCardsForSubs(subIds) {
+      if (!subIds.length) return [];
+      const qs = new URLSearchParams({ subs: subIds.join(",") }).toString();
+      const r  = await fetch(`/api/admin/billing/cards-preview?${qs}`, { credentials:"same-origin" });
+      const j  = await r.json().catch(() => ({ rows: [] }));
+      return (j.rows || []).map(normalizeCardRow);
+    }
 
-    try {
-      const res = await fetch('/api/admin/billing/split-by-address', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          submissions: allSubs,
-          addressGroups: groups,
-          customer_email: email || undefined
-        })
-      });
+    // ---- Prefill from existing draft ----
+    async function loadPrefill(submissionIds) {
+      if (!submissionIds?.length) return { invoice_id: null, items: [] };
 
-      const j = await res.json().catch(() => ({}));
+      const subsParam  = encodeURIComponent(submissionIds.join(','));
+      const emailParam = encodeURIComponent((lastBundle?.customer_email || '').trim());
+      let url = `/api/admin/billing/preview/prefill?subs=${subsParam}&email=${emailParam}`;
 
-      // 🔥 DEBUG LOG SO WE CAN SEE THE CREATED INVOICE IDS
-      console.log('[split-by-address response]', j);
-
-      const createdArr = Array.isArray(j.created) ? j.created : [];
-      const count = createdArr.length;
-
-      alert(`Split into ${count} invoice${count === 1 ? '' : 's'}.`);
-
-      // On success → go back to Billing
-      if (count > 0) {
-        window.location.href = '/admin/billing.html?tab=to-send';
+      // If we have a ship_to in the bundle, pass it along (helps pick correct invoice if any)
+      if (lastBundle?.ship_to) {
+        url += `&ship_to=${encodeURIComponent(JSON.stringify(lastBundle.ship_to))}`;
       }
 
-    } catch (err) {
-      console.error('[split-by-address] failed', err);
-      alert('Failed to split invoices by address.');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalLabel;
+      const r = await fetch(url, { credentials: 'same-origin' });
+      if (!r.ok) return { invoice_id: null, items: [] };
+      return r.json();
     }
-  };
 
-  chooser.appendChild(btn);
-}
-
-
-
-async function loadPrefill(submissionIds){
-  if (!submissionIds?.length) return { invoice_id: null, items: [] };
-
-  const subsParam  = encodeURIComponent(submissionIds.join(','));
-  const emailParam = encodeURIComponent((lastBundle?.customer_email || '').trim());
-
-  const url = `/api/admin/billing/preview/prefill?subs=${subsParam}&email=${emailParam}`;
-  const r   = await fetch(url, { credentials: 'same-origin' });
-  if (!r.ok) return { invoice_id: null, items: [] };
-
-  return r.json();
-}
-
-    function applyPrefill(prefill){
-      if(!prefill?.items?.length)return;
-      const map=new Map(prefill.items.map(it=>[String(it.card_id),it]));
-      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp=>{
-        const id=String(inp.dataset.id||'');
-        const it=map.get(id);
-        if(it) inp.value=(Number(it.upcharge_cents||0)/100).toFixed(2);
+    function applyPrefill(prefill) {
+      if (!prefill?.items?.length) return;
+      const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
+      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+        const id = String(inp.dataset.id || '');
+        const it = map.get(id);
+        if (it) inp.value = (Number(it.upcharge_cents || 0) / 100).toFixed(2);
       });
-      draftInvoiceId=prefill.invoice_id||null;
+      draftInvoiceId = prefill.invoice_id || null;
       recalc();
     }
 
     // Ensure a draft exists once rows are present (silent)
-async function ensureDraftExists(){
-  if (draftInvoiceId) return;                              // already have a draft
-  const email = (lastBundle?.customer_email || '').trim();
-  if (!email) return;
+    async function ensureDraftExists() {
+      if (draftInvoiceId) return;
+      const email = (lastBundle?.customer_email || '').trim();
+      if (!email) return;
 
-  const items = collectUpcharges();                        // uses current table rows
-  if (!items.length) return;                               // nothing to save yet
+      const items = collectUpcharges();
+      if (!items.length) return;
 
-  await save(true);                                        // silent create/update
-}
-
-    function updateTotals(gradeSum, upchargeSum){
-      const ship=SETTINGS.shipping, subtotal=gradeSum+upchargeSum, total=subtotal+ship;
-      document.querySelector(".js-subtotal").textContent=money(subtotal);
-      document.querySelector(".js-total").textContent=money(total);
-      document.querySelector(".js-ship").textContent=money(ship);
+      await save(true);
     }
 
-    function recalc(){
-      const rows=[...document.querySelectorAll("#cardsTbody tr[data-row]")];
-      const gradeSum = rows.reduce((s,tr)=> s + (Number(tr.dataset.gradeCents||0)/100), 0);
-      const upchargeSum=rows.reduce((s,tr)=>s+Number(tr.querySelector(".js-up")?.value||0),0);
-      updateTotals(gradeSum,upchargeSum);
+    // ---- Totals ----
+    function updateTotals(gradeSum, upchargeSum) {
+      const ship     = SETTINGS.shipping;
+      const subtotal = gradeSum + upchargeSum;
+      const total    = subtotal + ship;
+
+      document.querySelector(".js-subtotal").textContent = money(subtotal);
+      document.querySelector(".js-total").textContent    = money(total);
+      document.querySelector(".js-ship").textContent     = money(ship);
     }
 
-    function collectUpcharges(){
-      return [...document.querySelectorAll('#cardsTbody input.js-up')].map(inp=>{
-        const id=inp.dataset.id;const v=Number(inp.value||0);
-        return id&&Number.isFinite(v)?{card_id:id,upcharge_cents:Math.round(v*100)}:null;
-      }).filter(Boolean);
+    function recalc() {
+      const rows = [...document.querySelectorAll("#cardsTbody tr[data-row]")];
+      const gradeSum = rows.reduce((s, tr) =>
+        s + (Number(tr.dataset.gradeCents || 0) / 100), 0
+      );
+      const upchargeSum = rows.reduce((s, tr) =>
+        s + Number(tr.querySelector(".js-up")?.value || 0), 0
+      );
+      updateTotals(gradeSum, upchargeSum);
     }
 
-async function save(silent = false){
-  const email = (lastBundle?.customer_email || '').trim();
-  const items = collectUpcharges();
-  if (!email || !items.length) return;
-
-  const btn = $("btnDraftSave");
-  if (!silent && btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-
-  const res = await fetch(SAVE_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ customer_email: email, items, invoice_id: draftInvoiceId || null })
-  });
-
-  if (res.ok) {
-    const j = await res.json().catch(() => ({}));
-    if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
-    hasUnsavedChanges = false;
-
-    if (!silent && btn) {
-      btn.textContent = 'Saved ✓';
-      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 1200);
-    }
-  } else {
-    const txt = await res.text().catch(()=> '');
-    console.error('[preview/save] failed:', txt);
-    if (!silent) alert('Save failed.\n' + (txt || ''));
-    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-  }
-}
-    async function sendInvoice(){
-  const email = (lastBundle?.customer_email || '').trim();
-  const btn = $("btnDraftSend");
-
-  if (!email) { alert('Missing customer email.'); return; }
-
-  // Ensure latest changes are saved first
-  if (hasUnsavedChanges) {
-    await save(true);              // run silent save
-    if (hasUnsavedChanges) return; // bail if save failed
-  }
-
-  // If we still don't have an invoice id, try once to create it
-  if (!draftInvoiceId) {
-    await save(true);
-    if (!draftInvoiceId) { alert('Could not determine invoice id.'); return; }
-  }
-
-      // If we detected multiple ship-to addresses and the user hasn't split yet,
-// give them a heads-up. We can reuse shipToChooser visibility as the signal.
-const chooser = document.getElementById('shipToChooser');
-if (chooser && !chooser.classList.contains('hide')) {
-  const confirmed = window.confirm(
-    'Multiple shipping addresses were detected for these submissions.\n\n' +
-    'If you want one invoice per address, click Cancel and use "Split invoices by address" first.\n\n' +
-    'Continue sending a single combined invoice anyway?'
-  );
-  if (!confirmed) {
-    btn.disabled = false;
-    btn.textContent = 'Send';
-    return;
-  }
-}
-
-  try {
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-
-    const res = await fetch(SEND_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        invoice_id: draftInvoiceId,
-        customer_email: email
-      })
-    });
-
-    if (!res.ok) {
-      const t = await res.text().catch(()=>'');
-      console.error('Send failed', t);
-      alert('Failed to send invoice.');
-      btn.disabled = false;
-      btn.textContent = 'Send';
-      return;
+    function collectUpcharges() {
+      return [...document.querySelectorAll('#cardsTbody input.js-up')]
+        .map(inp => {
+          const id = inp.dataset.id;
+          const v  = Number(inp.value || 0);
+          return id && Number.isFinite(v)
+            ? { card_id: id, upcharge_cents: Math.round(v * 100) }
+            : null;
+        })
+        .filter(Boolean);
     }
 
-    // Optional: read response (e.g., a URL) if your API returns it
-    // const j = await res.json().catch(()=>({}));
+    // ---- Save ----
+    async function save(silent = false) {
+      const email = (lastBundle?.customer_email || '').trim();
+      const items = collectUpcharges();
+      if (!email || !items.length) return;
 
-    hasUnsavedChanges = false; // prevent dirty-leave prompts
-    // Go back to Billing after successful send
-    window.location.href = '/admin/billing.html';
-  } catch (err) {
-    console.error(err);
-    alert('Failed to send invoice.');
-    btn.disabled = false;
-    btn.textContent = 'Send';
-  }
-}
+      const btn = $("btnDraftSave");
+      if (!silent && btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+      const body = {
+        customer_email: email,
+        items,
+        invoice_id: draftInvoiceId || null,
+      };
+
+      // If we have a single ship-to, let the server persist it on the invoice
+      if (lastBundle?.ship_to) {
+        body.ship_to = lastBundle.ship_to;
+      }
+
+      const res = await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      });
+
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        if (j && j.invoice_id) draftInvoiceId = j.invoice_id;
+        hasUnsavedChanges = false;
+
+        if (!silent && btn) {
+          btn.textContent = 'Saved ✓';
+          setTimeout(() => { btn.textContent = 'Save'; btn.disabled = true; }, 1200);
+        }
+      } else {
+        const txt = await res.text().catch(() => '');
+        console.error('[preview/save] failed:', txt);
+        if (!silent) alert('Save failed.\n' + (txt || ''));
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      }
+    }
+
+    // ---- Send ----
+    async function sendInvoice() {
+      const email = (lastBundle?.customer_email || '').trim();
+      const btn   = $("btnDraftSend");
+
+      if (!email) { alert('Missing customer email.'); return; }
+
+      // Ensure latest changes are saved first
+      if (hasUnsavedChanges) {
+        await save(true);
+        if (hasUnsavedChanges) return;
+      }
+
+      // Ensure we have an invoice id
+      if (!draftInvoiceId) {
+        await save(true);
+        if (!draftInvoiceId) {
+          alert('Could not determine invoice id.');
+          return;
+        }
+      }
+
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+
+        const res = await fetch(SEND_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            invoice_id: draftInvoiceId,
+            customer_email: email
+          })
+        });
+
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          console.error('Send failed', t);
+          alert('Failed to send invoice.');
+          btn.disabled = false;
+          btn.textContent = 'Send';
+          return;
+        }
+
+        hasUnsavedChanges = false;
+        window.location.href = '/admin/billing.html';
+      } catch (err) {
+        console.error(err);
+        alert('Failed to send invoice.');
+        btn.disabled = false;
+        btn.textContent = 'Send';
+      }
+    }
+
+    // ---- Modals ----
     function showConfirm(show) {
       const m = document.getElementById('confirmCloseModal');
       if (!m) return;
@@ -661,22 +466,26 @@ if (chooser && !chooser.classList.contains('hide')) {
       }
     }
 
-    function showSendConfirm(show){
-  const m = document.getElementById('sendConfirmModal');
-  if (!m) return;
-  m.style.display = show ? 'flex' : 'none';
-  if (show) {
-    const email = (lastBundle?.customer_email || '').trim() || '—';
-    const rows = [...document.querySelectorAll("#cardsTbody tr[data-row]")];
-    const gradeSum = rows.reduce((s,tr)=> s + (Number(tr.dataset.gradeCents||0)/100), 0);
-    const upchargeSum = rows.reduce((s,tr)=> s + Number(tr.querySelector(".js-up")?.value || 0), 0);
-    const total = gradeSum + upchargeSum + SETTINGS.shipping;
+    function showSendConfirm(show) {
+      const m = document.getElementById('sendConfirmModal');
+      if (!m) return;
+      m.style.display = show ? 'flex' : 'none';
+      if (show) {
+        const email = (lastBundle?.customer_email || '').trim() || '—';
+        const rows  = [...document.querySelectorAll("#cardsTbody tr[data-row]")];
+        const gradeSum = rows.reduce((s, tr) =>
+          s + (Number(tr.dataset.gradeCents || 0) / 100), 0
+        );
+        const upchargeSum = rows.reduce((s, tr) =>
+          s + Number(tr.querySelector(".js-up")?.value || 0), 0
+        );
+        const total = gradeSum + upchargeSum + SETTINGS.shipping;
 
-    $("sendEmailTarget").textContent = email;
-    $("sendCardCount").textContent = String(rows.length);
-    $("sendEstTotal").textContent = money(total);
-  }
-}
+        $("sendEmailTarget").textContent = email;
+        $("sendCardCount").textContent   = String(rows.length);
+        $("sendEstTotal").textContent    = money(total);
+      }
+    }
 
     function navigateToPending() {
       const href = pendingNavHref;
@@ -689,7 +498,7 @@ if (chooser && !chooser.classList.contains('hide')) {
       window.addEventListener('beforeunload', (e) => {
         if (!hasUnsavedChanges) return;
         e.preventDefault();
-        e.returnValue = ''; // required for Chrome to show a prompt
+        e.returnValue = '';
       });
 
       // Intercept anchor navigations
@@ -706,14 +515,14 @@ if (chooser && !chooser.classList.contains('hide')) {
       });
 
       // Modal buttons
-      const bSave = document.getElementById('btnConfirmSave');
+      const bSave    = document.getElementById('btnConfirmSave');
       const bDiscard = document.getElementById('btnConfirmDiscard');
-      const bCancel = document.getElementById('btnConfirmCancel');
+      const bCancel  = document.getElementById('btnConfirmCancel');
 
       bCancel?.addEventListener('click', () => showConfirm(false));
 
       bDiscard?.addEventListener('click', () => {
-        hasUnsavedChanges = false; // allow navigation
+        hasUnsavedChanges = false;
         showConfirm(false);
         navigateToPending();
       });
@@ -728,106 +537,116 @@ if (chooser && !chooser.classList.contains('hide')) {
 
       // ESC closes confirm
       window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && document.getElementById('confirmCloseModal')?.style.display !== 'none') {
+        if (e.key === 'Escape' &&
+            document.getElementById('confirmCloseModal')?.style.display !== 'none') {
           showConfirm(false);
         }
       });
     }
 
-    async function populate(bundle){
-      lastBundle=bundle;
-      const subs=bundle.submissions||[];
-      const groups=bundle.groups||bundle.group_codes||[];
-      const email=bundle.customer_email||'';
+    // ---- Populate UI ----
+    async function populate(bundle) {
+      lastBundle = bundle;
+      const subs   = bundle.submissions || [];
+      const groups = bundle.groups || bundle.group_codes || [];
+      const email  = bundle.customer_email || '';
 
       // Submissions pills
-      const subEl=document.querySelector(".js-sub-list");
-      subEl.innerHTML='';
-      subs.forEach(s=>subEl.appendChild(pill(s.submission_id)));
+      const subEl = document.querySelector(".js-sub-list");
+      subEl.innerHTML = '';
+      subs.forEach(s => subEl.appendChild(pill(s.submission_id)));
 
       // Groups pills
-      const grpEl=document.querySelector(".js-group-list");
-      grpEl.innerHTML='';
-      groups.forEach(code=>grpEl.appendChild(pill(code)));
+      const grpEl = document.querySelector(".js-group-list");
+      grpEl.innerHTML = '';
+      groups.forEach(code => grpEl.appendChild(pill(code)));
 
       // Email pill
-      const emailEl=document.querySelector(".js-email");
+      const emailEl = document.querySelector(".js-email");
       if (emailEl) {
         emailEl.innerHTML = "";
         emailEl.appendChild(email ? emailPill(email) : pill("—"));
       }
 
-      const subIds=subs.map(s=>s.submission_id);
-      // Load and render ship-to before table so the user sees it right away
-try {
-  const shipTos = await fetchShipTos(subIds);
-  renderShipTo(shipTos);
-} catch {
-  renderShipTo([]); // graceful fallback
-}
-      const rows=await fetchCardsForSubs(subIds);
-      $("cardsTbody").innerHTML=rows.map((r,i)=>`
-        <tr data-row="${i}" data-grade-cents="${r.grading_cents||0}">
+      // Ship-to (single)
+      renderShipToSingle(bundle.ship_to || null);
+
+      const subIds = subs.map(s => s.submission_id);
+      const rows   = await fetchCardsForSubs(subIds);
+
+      $("cardsTbody").innerHTML = rows.map((r, i) => `
+        <tr data-row="${i}" data-grade-cents="${r.grading_cents || 0}">
           <td>${esc(r.submission)}</td>
-          <td>${esc(r.date||'')}</td>
-          <td>${esc(r.channel||'—')}</td>
-          <td style="text-align:right;">${esc(r.breakNo||'—')}</td>
-          <td>${esc(r.desc||'—')}</td>
-          <td style="text-align:right;">${money((r.grading_cents||0)/100)}</td>
-          <td style="text-align:right;"><input class="js-up" data-id="${esc(r.id||'')}" type="number" step="0.01" value="0.00" style="width:100px;text-align:right;"/></td>
+          <td>${esc(r.date || '')}</td>
+          <td>${esc(r.channel || '—')}</td>
+          <td style="text-align:right;">${esc(r.breakNo || '—')}</td>
+          <td>${esc(r.desc || '—')}</td>
+          <td style="text-align:right;">${money((r.grading_cents || 0) / 100)}</td>
+          <td style="text-align:right;">
+            <input class="js-up" data-id="${esc(r.id || '')}"
+                   type="number" step="0.01" value="0.00"
+                   style="width:100px;text-align:right;" />
+          </td>
         </tr>`).join("");
 
-      // delegated input: totals + save enablement
-      $("cardsTbody").addEventListener("input",()=>{
-        hasUnsavedChanges=true;
-        $("btnDraftSave").disabled=false;
+      $("cardsTbody").addEventListener("input", () => {
+        hasUnsavedChanges = true;
+        $("btnDraftSave").disabled = false;
         recalc();
       });
+
       recalc();
 
       const pre = await loadPrefill(subIds);
       applyPrefill(pre);
 
-      // If no draft was found/returned, create one now from the loaded rows
       await ensureDraftExists();
     }
-    // Boot
-    (async function init(){
-      $("sidebar-signout")?.addEventListener("click",async e=>{
+
+    // ---- Boot ----
+    (async function init() {
+      $("sidebar-signout")?.addEventListener("click", async (e) => {
         e.preventDefault();
-        try{await fetch('/api/admin-logout',{method:'POST',credentials:'same-origin'});}catch{}
+        try {
+          await fetch('/api/admin-logout', { method: 'POST', credentials: 'same-origin' });
+        } catch {}
         window.location.replace('/admin');
       });
+
       await loadSettings();
 
-      // Read query params (includes groups)
-      const qs=new URLSearchParams(location.search);
-      const subs=(qs.get("subs")||"").split(",").filter(Boolean).map(id=>({submission_id:id}));
-      const groups=(qs.get("groups")||"").split(",").filter(Boolean);
-      const bundle={customer_email:qs.get("email")||"",submissions:subs,groups};
+      const qs      = new URLSearchParams(location.search);
+      const subs    = (qs.get("subs") || "").split(",").filter(Boolean).map(id => ({ submission_id: id }));
+      const groups  = (qs.get("groups") || "").split(",").filter(Boolean);
+      const email   = qs.get("email") || "";
+
+      let ship_to = null;
+      const shipRaw = qs.get("ship_to");
+      if (shipRaw) {
+        try {
+          ship_to = JSON.parse(shipRaw);
+        } catch {}
+      }
+
+      const bundle = {
+        customer_email: email,
+        submissions: subs,
+        groups,
+        ship_to
+      };
 
       await populate(bundle);
-      $("btnDraftSave")?.addEventListener("click",()=>save(false));
-      $("btnConfirmSave")?.addEventListener("click",()=>save(false));
+
+      $("btnDraftSave")?.addEventListener("click", () => save(false));
+      $("btnConfirmSave")?.addEventListener("click", () => save(false));
+
       $("btnDraftSend")?.addEventListener("click", () => showSendConfirm(true));
-$("btnSendCancel")?.addEventListener("click", () => showSendConfirm(false));
-$("btnSendConfirm")?.addEventListener("click", async () => {
-  showSendConfirm(false);
-  await sendInvoice();
-});
+      $("btnSendCancel")?.addEventListener("click", () => showSendConfirm(false));
+      $("btnSendConfirm")?.addEventListener("click", async () => {
+        showSendConfirm(false);
+        await sendInvoice();
+      });
 
-// Optional safety: warn if multiple addresses exist before sending
-const chooserVisible = !document.getElementById('shipToChooser')?.classList.contains('hide');
-if (chooserVisible) {
-  $("btnDraftSend")?.addEventListener("click", (e) => {
-    if (confirm("Multiple shipping addresses detected. Split invoices by address first?")) {
-      document.querySelector('.js-split-invoices')?.click();
-      e.preventDefault();
-    }
-  });
-}
-
-      // Enable dirty-leave protection
       installDirtyLeaveGuards();
     })();
   </script>
