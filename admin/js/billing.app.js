@@ -140,21 +140,48 @@ function ensureDraftsForAll(bundles) {
 function openBuilder(bundle) {
   if (!bundle) return;
 
-  const subs = (bundle.submissions || []).map(s => s.submission_id).filter(Boolean);
+  const subs = (bundle.submissions || [])
+    .map(s => s.submission_id)
+    .filter(Boolean);
+
   const email = (bundle.customer_email || '').trim();
   const rawGroups = bundle.groups || bundle.group_codes || [];
-const groups = Array.isArray(rawGroups)
-  ? rawGroups.filter(Boolean)
-  : [rawGroups].filter(Boolean);
+  const groups = Array.isArray(rawGroups)
+    ? rawGroups.filter(Boolean)
+    : [rawGroups].filter(Boolean);
 
+  // --- NEW: normalize the bundle's ship_to address ---
+  function normalizeShipToFromBundle(b) {
+    if (!b || !b.ship_to) return null;
+    const a = b.ship_to;
+    const obj = {
+      name   : a.name   || a.contact || a.full_name || '',
+      line1  : a.line1  || a.address1 || a.addr1 || a.street || '',
+      line2  : a.line2  || a.address2 || a.addr2 || '',
+      city   : a.city   || '',
+      region : a.region || a.state || a.province || '',
+      postal : a.postal || a.zip || a.postal_code || '',
+      country: a.country || 'US'
+    };
+    const any = Object.values(obj).some(Boolean);
+    return any ? obj : null;
+  }
 
   const qp = new URLSearchParams();
   if (subs.length) qp.set('subs', subs.join(','));
   if (email) qp.set('email', email);
   if (groups.length) qp.set('groups', groups.join(','));
 
+  // --- NEW: embed normalized address if present ---
+  const shipTo = normalizeShipToFromBundle(bundle);
+  if (shipTo) {
+    qp.set('ship_to', JSON.stringify(shipTo));
+  }
+
+  // Navigate
   window.location.href = `/admin/invoice-builder.html?${qp.toString()}`;
 }
+
 
 // ---------- API ----------
 async function fetchToBill(tab = 'to-send') {
