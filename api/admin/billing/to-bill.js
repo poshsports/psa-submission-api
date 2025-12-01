@@ -53,19 +53,31 @@ export default async function handler(req, res) {
 
   try {
     // pending = unsent invoices that should appear on the "To send" tab
-    const { data: invoices, error: invErr } = await supabase
-      .from("billing_invoices")
-      .select(`
-        id,
-        status,
-        customer_email,
-        subtotal_cents,
-        total_cents,
-        metadata,
-        created_at
-      `)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
+   const { data: invoices, error: invErr } = await supabase
+  .from("billing_invoices")
+  .select(`
+    id,
+    status,
+    group_code,
+    shopify_customer_id,
+    subtotal_cents,
+    shipping_cents,
+    discount_cents,
+    tax_cents,
+    total_cents,
+    created_at,
+    updated_at,
+    ship_to_name,
+    ship_to_line1,
+    ship_to_line2,
+    ship_to_city,
+    ship_to_region,
+    ship_to_postal,
+    ship_to_country
+  `)
+  .eq("status", "pending")
+  .order("created_at", { ascending: false });
+
 
     if (invErr) {
       console.warn("[to-bill] invoice read failed, will fall back to submissions only:", invErr);
