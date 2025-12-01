@@ -32,28 +32,6 @@ function isOlder(a, b) {
   return na < nb;
 }
 
-function safeParseAddress(raw) {
-  try {
-    if (!raw) return {};
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function normalizeAddress(addr = {}) {
-  const street   = (addr.street   || "").trim().toLowerCase();
-  const address2 = (addr.address2 || "").trim().toLowerCase();
-  const city     = (addr.city     || "").trim().toLowerCase();
-  const state    = (addr.state    || "").trim().toLowerCase();
-  const zip      = (addr.zip      || "").trim();
-
-  return [street, address2, city, state, zip]
-    .filter(Boolean)
-    .join(", ")
-    .replace(/\s+/g, " ");
-}
-
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -65,9 +43,10 @@ export default async function handler(req, res) {
 
   const tab = (req.query.tab || "to-send").toString();
 
-  // -------------------------------------------------------
-  // 1) PENDING INVOICES — unchanged
-  // -------------------------------------------------------
+  // ======================================================
+  // 1) LOAD PENDING INVOICES (unchanged)
+  // ======================================================
+
   let invoiceBundles = [];
   let invoiceAttachedSubIds = new Set();
 
@@ -166,90 +145,51 @@ export default async function handler(req, res) {
     console.warn("[to-bill] invoice section error:", err);
   }
 
-  // -------------------------------------------------------
-  // 2) RAW SUBMISSIONS — GROUP BY EMAIL + NORMALIZED ADDRESS
-  // -------------------------------------------------------
+  // ======================================================
+  // 2) NEW BILLABLE ROWS — DIRECTLY FROM THE VIEW
+  // ======================================================
+
   let emailBundles = [];
 
   try {
-    const { data: submissions, error: subErr } = await supabase
-      .from("admin_submissions_v")
-      .select(
-        "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status, address"
-      )
-      .eq("status", "received_from_psa");
+    const { data: rows, error: rowErr } = await supabase
+      .from("billing_to_bill_v")
+      .select("*");
 
-    if (subErr) {
-      console.error("[to-bill] subsErr:", subErr);
-      return res.status(500).json({ error: "Failed to read submissions" });
+    if (rowErr) {
+      console.error("[to-bill] SQL view error:", rowErr);
+      return res.status(500).json({ error: "Failed to load billing_to_bill_v" });
     }
 
-    if (!submissions?.length)
-      return res.status(200).json({ items: invoiceBundles });
+    for (const r of rows) {
+      // Skip any rows already attached to pending invoices
+      const skip = r.submission_ids.some((id) =>
+        invoiceAttachedSubIds.has(id)
+      );
+      if (skip) continue;
 
-    const grouped = new Map(); // key = `${email}||${normalized}`
-
-    for (const s of submissions) {
-      if (invoiceAttachedSubIds.has(s.submission_id)) continue;
-
-      const email = (s.customer_email || "").trim().toLowerCase();
-
-      const addrObj = safeParseAddress(s.address);
-      const norm = normalizeAddress(addrObj);
-      const key = `${email}||${norm}`;
-
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          customer_email: email,
-          submissions: [],
-          submission_ids: [],
-          groupsSet: new Set(),
-          cards: 0,
-          returned_newest: null,
-          returned_oldest: null,
-          address: {
-            ...addrObj,
-            normalized: norm,
-            raw: s.address,
-          },
-        });
-      }
-
-      const b = grouped.get(key);
-      b.submission_ids.push(s.submission_id);
-      b.submissions.push(s);
-      if (s.group_code) b.groupsSet.add(s.group_code);
-      b.cards += Number(s.cards) || 0;
-
-      const dt = pickReceivedAt(s);
-      if (dt) {
-        if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
-        if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
-      }
+      emailBundles.push({
+        invoice_id: null,
+        customer_email: r.customer_email,
+        submissions: r.submissions,
+        submission_ids: r.submission_ids,
+        groups: [], // no grouping for UI
+        group_codes: [],
+        cards: r.cards,
+        returned_newest: r.returned_newest,
+        returned_oldest: r.returned_oldest,
+        estimated_cents: null,
+        is_split: false,
+        address: r.address, // already JSON from view
+      });
     }
-
-    emailBundles = [...grouped.values()].map((b) => ({
-      invoice_id: null,
-      customer_email: b.customer_email,
-      submissions: b.submissions,
-      submission_ids: b.submission_ids,
-      groups: [...b.groupsSet],
-      group_codes: [...b.groupsSet],
-      cards: b.cards,
-      returned_newest: b.returned_newest,
-      returned_oldest: b.returned_oldest,
-      estimated_cents: null,
-      is_split: false,
-      address: b.address,
-    }));
   } catch (err) {
-    console.error("[to-bill] address/grouping error:", err);
-    return res.status(200).json({ items: invoiceBundles });
+    console.error("[to-bill] address/view grouping error:", err);
   }
 
-  // -------------------------------------------------------
+  // ======================================================
   // 3) FINAL RESULT
-  // -------------------------------------------------------
+  // ======================================================
   return res.status(200).json({
     items: [...invoiceBundles, ...emailBundles],
   });
