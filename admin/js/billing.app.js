@@ -40,6 +40,34 @@ function hideEmpty() {
   if (!el) return;
   el.classList.add('hide');
 }
+function extractNormalizedShipTo(bundle) {
+  if (!bundle?.submissions?.length) return null;
+
+  const sub = bundle.submissions[0];
+let raw = null;
+
+try {
+  raw =
+    typeof sub.address === 'string' ? JSON.parse(sub.address) :
+    sub.address ? sub.address :
+    typeof sub.raw === 'string' ? JSON.parse(sub.raw).address :
+    sub.raw?.address ||
+    null;
+} catch {}
+
+
+  if (!raw) return null;
+
+  return {
+    name:   (raw.name   || '').trim(),
+    line1:  (raw.street || raw.line1 || '').trim(),
+    line2:  (raw.address2 || raw.line2 || '').trim(),
+    city:   (raw.city   || '').trim(),
+    region: (raw.state  || raw.region || '').trim(),
+    postal: (raw.zip    || raw.postal || '').trim(),
+    country:(raw.country || 'US').trim()
+  };
+}
 
 async function ensureDraftForBundle(b) {
   const email  = (b?.customer_email || '').trim();
@@ -63,7 +91,15 @@ async function ensureDraftForBundle(b) {
   // 2) Ask server for the existing draft (if any) scoped to these subs+email
   let prefill = null;
   try {
-    const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(email)}`;
+    const shipTo = extractNormalizedShipTo(b);
+const qp = new URLSearchParams({
+  subs: subIds.join(','),
+  email
+});
+if (shipTo) qp.set('ship_to', JSON.stringify(shipTo));
+
+const url = `${PREFILL_ENDPOINT}?${qp.toString()}`;
+
     prefill = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
   } catch {}
 
@@ -86,11 +122,12 @@ await fetch(PREVIEW_SAVE_ENDPOINT, {
   credentials: 'same-origin',
   body: JSON.stringify({
     customer_email: email,
-    invoice_id: invoiceId,          // null => create; value => append
+    invoice_id: invoiceId,
     items: toSend.map(id => ({ card_id: id, upcharge_cents: 0 })),
-    ship_to: b.address?.raw ? JSON.parse(b.address.raw) : b.address || null
+    ship_to: extractNormalizedShipTo(b)
   })
 });
+
 
   } catch {}
 }
@@ -159,8 +196,16 @@ async function addServerEstimates(bundles = []) {
     // --- STEP 1: call prefill to get invoice id ---
     let pre = null;
     try {
-      const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(email)}`;
-      pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+const shipTo = extractNormalizedShipTo(b);
+const qp = new URLSearchParams({
+  subs: subs.join(','),
+  email
+});
+if (shipTo) qp.set('ship_to', JSON.stringify(shipTo));
+
+const url = `${PREFILL_ENDPOINT}?${qp.toString()}`;
+pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+
       console.log('[addServerEstimates]', email, '→ prefill:', pre);
     } catch (err) {
       console.warn('[addServerEstimates] prefill failed:', err);
@@ -265,7 +310,19 @@ async function sendDraftForEmail(email) {
 
   let invoiceId = null;
   try {
-    const url = `${PREFILL_ENDPOINT}?subs=${encodeURIComponent(subIds.join(','))}&email=${encodeURIComponent(em)}`;
+    let shipTo = null;
+if (bundle?.submissions?.length) {
+  shipTo = extractNormalizedShipTo(bundle);
+}
+
+const qp = new URLSearchParams({
+  subs: subIds.join(','),
+  email: em
+});
+if (shipTo) qp.set('ship_to', JSON.stringify(shipTo));
+
+const url = `${PREFILL_ENDPOINT}?${qp.toString()}`;
+
     const pre = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
     invoiceId = pre?.invoice_id || null;
   } catch {}
