@@ -621,12 +621,15 @@ if (normalized.length === 0) {
   return;
 }
 
-  // --- Existing "To send" behavior (now with server-backed estimate) ---
   let rows = await fetchToBill();
   if (!Array.isArray(rows)) rows = [];
 
-  // Pull the same total used by the invoice builder (prefill)
-  rows = await addServerEstimates(rows);
+  // If rows already come from invoices (have invoice_id / estimated_cents),
+  // skip extra prefill/cards-preview calls.
+  const isInvoiceMode = rows.some(r => r.invoice_id);
+  if (!isInvoiceMode) {
+    rows = await addServerEstimates(rows);
+  }
 
   const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
 
