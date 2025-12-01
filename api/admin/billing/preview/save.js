@@ -52,6 +52,38 @@ function normalizeShipTo(raw) {
   return { name, line1, line2, city, region, postal, country };
 }
 
+function normalizeShipKeyFromShipTo(shipTo) {
+  if (!shipTo) return '';
+  const line1  = String(shipTo.line1  || '').trim().toLowerCase();
+  const line2  = String(shipTo.line2  || '').trim().toLowerCase();
+  const city   = String(shipTo.city   || '').trim().toLowerCase();
+  const region = String(shipTo.region || '').trim().toLowerCase();
+  const postal = String(shipTo.postal || '').trim().toLowerCase();
+  const country= String(shipTo.country || 'US').trim().toLowerCase();
+
+  const base = [line1, line2, city, region, postal, country]
+    .filter(Boolean)
+    .join(', ');
+
+  return base.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeShipKeyFromInvoice(inv) {
+  if (!inv) return '';
+  const line1  = String(inv.ship_to_line1  || '').trim().toLowerCase();
+  const line2  = String(inv.ship_to_line2  || '').trim().toLowerCase();
+  const city   = String(inv.ship_to_city   || '').trim().toLowerCase();
+  const region = String(inv.ship_to_region || '').trim().toLowerCase();
+  const postal = String(inv.ship_to_postal || '').trim().toLowerCase();
+  const country= String(inv.ship_to_country || 'US').trim().toLowerCase();
+
+  const base = [line1, line2, city, region, postal, country]
+    .filter(Boolean)
+    .join(', ');
+
+  return base.replace(/\s+/g, ' ').trim();
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -72,6 +104,7 @@ export default async function handler(req, res) {
 
     const shipTo  = normalizeShipTo(ship_to);
     const email   = String(customer_email || '').trim().toLowerCase();
+    const shipKey = shipTo ? normalizeShipKeyFromShipTo(shipTo) : '';
     const list    = Array.isArray(items) ? items : [];
     const forceNew = Boolean(force_new); // normalized flag
 
@@ -159,40 +192,83 @@ export default async function handler(req, res) {
       let existing = null;
 
       if (!forceNew && !incomingInvoiceId) {
-        // A) Try to reuse via existing links (any of the submissions already linked to an open invoice)
-        const { data: links, error: linkErr } = await client
-          .from('billing_invoice_submissions')
-          .select('invoice_id')
-          .in('submission_code', subCodes);
-        if (linkErr) return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
+    // A) Try to reuse via existing links (any of the submissions already linked to an open invoice)
+    const { data: links, error: linkErr } = await client
+      .from('billing_invoice_submissions')
+      .select('invoice_id')
+      .in('submission_code', subCodes);
+    if (linkErr) {
+      return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
+    }
 
-        if (links?.length) {
-          const invIds = uniq(links.map(l => l.invoice_id));
-          const { data: invs, error: invErr } = await client
-            .from('billing_invoices')
-            .select('id, status, updated_at')
-            .in('id', invIds)
-            .in('status', ['pending', 'draft']);
-          if (invErr) return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
-          if (invs?.length) {
-            invs.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-            existing = invs[0];
-          }
-        }
+    if (links?.length) {
+      const invIds = uniq(links.map(l => l.invoice_id));
+      const { data: invs, error: invErr } = await client
+        .from('billing_invoices')
+        .select(`
+          id,
+          status,
+          updated_at,
+          ship_to_line1,
+          ship_to_line2,
+          ship_to_city,
+          ship_to_region,
+          ship_to_postal,
+          ship_to_country
+        `)
+        .in('id', invIds)
+        .in('status', ['pending', 'draft']);
+      if (invErr) {
+        return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
+      }
 
-        // B) Fallback: reuse by (shopify_customer_id, group_code) unique-open rule
-        if (!existing) {
-          const { data: invs2, error: inv2Err } = await client
-            .from('billing_invoices')
-            .select('id, updated_at')
-            .eq('shopify_customer_id', shopify_customer_id)
-            .eq('group_code', group_code)
-            .in('status', ['pending', 'draft'])
-            .order('updated_at', { ascending: false })
-            .limit(1);
-          if (inv2Err) return json(res, 500, { error: 'Failed to read open invoice by customer/group', details: inv2Err.message });
-          if (invs2 && invs2.length) existing = invs2[0];
-        }
+      let candidates = invs || [];
+      // If we have an incoming ship_to, only reuse invoices with the SAME normalized address
+      if (shipKey) {
+        candidates = candidates.filter(inv => normalizeShipKeyFromInvoice(inv) === shipKey);
+      }
+
+      if (candidates.length) {
+        // Prefer the most recently updated
+        candidates.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        existing = candidates[0];
+      }
+    }
+      }
+
+    // B) Fallback: reuse by (shopify_customer_id, group_code) unique-open rule,
+    //     but ONLY if address matches when we know the ship_to.
+    if (!existing) {
+      const { data: invs2, error: inv2Err } = await client
+        .from('billing_invoices')
+        .select(`
+          id,
+          updated_at,
+          ship_to_line1,
+          ship_to_line2,
+          ship_to_city,
+          ship_to_region,
+          ship_to_postal,
+          ship_to_country
+        `)
+        .eq('shopify_customer_id', shopify_customer_id)
+        .eq('group_code', group_code)
+        .in('status', ['pending', 'draft'])
+        .order('updated_at', { ascending: false });
+      if (inv2Err) {
+        return json(res, 500, { error: 'Failed to read open invoice by customer/group', details: inv2Err.message });
+      }
+
+      let candidates2 = invs2 || [];
+      if (shipKey) {
+        candidates2 = candidates2.filter(inv => normalizeShipKeyFromInvoice(inv) === shipKey);
+      }
+
+      if (candidates2.length) {
+        existing = candidates2[0];
+      }
+    }
+
       }
 
       if (existing) {
