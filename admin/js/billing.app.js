@@ -80,16 +80,18 @@ async function ensureDraftForBundle(b) {
   if (!toSend.length) return;
 
   try {
-    await fetch(PREVIEW_SAVE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        customer_email: email,
-        invoice_id: invoiceId,          // null => create; value => append
-        items: toSend.map(id => ({ card_id: id, upcharge_cents: 0 }))
-      })
-    });
+await fetch(PREVIEW_SAVE_ENDPOINT, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'same-origin',
+  body: JSON.stringify({
+    customer_email: email,
+    invoice_id: invoiceId,          // null => create; value => append
+    items: toSend.map(id => ({ card_id: id, upcharge_cents: 0 })),
+    ship_to: b.address?.raw ? JSON.parse(b.address.raw) : b.address || null
+  })
+});
+
   } catch {}
 }
 
