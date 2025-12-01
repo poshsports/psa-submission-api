@@ -177,94 +177,91 @@ export default async function handler(req, res) {
     console.warn("[to-bill] unexpected invoice mode error:", err);
   }
 
-  // -------------------------------------------------------
-  // 2) RAW SUBMISSIONS (no pending invoice yet)
-  //    → GROUPED PURELY BY EMAIL
-  // -------------------------------------------------------
-  let emailBundles = [];
+      // -------------------------------------------------------
+    // 2) RAW SUBMISSIONS (no pending invoice yet)
+    //    → GROUPED PURELY BY EMAIL (ONE ROW PER EMAIL)
+    // -------------------------------------------------------
+    let emailBundles = [];
 
-  try {
-    const { data: submissions, error: subErr } = await supabase
-      .from("admin_submissions_v")
-      .select(
-        "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
-      )
-      .eq("status", "received_from_psa");
+    try {
+      const { data: submissions, error: subErr } = await supabase
+        .from("admin_submissions_v")
+        .select(
+          "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
+        )
+        .eq("status", "received_from_psa");
 
-    if (subErr) {
-      console.error("[to-bill] subsErr (combined mode):", subErr);
-      return res.status(500).json({ error: "Failed to read submissions" });
-    }
+      if (subErr) {
+        console.error("[to-bill] subsErr (combined mode):", subErr);
+        return res.status(500).json({ error: "Failed to read submissions" });
+      }
 
-    if (!submissions || submissions.length === 0) {
-      // nothing raw; just return any pending invoice rows
+      if (!submissions || submissions.length === 0) {
+        return res.status(200).json({ items: invoiceBundles });
+      }
+
+      const grouped = new Map(); // email → bundle
+
+      for (const s of submissions) {
+        if (invoiceAttachedSubIds.has(s.submission_id)) continue;
+
+        const email = (s.customer_email || "").trim();
+
+        if (!grouped.has(email)) {
+          grouped.set(email, {
+            customer_email: email,
+            submissions: [],
+            submission_ids: [],
+            groupsSet: new Set(),
+            cards: 0,
+            returned_newest: null,
+            returned_oldest: null,
+            is_split: false,
+          });
+        }
+
+        const b = grouped.get(email);
+
+        b.submission_ids.push(s.submission_id);
+        b.submissions.push({
+          submission_id: s.submission_id,
+          group_code: s.group_code,
+          cards: s.cards,
+          created_at: s.created_at,
+          last_updated_at: s.last_updated_at,
+          status: s.status,
+        });
+
+        if (s.group_code) b.groupsSet.add(s.group_code);
+        b.cards += Number(s.cards) || 0;
+
+        const dt = pickReceivedAt(s);
+        if (dt) {
+          if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
+          if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
+        }
+      }
+
+      // Convert map → ONE bundle per email
+      emailBundles = [...grouped.values()].map((b) => ({
+        invoice_id: null,
+        customer_email: b.customer_email,
+        submissions: b.submissions,
+        submission_ids: b.submission_ids,
+        groups: Array.from(b.groupsSet),
+        group_codes: Array.from(b.groupsSet),
+        cards: b.cards,
+        returned_newest: b.returned_newest,
+        returned_oldest: b.returned_oldest,
+        estimated_cents: null,
+        is_split: false,
+      }));
+
+    } catch (err) {
+      console.error("[to-bill] unexpected combined-mode error:", err);
       return res.status(200).json({ items: invoiceBundles });
     }
 
-    const grouped = new Map(); // KEY = email ONLY
-
-    for (const s of submissions) {
-      // Skip if this submission is already attached to a pending invoice
-      if (invoiceAttachedSubIds.has(s.submission_id)) continue;
-
-      const email = (s.customer_email || "").trim();
-
-      // we STILL group by email even if it's blank, but in your data it’s set
-      if (!grouped.has(email)) {
-        grouped.set(email, {
-          customer_email: email,
-          submissions: [],
-          submission_ids: [],
-          groupsSet: new Set(),
-          cards: 0,
-          returned_newest: null,
-          returned_oldest: null,
-          is_split: false, // unsplit bundles
-        });
-      }
-
-      const b = grouped.get(email);
-
-      b.submission_ids.push(s.submission_id);
-      b.submissions.push({
-        submission_id: s.submission_id,
-        group_code: s.group_code,
-        cards: s.cards,
-        created_at: s.created_at,
-        last_updated_at: s.last_updated_at,
-        status: s.status,
-      });
-
-      if (s.group_code) b.groupsSet.add(s.group_code);
-      b.cards += Number(s.cards) || 0;
-
-      const dt = pickReceivedAt(s);
-      if (dt) {
-        if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
-        if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
-      }
-    }
-
-// We must collapse ALL submissions under the same email into ONE item.
-emailBundles = [{
-  invoice_id: null,
-  customer_email: Array.from(grouped.keys())[0] || "",
-  submissions: [].concat(...[...grouped.values()].map((b) => b.submissions)),
-  submission_ids: [].concat(...[...grouped.values()].map((b) => b.submission_ids)),
-  groups: Array.from(new Set([].concat(...[...grouped.values()].map((b) => Array.from(b.groupsSet))))),
-  group_codes: Array.from(new Set([].concat(...[...grouped.values()].map((b) => Array.from(b.groupsSet))))),
-  cards: [...grouped.values()].reduce((sum, b) => sum + b.cards, 0),
-  returned_newest: [...grouped.values()].map((b) => b.returned_newest).sort().reverse()[0] || null,
-  returned_oldest: [...grouped.values()].map((b) => b.returned_oldest).sort()[0] || null,
-  estimated_cents: null,
-  is_split: false,
-}];
-
-  } catch (err) {
-    console.error("[to-bill] unexpected combined-mode error:", err);
-    // worst case: at least return invoice bundles so page isn’t blank
-    return res.status(200).json({ items: invoiceBundles });
-  }
 
   // -------------------------------------------------------
   // 3) FINAL RESULT
