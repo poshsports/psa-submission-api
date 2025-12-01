@@ -7,6 +7,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+// Helpers
 function pickReceivedAt(row) {
   return row.last_updated_at || row.created_at || null;
 }
@@ -29,6 +30,28 @@ function isOlder(a, b) {
   if (Number.isNaN(na)) return false;
   if (Number.isNaN(nb)) return true;
   return na < nb;
+}
+
+function safeParseAddress(raw) {
+  try {
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeAddress(addr = {}) {
+  const street   = (addr.street   || "").trim().toLowerCase();
+  const address2 = (addr.address2 || "").trim().toLowerCase();
+  const city     = (addr.city     || "").trim().toLowerCase();
+  const state    = (addr.state    || "").trim().toLowerCase();
+  const zip      = (addr.zip      || "").trim();
+
+  return [street, address2, city, state, zip]
+    .filter(Boolean)
+    .join(", ")
+    .replace(/\s+/g, " ");
 }
 
 export default async function handler(req, res) {
@@ -73,7 +96,7 @@ export default async function handler(req, res) {
         .select("invoice_id, submission_code")
         .in("invoice_id", invoiceIds);
 
-      const subCodes = [...new Set(links?.map((x) => x.submission_code) || [])];
+      const subCodes = [...new Set(links?.map((l) => l.submission_code) || [])];
       invoiceAttachedSubIds = new Set(subCodes);
 
       const { data: subs } = await supabase
@@ -144,49 +167,16 @@ export default async function handler(req, res) {
   }
 
   // -------------------------------------------------------
-  // 2) RAW SUBMISSIONS — GROUP BY email + normalized_address
+  // 2) RAW SUBMISSIONS — GROUP BY EMAIL + NORMALIZED ADDRESS
   // -------------------------------------------------------
   let emailBundles = [];
 
   try {
     const { data: submissions, error: subErr } = await supabase
       .from("admin_submissions_v")
-      .select(`
-        submission_id,
-        customer_email,
-        group_code,
-        cards,
-        created_at,
-        last_updated_at,
-        status,
-        address,
-
-        address_name:     sql=(address::jsonb->>'name'),
-        address_street:   sql=(address::jsonb->>'street'),
-        address_address2: sql=(address::jsonb->>'address2'),
-        address_city:     sql=(address::jsonb->>'city'),
-        address_state:    sql=(address::jsonb->>'state'),
-        address_zip:      sql=(address::jsonb->>'zip'),
-        address_country:  sql=(address::jsonb->>'country'),
-
-        normalized_address: sql=lower(
-          regexp_replace(
-            trim(
-              concat_ws(
-                ', ',
-                (address::jsonb->>'street'),
-                (address::jsonb->>'address2'),
-                (address::jsonb->>'city'),
-                (address::jsonb->>'state'),
-                (address::jsonb->>'zip')
-              )
-            ),
-            '\\s+',
-            ' ',
-            'g'
-          )
-        )
-      `)
+      .select(
+        "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status, address"
+      )
       .eq("status", "received_from_psa");
 
     if (subErr) {
@@ -202,8 +192,10 @@ export default async function handler(req, res) {
     for (const s of submissions) {
       if (invoiceAttachedSubIds.has(s.submission_id)) continue;
 
-      const email = (s.customer_email || "").trim();
-      const norm = (s.normalized_address || "").trim();
+      const email = (s.customer_email || "").trim().toLowerCase();
+
+      const addrObj = safeParseAddress(s.address);
+      const norm = normalizeAddress(addrObj);
       const key = `${email}||${norm}`;
 
       if (!grouped.has(key)) {
@@ -215,17 +207,10 @@ export default async function handler(req, res) {
           cards: 0,
           returned_newest: null,
           returned_oldest: null,
-
           address: {
-            name: s.address_name,
-            street: s.address_street,
-            address2: s.address_address2,
-            city: s.address_city,
-            state: s.address_state,
-            zip: s.address_zip,
-            country: s.address_country,
-            raw: s.address,
+            ...addrObj,
             normalized: norm,
+            raw: s.address,
           },
         });
       }
@@ -265,7 +250,7 @@ export default async function handler(req, res) {
   // -------------------------------------------------------
   // 3) FINAL RESULT
   // -------------------------------------------------------
-  const items = [...invoiceBundles, ...emailBundles];
-
-  return res.status(200).json({ items });
+  return res.status(200).json({
+    items: [...invoiceBundles, ...emailBundles],
+  });
 }
