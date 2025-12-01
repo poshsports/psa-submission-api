@@ -7,12 +7,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// Pick the best "received from PSA" timestamp as a string
 function pickReceivedAt(row) {
   return row.last_updated_at || row.created_at || null;
 }
 
-// Compare two date strings safely using Date.parse
 function isNewer(a, b) {
   if (!a) return false;
   if (!b) return true;
@@ -22,6 +20,7 @@ function isNewer(a, b) {
   if (Number.isNaN(nb)) return true;
   return na > nb;
 }
+
 function isOlder(a, b) {
   if (!a) return false;
   if (!b) return true;
@@ -41,18 +40,15 @@ export default async function handler(req, res) {
   const ok = await requireAdmin(req, res);
   if (!ok) return;
 
-  // we only really have a "to-send" tab right now, but keep this
   const tab = (req.query.tab || "to-send").toString();
 
   // -------------------------------------------------------
-  // 1) PENDING INVOICES → one bundle per invoice
+  // 1) PENDING INVOICES — unchanged
   // -------------------------------------------------------
   let invoiceBundles = [];
   let invoiceAttachedSubIds = new Set();
 
   try {
-    // NOTE: billing_invoices DOES NOT have customer_email.
-    // We derive the email from linked submissions instead.
     const { data: invoices, error: invErr } = await supabase
       .from("billing_invoices")
       .select(`
@@ -69,190 +65,146 @@ export default async function handler(req, res) {
       .eq("status", "pending")
       .order("created_at", { ascending: false });
 
-    if (invErr) {
-      console.warn("[to-bill] invoice read failed, skipping invoice mode:", invErr);
-    }
-
-    if (Array.isArray(invoices) && invoices.length > 0) {
+    if (!invErr && invoices?.length) {
       const invoiceIds = invoices.map((i) => i.id);
 
-      const { data: links, error: linkErr } = await supabase
+      const { data: links } = await supabase
         .from("billing_invoice_submissions")
         .select("invoice_id, submission_code")
         .in("invoice_id", invoiceIds);
 
-      if (linkErr) {
-        console.error("[to-bill] linkErr (invoice mode):", linkErr);
-      } else if (Array.isArray(links) && links.length > 0) {
-        const subCodes = [...new Set(links.map((l) => l.submission_code))];
+      const subCodes = [...new Set(links?.map((x) => x.submission_code) || [])];
+      invoiceAttachedSubIds = new Set(subCodes);
 
-        const { data: subs, error: subsErr } = await supabase
-          .from("admin_submissions_v")
-          .select(
-            "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
-          )
-          .in("submission_id", subCodes);
+      const { data: subs } = await supabase
+        .from("admin_submissions_v")
+        .select(
+          "submission_id, customer_email, group_code, cards, created_at, last_updated_at, status"
+        )
+        .in("submission_id", subCodes);
 
-        if (subsErr) {
-          console.error("[to-bill] subsErr (invoice mode):", subsErr);
-        } else {
-          const byId = new Map();
-          for (const s of subs || []) {
-            byId.set(s.submission_id, s);
-          }
+      const lookup = new Map(subs?.map((s) => [s.submission_id, s]) || []);
 
-          // mark which submissions are already attached to a pending invoice
-          invoiceAttachedSubIds = new Set(subCodes.filter(Boolean));
+      const bundles = new Map();
+      for (const inv of invoices) {
+        bundles.set(inv.id, {
+          invoice_id: inv.id,
+          customer_email: null,
+          submissions: [],
+          submission_ids: [],
+          groupsSet: new Set(),
+          cards: 0,
+          returned_newest: null,
+          returned_oldest: null,
+          estimated_cents:
+            inv.total_cents ??
+            (inv.subtotal_cents ?? 0) +
+              (inv.shipping_cents ?? 0) -
+              (inv.discount_cents ?? 0) +
+              (inv.tax_cents ?? 0),
+          is_split: (inv.group_code || "").includes("-SPLIT-"),
+        });
+      }
 
-          const map = new Map(); // invoice_id -> bundle
+      for (const l of links || []) {
+        const b = bundles.get(l.invoice_id);
+        const s = lookup.get(l.submission_code);
+        if (!b || !s) continue;
 
-          for (const inv of invoices) {
-            map.set(inv.id, {
-              invoice_id: inv.id,
-              customer_email: null, // we’ll fill from subs
-              submissions: [],
-              submission_ids: [],
-              groupsSet: new Set(),
-              cards: 0,
-              returned_newest: null,
-              returned_oldest: null,
-              estimated_cents:
-                inv.total_cents ??
-                (inv.subtotal_cents ?? 0) +
-                  (inv.shipping_cents ?? 0) -
-                  (inv.discount_cents ?? 0) +
-                  (inv.tax_cents ?? 0),
-              is_split:
-                typeof inv.group_code === "string" &&
-                inv.group_code.includes("-SPLIT-"),
-            });
-          }
+        b.submission_ids.push(s.submission_id);
+        b.submissions.push(s);
+        if (!b.customer_email) b.customer_email = s.customer_email;
 
-          for (const l of links) {
-            const bundle = map.get(l.invoice_id);
-            const s = byId.get(l.submission_code);
-            if (!bundle || !s) continue;
+        if (s.group_code) b.groupsSet.add(s.group_code);
+        b.cards += Number(s.cards) || 0;
 
-            bundle.submission_ids.push(s.submission_id);
-            bundle.submissions.push({
-              submission_id: s.submission_id,
-              group_code: s.group_code,
-              cards: s.cards,
-              created_at: s.created_at,
-              last_updated_at: s.last_updated_at,
-              status: s.status,
-            });
-
-            if (!bundle.customer_email && s.customer_email) {
-              bundle.customer_email = s.customer_email;
-            }
-
-            if (s.group_code) bundle.groupsSet.add(s.group_code);
-            bundle.cards += Number(s.cards) || 0;
-
-            const dt = pickReceivedAt(s);
-            if (dt) {
-              if (isNewer(dt, bundle.returned_newest)) bundle.returned_newest = dt;
-              if (isOlder(dt, bundle.returned_oldest)) bundle.returned_oldest = dt;
-            }
-          }
-
-          invoiceBundles = [...map.values()].map((b) => ({
-            invoice_id: b.invoice_id,
-            customer_email: b.customer_email || "", // <- for Customer column
-            submissions: b.submissions,
-            submission_ids: b.submission_ids,
-            groups: Array.from(b.groupsSet),
-            group_codes: Array.from(b.groupsSet),
-            cards: b.cards,
-            returned_newest: b.returned_newest,
-            returned_oldest: b.returned_oldest,
-            estimated_cents: b.estimated_cents,
-            is_split: b.is_split,
-          }));
+        const dt = pickReceivedAt(s);
+        if (dt) {
+          if (isNewer(dt, b.returned_newest)) b.returned_newest = dt;
+          if (isOlder(dt, b.returned_oldest)) b.returned_oldest = dt;
         }
       }
+
+      invoiceBundles = [...bundles.values()].map((b) => ({
+        invoice_id: b.invoice_id,
+        customer_email: b.customer_email,
+        submissions: b.submissions,
+        submission_ids: b.submission_ids,
+        groups: [...b.groupsSet],
+        group_codes: [...b.groupsSet],
+        cards: b.cards,
+        returned_newest: b.returned_newest,
+        returned_oldest: b.returned_oldest,
+        estimated_cents: b.estimated_cents,
+        is_split: b.is_split,
+      }));
     }
   } catch (err) {
-    console.warn("[to-bill] unexpected invoice mode error:", err);
+    console.warn("[to-bill] invoice section error:", err);
   }
 
   // -------------------------------------------------------
-  // 2) RAW SUBMISSIONS (no pending invoice yet)
-  //    → GROUPED BY EMAIL + NORMALIZED ADDRESS (SQL-normalized)
+  // 2) RAW SUBMISSIONS — GROUP BY email + normalized_address
   // -------------------------------------------------------
   let emailBundles = [];
 
   try {
-    // We pull address JSON and derive:
-    // - address_name
-    // - address_street
-    // - address_address2
-    // - address_city
-    // - address_state
-    // - address_zip
-    // - address_country
-    // - normalized_address (lowercased, whitespace-normalized "street, city, state, zip")
     const { data: submissions, error: subErr } = await supabase
       .from("admin_submissions_v")
-      .select(
-        `
-          submission_id,
-          customer_email,
-          group_code,
-          cards,
-          created_at,
-          last_updated_at,
-          status,
-          address,
-          address_name:address::jsonb->>'name',
-          address_street:address::jsonb->>'street',
-          address_address2:address::jsonb->>'address2',
-          address_city:address::jsonb->>'city',
-          address_state:address::jsonb->>'state',
-          address_zip:address::jsonb->>'zip',
-          address_country:address::jsonb->>'country',
-          normalized_address:lower(
-            regexp_replace(
-              trim(
-                concat_ws(
-                  ', ',
-                  coalesce(address::jsonb->>'street',''),
-                  coalesce(address::jsonb->>'city',''),
-                  coalesce(address::jsonb->>'state',''),
-                  coalesce(address::jsonb->>'zip','')
-                )
-              ),
-              '\\s+',
-              ' ',
-              'g'
-            )
+      .select(`
+        submission_id,
+        customer_email,
+        group_code,
+        cards,
+        created_at,
+        last_updated_at,
+        status,
+        address,
+
+        address_name:     sql=(address::jsonb->>'name'),
+        address_street:   sql=(address::jsonb->>'street'),
+        address_address2: sql=(address::jsonb->>'address2'),
+        address_city:     sql=(address::jsonb->>'city'),
+        address_state:    sql=(address::jsonb->>'state'),
+        address_zip:      sql=(address::jsonb->>'zip'),
+        address_country:  sql=(address::jsonb->>'country'),
+
+        normalized_address: sql=lower(
+          regexp_replace(
+            trim(
+              concat_ws(
+                ', ',
+                (address::jsonb->>'street'),
+                (address::jsonb->>'address2'),
+                (address::jsonb->>'city'),
+                (address::jsonb->>'state'),
+                (address::jsonb->>'zip')
+              )
+            ),
+            '\\s+',
+            ' ',
+            'g'
           )
-        `
-      )
+        )
+      `)
       .eq("status", "received_from_psa");
 
     if (subErr) {
-      console.error("[to-bill] subsErr (combined mode):", subErr);
+      console.error("[to-bill] subsErr:", subErr);
       return res.status(500).json({ error: "Failed to read submissions" });
     }
 
-    if (!submissions || submissions.length === 0) {
-      // Only pending invoice rows
+    if (!submissions?.length)
       return res.status(200).json({ items: invoiceBundles });
-    }
 
-    // Map key: email + normalized_address
-    const grouped = new Map(); // key → bundle
+    const grouped = new Map(); // key = `${email}||${normalized}`
 
     for (const s of submissions) {
       if (invoiceAttachedSubIds.has(s.submission_id)) continue;
 
       const email = (s.customer_email || "").trim();
-      const normAddr = (s.normalized_address || "").trim();
-
-      // If there is no email, we still need a key (but it'll be weird).
-      const key = `${email}||${normAddr}`;
+      const norm = (s.normalized_address || "").trim();
+      const key = `${email}||${norm}`;
 
       if (!grouped.has(key)) {
         grouped.set(key, {
@@ -263,35 +215,24 @@ export default async function handler(req, res) {
           cards: 0,
           returned_newest: null,
           returned_oldest: null,
-          is_split: false,
+
           address: {
-            name: s.address_name || null,
-            street: s.address_street || null,
-            address2: s.address_address2 || null,
-            city: s.address_city || null,
-            state: s.address_state || null,
-            zip: s.address_zip || null,
-            country: s.address_country || null,
-            raw: s.address || null,
-            normalized: normAddr || null,
+            name: s.address_name,
+            street: s.address_street,
+            address2: s.address_address2,
+            city: s.address_city,
+            state: s.address_state,
+            zip: s.address_zip,
+            country: s.address_country,
+            raw: s.address,
+            normalized: norm,
           },
         });
       }
 
       const b = grouped.get(key);
-
       b.submission_ids.push(s.submission_id);
-      b.submissions.push({
-        submission_id: s.submission_id,
-        group_code: s.group_code,
-        cards: s.cards,
-        created_at: s.created_at,
-        last_updated_at: s.last_updated_at,
-        status: s.status,
-        // keep raw address on each submission if you ever need it:
-        address: s.address,
-      });
-
+      b.submissions.push(s);
       if (s.group_code) b.groupsSet.add(s.group_code);
       b.cards += Number(s.cards) || 0;
 
@@ -302,32 +243,27 @@ export default async function handler(req, res) {
       }
     }
 
-    // Convert map → ONE bundle per (email + normalized_address)
     emailBundles = [...grouped.values()].map((b) => ({
       invoice_id: null,
       customer_email: b.customer_email,
       submissions: b.submissions,
       submission_ids: b.submission_ids,
-      groups: Array.from(b.groupsSet),
-      group_codes: Array.from(b.groupsSet),
+      groups: [...b.groupsSet],
+      group_codes: [...b.groupsSet],
       cards: b.cards,
       returned_newest: b.returned_newest,
       returned_oldest: b.returned_oldest,
       estimated_cents: null,
       is_split: false,
-      // NEW: shipping info per row (per customer per address)
       address: b.address,
     }));
   } catch (err) {
-    console.error("[to-bill] unexpected combined-mode error:", err);
-    // Even if this fails, still return invoiceBundles so UI doesn't totally die
+    console.error("[to-bill] address/grouping error:", err);
     return res.status(200).json({ items: invoiceBundles });
   }
 
   // -------------------------------------------------------
   // 3) FINAL RESULT
-  //    - Pending invoice rows (already split)
-  //    - PLUS one row per (email + normalized address) for remaining subs
   // -------------------------------------------------------
   const items = [...invoiceBundles, ...emailBundles];
 
