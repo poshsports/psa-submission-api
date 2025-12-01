@@ -1,28 +1,8 @@
-// /api/admin/billing/preview/save.js  (ESM, Vercel serverless)
+// /api/admin/billing/preview/save.js  (ESM)
 import { sb } from '../../../_util/supabase.js';
 import { requireAdmin } from '../../../_util/adminAuth.js';
 
 const DEFAULTS = { grade_fee_cents: 2000, shipping_cents: 500 };
-
-// Pull per-card grading cents from canonical view
-async function fetchGradingCentsByCard(cardIds) {
-  if (!Array.isArray(cardIds) || !cardIds.length) return {};
-  const { data, error } = await sb()
-    .from('billing_invoice_cards_v')
-    .select('card_id, grading_amount')
-    .in('card_id', cardIds);
-  if (error) return {};
-  const map = {};
-  for (const row of data) {
-    map[String(row.card_id)] = Number(row.grading_amount) || 0; // in cents
-  }
-  return map;
-}
-
-function json(res, status, payload) {
-  res.status(status).setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(payload));
-}
 
 async function readBody(req) {
   const chunks = [];
@@ -34,55 +14,86 @@ async function readBody(req) {
   }
 }
 
-const uniq = (arr) => Array.from(new Set(arr));
+function json(res, status, payload) {
+  res.status(status).setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
+}
+
+/* -------------------------------------------------------
+   ADDRESS NORMALIZATION (MUST MATCH to-bill + prefill)
+------------------------------------------------------- */
 
 function normalizeShipTo(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
-  const name   = String(raw.name   || raw.contact   || raw.full_name || raw.first_last || raw.attn || '').trim();
-  const line1  = String(raw.line1  || raw.address1  || raw.addr1     || raw.street     || '').trim();
-  const line2  = String(raw.line2  || raw.address2  || raw.addr2     || '').trim();
+  const line1  = String(raw.line1  || raw.address1 || raw.street || '').trim();
+  const line2  = String(raw.line2  || raw.address2 || '').trim();
   const city   = String(raw.city   || '').trim();
-  const region = String(raw.region || raw.state || raw.province || '').trim();
-  const postal = String(raw.postal || raw.zip || raw.postal_code || raw.postcode || '').trim();
+  const region = String(raw.region || raw.state || '').trim();
+  const postal = String(raw.postal || raw.zip || '').trim();
   const country= String(raw.country || 'US').trim();
 
-  if (!name && !line1 && !line2 && !city && !region && !postal && !country) return null;
+  if (!line1 && !city && !postal) return null;
 
-  return { name, line1, line2, city, region, postal, country };
+  return { line1, line2, city, region, postal, country };
 }
 
 function normalizeShipKeyFromShipTo(shipTo) {
   if (!shipTo) return '';
-  const line1  = String(shipTo.line1  || '').trim().toLowerCase();
-  const line2  = String(shipTo.line2  || '').trim().toLowerCase();
-  const city   = String(shipTo.city   || '').trim().toLowerCase();
-  const region = String(shipTo.region || '').trim().toLowerCase();
-  const postal = String(shipTo.postal || '').trim().toLowerCase();
-  const country= String(shipTo.country || 'US').trim().toLowerCase();
-
-  const base = [line1, line2, city, region, postal, country]
+  const parts = [
+    shipTo.line1,
+    shipTo.line2,
+    shipTo.city,
+    shipTo.region,
+    shipTo.postal,
+    shipTo.country
+  ];
+  return parts
+    .map(p => String(p || '').trim().toLowerCase())
     .filter(Boolean)
-    .join(', ');
-
-  return base.replace(/\s+/g, ' ').trim();
+    .join(', ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeShipKeyFromInvoice(inv) {
   if (!inv) return '';
-  const line1  = String(inv.ship_to_line1  || '').trim().toLowerCase();
-  const line2  = String(inv.ship_to_line2  || '').trim().toLowerCase();
-  const city   = String(inv.ship_to_city   || '').trim().toLowerCase();
-  const region = String(inv.ship_to_region || '').trim().toLowerCase();
-  const postal = String(inv.ship_to_postal || '').trim().toLowerCase();
-  const country= String(inv.ship_to_country || 'US').trim().toLowerCase();
-
-  const base = [line1, line2, city, region, postal, country]
+  const parts = [
+    inv.ship_to_line1,
+    inv.ship_to_line2,
+    inv.ship_to_city,
+    inv.ship_to_region,
+    inv.ship_to_postal,
+    inv.ship_to_country || 'US'
+  ];
+  return parts
+    .map(p => String(p || '').trim().toLowerCase())
     .filter(Boolean)
-    .join(', ');
-
-  return base.replace(/\s+/g, ' ').trim();
+    .join(', ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
+
+async function fetchGradingCentsByCard(cardIds) {
+  if (!Array.isArray(cardIds) || !cardIds.length) return {};
+  const { data, error } = await sb()
+    .from('billing_invoice_cards_v')
+    .select('card_id, grading_amount')
+    .in('card_id', cardIds);
+
+  if (error) return {};
+  const map = {};
+  for (const row of data) {
+    map[String(row.card_id)] = Number(row.grading_amount) || 0;
+  }
+  return map;
+}
+
+const uniq = (arr) => Array.from(new Set(arr));
+
+/* -------------------------------------------------------
+   MAIN HANDLER
+------------------------------------------------------- */
 
 export default async function handler(req, res) {
   try {
@@ -92,49 +103,57 @@ export default async function handler(req, res) {
     }
     if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
 
-    // Accept force_new, ship_to, and optional group_code_override from callers
+    /* -------------------------------------------
+       INPUTS
+    ------------------------------------------- */
     const {
       customer_email,
       items,
       invoice_id: incomingInvoiceId,
       force_new,
-      ship_to,
-      group_code_override,
+      ship_to
     } = await readBody(req);
 
-    const shipTo  = normalizeShipTo(ship_to);
-    const email   = String(customer_email || '').trim().toLowerCase();
+    const email = String(customer_email || '').trim().toLowerCase();
+    const shipTo = normalizeShipTo(ship_to);
     const shipKey = shipTo ? normalizeShipKeyFromShipTo(shipTo) : '';
-    const list    = Array.isArray(items) ? items : [];
-    const forceNew = Boolean(force_new); // normalized flag
 
-    if (!email) return json(res, 400, { error: 'customer_email is required' });
+    if (!email) return json(res, 400, { error: 'customer_email required' });
+
+    const list = Array.isArray(items) ? items : [];
     if (!list.length) return json(res, 400, { error: 'No items to save' });
 
-    // Normalize -> map card_id => upcharge_cents
+    /* -------------------------------------------
+       NORMALIZE card_ids + upcharges
+    ------------------------------------------- */
     const upMap = new Map();
     const cardIds = [];
+
     for (const it of list) {
       const id = String(it?.card_id || '').trim();
       if (!id) continue;
-      const cents = Math.max(0, Math.round(Number(it?.upcharge_cents || 0)));
-      upMap.set(id, cents);
       cardIds.push(id);
+      upMap.set(id, Math.max(0, Math.round(Number(it?.upcharge_cents || 0))));
     }
     const ids = uniq(cardIds);
-    if (!ids.length) return json(res, 400, { error: 'No valid card ids' });
+    if (!ids.length) return json(res, 400, { error: 'No valid card IDs' });
 
+    // Resolve card → submission_id
     const client = sb();
-
-    // Cards -> submission codes
-    const { data: cards, error: cardsErr } = await client
+    const { data: cards, error: cardErr } = await client
       .from('submission_cards')
       .select('id, submission_id, card_description')
       .in('id', ids);
-    if (cardsErr) return json(res, 500, { error: 'Failed to fetch cards', details: cardsErr.message });
+
+    if (cardErr)
+      return json(res, 500, { error: 'Failed to fetch cards', details: cardErr.message });
+
     if (!cards || cards.length !== ids.length) {
       const got = new Set((cards || []).map(r => r.id));
-      return json(res, 400, { error: 'Some cards not found', missing: ids.filter(x => !got.has(x)) });
+      return json(res, 400, {
+        error: 'Some cards not found',
+        missing: ids.filter(x => !got.has(x))
+      });
     }
 
     const codeByCard = new Map(cards.map(r => [r.id, r.submission_id]));
@@ -143,225 +162,138 @@ export default async function handler(req, res) {
     const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
     if (!subCodes.length) return json(res, 400, { error: 'Cards missing submission codes' });
 
-    // Submissions -> shopify_customer_id (from psa_submissions)
-    const { data: subs, error: subsErr } = await client
-      .from('psa_submissions')
-      .select('submission_id, shopify_customer_id, customer_email')
-      .in('submission_id', subCodes);
-    if (subsErr) return json(res, 500, { error: 'Failed to fetch submissions', details: subsErr.message });
-    if (!subs?.length) return json(res, 400, { error: 'Submissions not found for cards' });
+    /* -----------------------------------------------------------
+       NEW RULE:
+       NO group_code logic.
+       Invoice grouping is email + normalized address ONLY.
+    ----------------------------------------------------------- */
 
-    const shopIds = uniq(subs.map(s => s.shopify_customer_id).filter(Boolean));
-    const shopify_customer_id = shopIds[0] || null;
-    if (!shopify_customer_id) return json(res, 400, { error: 'Missing shopify_customer_id on submissions' });
+    let invoice_id = incomingInvoiceId ? String(incomingInvoiceId) : '';
 
-    // Derive group_code via group_submissions -> groups(code).
-    // If multiple different groups are present, use 'MULTI'.
-    let group_code = 'MULTI';
-    const { data: gs, error: gsErr } = await client
-      .from('group_submissions')
-      .select('group_id, submission_id')
-      .in('submission_id', subCodes);
-    if (gsErr) return json(res, 500, { error: 'Failed to fetch group_submissions', details: gsErr.message });
+    /* -----------------------------------------------------------
+       INVOICE REUSE LOGIC (exact match with prefill)
+       Reuse an invoice only if:
+         – submissions already linked
+         – AND normalized address matches
+    ----------------------------------------------------------- */
 
-    if (gs?.length) {
-      const groupIds = uniq(gs.map(g => g.group_id).filter(Boolean));
-      if (groupIds.length) {
-        const { data: grps, error: gErr } = await client
-          .from('groups')
-          .select('id, code')
-          .in('id', groupIds);
-        if (gErr) return json(res, 500, { error: 'Failed to fetch groups', details: gErr.message });
+    if (!invoice_id && !force_new) {
+      // 1) Does any submission already belong to an open invoice?
+      const { data: links, error: linkErr } = await client
+        .from('billing_invoice_submissions')
+        .select('invoice_id')
+        .in('submission_code', subCodes);
 
-        const codes = uniq((grps || []).map(g => g.code).filter(Boolean));
-        if (codes.length === 1) group_code = codes[0];
-      }
-    }
+      if (linkErr)
+        return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
 
-    // If caller (split-by-address) provides a synthetic group code, use it.
-    if (typeof group_code_override === 'string' && group_code_override.trim()) {
-      group_code = group_code_override.trim();
-    }
-    
-    // ===== Resolve or create invoice =====
-    // Normal flow: reuse an open invoice per customer+group.
-    // If force_new === true, we SKIP reuse logic and always create a new row.
-    let invoice_id = String(incomingInvoiceId || '').trim();
+      if (links?.length) {
+        const invoiceIds = uniq(links.map(l => l.invoice_id));
 
-    if (!invoice_id) {
-      let existing = null;
-
-      if (!forceNew && !incomingInvoiceId) {
-    // A) Try to reuse via existing links (any of the submissions already linked to an open invoice)
-    const { data: links, error: linkErr } = await client
-      .from('billing_invoice_submissions')
-      .select('invoice_id')
-      .in('submission_code', subCodes);
-    if (linkErr) {
-      return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
-    }
-
-    if (links?.length) {
-      const invIds = uniq(links.map(l => l.invoice_id));
-      const { data: invs, error: invErr } = await client
-        .from('billing_invoices')
-        .select(`
-          id,
-          status,
-          updated_at,
-          ship_to_line1,
-          ship_to_line2,
-          ship_to_city,
-          ship_to_region,
-          ship_to_postal,
-          ship_to_country
-        `)
-        .in('id', invIds)
-        .in('status', ['pending', 'draft']);
-      if (invErr) {
-        return json(res, 500, { error: 'Failed to read invoices', details: invErr.message });
-      }
-
-      let candidates = invs || [];
-      // If we have an incoming ship_to, only reuse invoices with the SAME normalized address
-      if (shipKey) {
-        candidates = candidates.filter(inv => normalizeShipKeyFromInvoice(inv) === shipKey);
-      }
-
-      if (candidates.length) {
-        // Prefer the most recently updated
-        candidates.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-        existing = candidates[0];
-      }
-    }
-      }
-
-    // B) Fallback: reuse by (shopify_customer_id, group_code) unique-open rule,
-    //     but ONLY if address matches when we know the ship_to.
-    if (!existing) {
-      const { data: invs2, error: inv2Err } = await client
-        .from('billing_invoices')
-        .select(`
-          id,
-          updated_at,
-          ship_to_line1,
-          ship_to_line2,
-          ship_to_city,
-          ship_to_region,
-          ship_to_postal,
-          ship_to_country
-        `)
-        .eq('shopify_customer_id', shopify_customer_id)
-        .eq('group_code', group_code)
-        .in('status', ['pending', 'draft'])
-        .order('updated_at', { ascending: false });
-      if (inv2Err) {
-        return json(res, 500, { error: 'Failed to read open invoice by customer/group', details: inv2Err.message });
-      }
-
-      let candidates2 = invs2 || [];
-      if (shipKey) {
-        candidates2 = candidates2.filter(inv => normalizeShipKeyFromInvoice(inv) === shipKey);
-      }
-
-      if (candidates2.length) {
-        existing = candidates2[0];
-      }
-    }
-
-      }
-
-      if (existing) {
-        // Normal reuse path
-        invoice_id = existing.id;
-      } else {
-        // C) Create new (handle race with unique index by catching 23505)
-        const now = new Date().toISOString();
-        const { data: inserted, error: insErr } = await client
+        const { data: invs } = await client
           .from('billing_invoices')
-          .insert([{
-            group_code,
-            shopify_customer_id,
-            status: 'pending',
-            currency: 'USD',
-            shipping_cents: DEFAULTS.shipping_cents,
-            subtotal_cents: 0,
-            total_cents: 0,
-            created_at: now,
-            updated_at: now,
-          }])
-          .select('id')
-          .single();
+          .select(`
+            id,
+            status,
+            updated_at,
+            ship_to_line1,
+            ship_to_line2,
+            ship_to_city,
+            ship_to_region,
+            ship_to_postal,
+            ship_to_country
+          `)
+          .in('id', invoiceIds)
+          .in('status', ['pending','draft']);
 
-        if (insErr && insErr.code === '23505') {
-          // If caller explicitly requested a fresh invoice, treat this as a conflict
-          if (forceNew) {
-            return json(res, 409, {
-              error: 'Could not create a second open invoice for this customer/group (unique constraint).',
-              code: 'UNIQUE_OPEN_INVOICE',
-            });
+        if (invs?.length) {
+          let candidates = invs;
+
+          if (shipKey) {
+            candidates = candidates.filter(inv =>
+              normalizeShipKeyFromInvoice(inv) === shipKey
+            );
           }
 
-          // Someone else created the open invoice first — reuse it (normal behavior)
-          const { data: invs3, error: inv3Err } = await client
-            .from('billing_invoices')
-            .select('id')
-            .eq('shopify_customer_id', shopify_customer_id)
-            .eq('group_code', group_code)
-            .in('status', ['pending', 'draft'])
-            .order('updated_at', { ascending: false })
-            .limit(1);
-          if (inv3Err || !invs3?.length) return json(res, 500, { error: 'Race on create but no invoice found' });
-          invoice_id = invs3[0].id;
-        } else if (insErr) {
-          return json(res, 500, { error: 'Failed to create invoice', details: insErr.message });
-        } else {
-          invoice_id = inserted.id;
+          if (candidates.length) {
+            candidates.sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at));
+            invoice_id = candidates[0].id;
+          }
         }
       }
-    } else {
-      const { data: inv, error: invErr } = await client
-        .from('billing_invoices')
-        .select('id')
-        .eq('id', invoice_id)
-        .single();
-      if (invErr || !inv) return json(res, 404, { error: 'invoice_id not found' });
     }
 
-    // If we were given a shipping address, persist it on the invoice
+    /* ----------------------------------------------
+       If no reusable invoice → ALWAYS create new
+    ---------------------------------------------- */
+    if (!invoice_id) {
+      const now = new Date().toISOString();
+      const { data: inserted, error: insErr } = await client
+        .from('billing_invoices')
+        .insert([{
+          status: 'pending',
+          currency: 'USD',
+          shipping_cents: DEFAULTS.shipping_cents,
+          subtotal_cents: 0,
+          total_cents: 0,
+          created_at: now,
+          updated_at: now,
+
+          // Legacy fields kept for UI compatibility:
+          group_code: 'N/A',
+          shopify_customer_id: null
+        }])
+        .select('id')
+        .single();
+
+      if (insErr)
+        return json(res, 500, { error:'Failed to create invoice', details: insErr.message });
+
+      invoice_id = inserted.id;
+    }
+
+    /* ----------------------------------------------
+       WRITE ship_to fields
+    ---------------------------------------------- */
     if (shipTo) {
       const { error: addrErr } = await client
         .from('billing_invoices')
         .update({
-          ship_to_name:   shipTo.name,
-          ship_to_line1:  shipTo.line1,
-          ship_to_line2:  shipTo.line2,
-          ship_to_city:   shipTo.city,
+          ship_to_name: shipTo.name || '',
+          ship_to_line1: shipTo.line1,
+          ship_to_line2: shipTo.line2,
+          ship_to_city: shipTo.city,
           ship_to_region: shipTo.region,
           ship_to_postal: shipTo.postal,
-          ship_to_country: shipTo.country,
+          ship_to_country: shipTo.country
         })
         .eq('id', invoice_id);
-      if (addrErr) {
-        return json(res, 500, { error: 'Failed to update shipping address', details: addrErr.message });
-      }
+
+      if (addrErr)
+        return json(res, 500, { error:'Failed to update shipping', details: addrErr.message });
     }
 
-    // Idempotent clear for these cards (requires submission_card_uuid column)
+    /* ----------------------------------------------
+       CLEAR old service+upcharge rows for these cards
+    ---------------------------------------------- */
     const { error: delErr } = await client
       .from('billing_invoice_items')
       .delete()
       .eq('invoice_id', invoice_id)
-      .in('submission_card_uuid', ids)
-      .in('kind', ['service', 'upcharge']);
-    if (delErr) return json(res, 500, { error: 'Failed to clear existing items', details: delErr.message });
+      .in('submission_card_uuid', ids);
 
-    // Insert grading + upcharge
-    const gradeByCard = await fetchGradingCentsByCard(ids);
+    if (delErr)
+      return json(res, 500, { error:'Failed to clear items', details: delErr.message });
 
+    /* ----------------------------------------------
+       INSERT grading + upcharges
+    ---------------------------------------------- */
+
+    const gradingMap = await fetchGradingCentsByCard(ids);
     const now = new Date().toISOString();
+
     const gradingRows = ids.map(cid => {
-      const unit = Number(gradeByCard[cid]) || DEFAULTS.grade_fee_cents;
+      const unit = Number(gradingMap[cid]) || DEFAULTS.grade_fee_cents;
       return {
         invoice_id,
         submission_card_uuid: cid,
@@ -371,77 +303,80 @@ export default async function handler(req, res) {
         qty: 1,
         unit_cents: unit,
         amount_cents: unit,
-        created_at: now,
+        created_at: now
       };
     });
 
     const upchargeRows = ids.map(cid => {
-      const cents = upMap.get(cid) ?? 0;
-      const desc  = descByCard.get(cid) || '';
+      const cents = upMap.get(cid) || 0;
       return {
         invoice_id,
         submission_card_uuid: cid,
         submission_code: codeByCard.get(cid),
         kind: 'upcharge',
-        title: desc || 'Upcharge',
+        title: descByCard.get(cid) || 'Upcharge',
         qty: 1,
         unit_cents: cents,
         amount_cents: cents,
         meta: { card_id: cid },
-        created_at: now,
+        created_at: now
       };
     });
 
-    const { error: insG } = await client.from('billing_invoice_items').insert(gradingRows);
-    if (insG) return json(res, 500, { error: 'Failed to insert grading items', details: insG.message });
+    await client.from('billing_invoice_items').insert(gradingRows);
+    await client.from('billing_invoice_items').insert(upchargeRows);
 
-    const { error: insU } = await client.from('billing_invoice_items').insert(upchargeRows);
-    if (insU) return json(res, 500, { error: 'Failed to insert upcharge items', details: insU.message });
-
-    // Rebuild invoice<->submission links
-    const { error: delLinks } = await client
+    /* ----------------------------------------------
+       REBUILD invoice ↔ submission links
+    ---------------------------------------------- */
+    await client
       .from('billing_invoice_submissions')
       .delete()
       .eq('invoice_id', invoice_id);
-    if (delLinks) return json(res, 500, { error: 'Failed to clear invoice links', details: delLinks.message });
 
-    const linkRows = uniq(subCodes).map(code => ({ invoice_id, submission_code: code }));
-    const { error: insLinks } = await client
+    const linkRows = uniq(subCodes).map(code => ({
+      invoice_id,
+      submission_code: code
+    }));
+
+    await client
       .from('billing_invoice_submissions')
       .insert(linkRows);
-    if (insLinks) return json(res, 500, { error: 'Failed to insert invoice links', details: insLinks.message });
 
-    // Recompute totals
-    const { data: sums, error: sumErr } = await client
+    /* ----------------------------------------------
+       RECALCULATE totals
+    ---------------------------------------------- */
+    const { data: sums } = await client
       .from('billing_invoice_items')
       .select('amount_cents')
       .eq('invoice_id', invoice_id);
-    if (sumErr) return json(res, 500, { error: 'Failed to load items for totals', details: sumErr.message });
 
-    const subtotal = (sums || []).reduce((a, r) => a + (Number(r.amount_cents) || 0), 0);
+    const subtotal = (sums || []).reduce((a,r)=>a+(Number(r.amount_cents)||0),0);
 
-    const { data: invShip, error: shipErr } = await client
+    const { data: shipRow } = await client
       .from('billing_invoices')
       .select('shipping_cents')
       .eq('id', invoice_id)
       .single();
-    if (shipErr) return json(res, 500, { error: 'Failed to read shipping', details: shipErr.message });
 
-    const shipping = Number(invShip?.shipping_cents ?? DEFAULTS.shipping_cents) || 0;
+    const shipping = Number(shipRow?.shipping_cents || 0);
 
-    const { error: upInv } = await client
+    await client
       .from('billing_invoices')
       .update({
         subtotal_cents: subtotal,
         total_cents: subtotal + shipping,
-        updated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .eq('id', invoice_id);
-    if (upInv) return json(res, 500, { error: 'Failed to update invoice totals', details: upInv.message });
 
-    return json(res, 200, { saved: gradingRows.length + upchargeRows.length, invoice_id });
+    return json(res, 200, {
+      invoice_id,
+      saved: gradingRows.length + upchargeRows.length
+    });
+
   } catch (err) {
-    console.error('[preview/save] error', err);
+    console.error('[save] error', err);
     return json(res, 500, { error: err?.message || String(err) });
   }
 }
