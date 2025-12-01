@@ -245,19 +245,21 @@ export default async function handler(req, res) {
       }
     }
 
-    emailBundles = [...grouped.values()].map((b) => ({
-      invoice_id: null,
-      customer_email: b.customer_email || "",
-      submissions: b.submissions,
-      submission_ids: b.submission_ids,
-      groups: Array.from(b.groupsSet),
-      group_codes: Array.from(b.groupsSet),
-      cards: b.cards,
-      returned_newest: b.returned_newest,
-      returned_oldest: b.returned_oldest,
-      estimated_cents: null, // UI can recompute estimation from cards if needed
-      is_split: b.is_split,
-    }));
+// We must collapse ALL submissions under the same email into ONE item.
+emailBundles = [{
+  invoice_id: null,
+  customer_email: Array.from(grouped.keys())[0] || "",
+  submissions: [].concat(...[...grouped.values()].map((b) => b.submissions)),
+  submission_ids: [].concat(...[...grouped.values()].map((b) => b.submission_ids)),
+  groups: Array.from(new Set([].concat(...[...grouped.values()].map((b) => Array.from(b.groupsSet))))),
+  group_codes: Array.from(new Set([].concat(...[...grouped.values()].map((b) => Array.from(b.groupsSet))))),
+  cards: [...grouped.values()].reduce((sum, b) => sum + b.cards, 0),
+  returned_newest: [...grouped.values()].map((b) => b.returned_newest).sort().reverse()[0] || null,
+  returned_oldest: [...grouped.values()].map((b) => b.returned_oldest).sort()[0] || null,
+  estimated_cents: null,
+  is_split: false,
+}];
+
   } catch (err) {
     console.error("[to-bill] unexpected combined-mode error:", err);
     // worst case: at least return invoice bundles so page isn’t blank
