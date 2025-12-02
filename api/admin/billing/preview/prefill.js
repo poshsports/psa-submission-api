@@ -37,7 +37,7 @@ function normalizeShipKeyFromInvoice(inv) {
     inv.ship_to_city,
     inv.ship_to_region,
     inv.ship_to_postal,
-    inv.ship_to_country || 'us'
+    inv.ship_to_country || 'US'
   ];
 
   return fields
@@ -47,6 +47,7 @@ function normalizeShipKeyFromInvoice(inv) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
 
 // convert incoming shipTo → normalized key
 function normalizeShipKeyFromShipTo(shipTo) {
