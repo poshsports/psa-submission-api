@@ -371,10 +371,19 @@
         invoice_id: draftInvoiceId || null,
       };
 
-      // If we have a single ship-to, let the server persist it on the invoice
-      if (lastBundle?.ship_to) {
-        body.ship_to = lastBundle.ship_to;
-      }
+// Save the address exactly as seen in UI
+if (lastBundle?.ship_to) {
+  body.ship_to = {
+    name:   lastBundle.ship_to.name   || '',
+    line1:  lastBundle.ship_to.line1  || '',
+    line2:  lastBundle.ship_to.line2  || '',
+    city:   lastBundle.ship_to.city   || '',
+    region: lastBundle.ship_to.region || '',
+    postal: lastBundle.ship_to.postal || '',
+    country:lastBundle.ship_to.country|| 'US'
+  };
+}
+
 
       const res = await fetch(SAVE_ENDPOINT, {
         method: 'POST',
@@ -628,12 +637,27 @@
         } catch {}
       }
 
-      const bundle = {
-        customer_email: email,
-        submissions: subs,
-        groups,
-        ship_to
-      };
+// Normalize ship_to object if present
+let normalizedShipTo = null;
+if (ship_to) {
+  normalizedShipTo = {
+    name:   (ship_to.name   || '').trim(),
+    line1:  (ship_to.line1  || '').trim(),
+    line2:  (ship_to.line2  || '').trim(),
+    city:   (ship_to.city   || '').trim(),
+    region: (ship_to.region || '').trim(),
+    postal: (ship_to.postal || '').trim(),
+    country:(ship_to.country|| 'US').trim()
+  };
+}
+
+const bundle = {
+  customer_email: email,
+  submissions: subs,
+  groups,
+  ship_to: normalizedShipTo
+};
+
 
       await populate(bundle);
 
