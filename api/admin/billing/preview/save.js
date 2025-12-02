@@ -4,6 +4,34 @@ import { requireAdmin } from '../../../_util/adminAuth.js';
 
 const DEFAULTS = { grade_fee_cents: 2000, shipping_cents: 500 };
 
+/* -------------------------------------------------------
+   LOOKUP SHOPIFY CUSTOMER ID BY EMAIL
+------------------------------------------------------- */
+async function resolveShopifyCustomerId(email) {
+  if (!email) return null;
+
+  // Try matching psa_submissions (most reliable source)
+  const { data, error } = await sb()
+    .from('psa_submissions')
+    .select('shopify_customer_id')
+    .eq('customer_email', email)
+    .not('shopify_customer_id', 'is', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (data?.shopify_customer_id) return data.shopify_customer_id;
+
+  // If your database has a dedicated customer table, drop-in replacement:
+  // const { data: cust } = await sb()
+  //   .from('customers')
+  //   .select('shopify_customer_id')
+  //   .eq('email', email)
+  //   .maybeSingle();
+  // return cust?.shopify_customer_id || null;
+
+  return null;
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const ch of req) chunks.push(Buffer.from(ch));
@@ -228,34 +256,41 @@ const {
       }
     }
 
-    /* ----------------------------------------------
-       If no reusable invoice → ALWAYS create new
-    ---------------------------------------------- */
-    if (!invoice_id) {
-      const now = new Date().toISOString();
-      const { data: inserted, error: insErr } = await client
-        .from('billing_invoices')
-        .insert([{
-          status: 'pending',
-          currency: 'USD',
-          shipping_cents: DEFAULTS.shipping_cents,
-          subtotal_cents: 0,
-          total_cents: 0,
-          created_at: now,
-          updated_at: now,
+/* ----------------------------------------------
+   If no reusable invoice → ALWAYS create new
+---------------------------------------------- */
+if (!invoice_id) {
+  const now = new Date().toISOString();
 
-          // Legacy fields kept for UI compatibility:
-          group_code: 'N/A',
-          shopify_customer_id: shopify_customer_id || null
-        }])
-        .select('id')
-        .single();
+  // 🔥 IMPORTANT: automatically resolve Shopify ID
+  const resolvedShopifyId = await resolveShopifyCustomerId(email);
 
-      if (insErr)
-        return json(res, 500, { error:'Failed to create invoice', details: insErr.message });
+  const { data: inserted, error: insErr } = await client
+    .from('billing_invoices')
+    .insert([{
+      status: 'pending',
+      currency: 'USD',
+      shipping_cents: DEFAULTS.shipping_cents,
+      subtotal_cents: 0,
+      total_cents: 0,
+      created_at: now,
+      updated_at: now,
 
-      invoice_id = inserted.id;
-    }
+      // Required fields
+      shopify_customer_id: resolvedShopifyId,   // 🔥 FIXED
+
+      // Legacy field
+      group_code: 'N/A'
+    }])
+    .select('id')
+    .single();
+
+  if (insErr)
+    return json(res, 500, { error:'Failed to create invoice', details: insErr.message });
+
+  invoice_id = inserted.id;
+}
+
 
     /* ----------------------------------------------
        WRITE ship_to fields
