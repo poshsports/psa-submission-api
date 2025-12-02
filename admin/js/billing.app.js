@@ -594,17 +594,17 @@ if (tr) {
   const isInteractive = e.target.closest('button, a, input, select, textarea, label');
   if (isInteractive) return;
 
-if (CURRENT_TAB === 'to-send') {
-  const rowId = String(tr.dataset.id || '');
-  const rowBundle = tbl.getRowById(rowId);   // ⭐ get correct bundle
-  if (rowBundle) openBuilder(rowBundle);
-} else {
-    // read-only: open Shopify customer-facing invoice
-    const rowId = String(tr.dataset.id || '');
+  const rowId = String(tr.dataset.id || '');   // <-- define ONCE
+
+  if (CURRENT_TAB === 'to-send') {
+    const rowBundle = tbl.getRowById(rowId);
+    if (rowBundle) openBuilder(rowBundle);
+  } else {
     const url = URL_BY_ROWID.get(rowId);
     if (url) window.open(url, '_blank');
   }
 }
+
   });
 }
 
