@@ -575,17 +575,19 @@ if (draftBtn) {
     return;
   }
 
-  // -------- LEGACY CUSTOMER-BUNDLE ROW (to-send tab) --------
-  const email = extractEmailFromRow(tr);
-  if (!email) return;
-  draftBtn.disabled = true;
-  try {
-    const item = await fetchDraftBundleByEmail(email);
-    if (item) openBuilder(item);
-  } finally {
-    draftBtn.disabled = false;
-  }
-  return;
+// -------- FIXED: Open the actual bundle for this row --------
+const rowId = String(tr.dataset.id || '');
+const rowBundle = tbl.getRowData(rowId);   // ⭐ THIS is the correct bundle
+
+if (!rowBundle) return;
+
+draftBtn.disabled = true;
+try {
+  openBuilder(rowBundle);
+} finally {
+  draftBtn.disabled = false;
+}
+return;
 }
 
 
@@ -595,12 +597,11 @@ if (tr) {
   const isInteractive = e.target.closest('button, a, input, select, textarea, label');
   if (isInteractive) return;
 
-  if (CURRENT_TAB === 'to-send') {
-    const email = extractEmailFromRow(tr);
-    if (!email) return;
-    const item = await fetchDraftBundleByEmail(email);
-    if (item) openBuilder(item);
-  } else {
+if (CURRENT_TAB === 'to-send') {
+  const rowId = String(tr.dataset.id || '');
+  const rowBundle = tbl.getRowData(rowId);   // ⭐ get correct bundle
+  if (rowBundle) openBuilder(rowBundle);
+} else {
     // read-only: open Shopify customer-facing invoice
     const rowId = String(tr.dataset.id || '');
     const url = URL_BY_ROWID.get(rowId);
