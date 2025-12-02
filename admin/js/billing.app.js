@@ -577,7 +577,7 @@ if (draftBtn) {
 
 // -------- FIXED: Open the actual bundle for this row --------
 const rowId = String(tr.dataset.id || '');
-const rowBundle = tbl.getRowData(rowId);   // ⭐ THIS is the correct bundle
+const rowBundle = tbl.getRowById(rowId);   // ⭐ THIS is the correct bundle
 
 if (!rowBundle) return;
 
@@ -599,7 +599,7 @@ if (tr) {
 
 if (CURRENT_TAB === 'to-send') {
   const rowId = String(tr.dataset.id || '');
-  const rowBundle = tbl.getRowData(rowId);   // ⭐ get correct bundle
+  const rowBundle = tbl.getRowById(rowId);   // ⭐ get correct bundle
   if (rowBundle) openBuilder(rowBundle);
 } else {
     // read-only: open Shopify customer-facing invoice
