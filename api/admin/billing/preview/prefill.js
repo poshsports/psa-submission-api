@@ -176,7 +176,7 @@ let shipFields = null;
 let matchedInvoice = null;
 
 // We can only know matched invoice if invoices existed
-if (candidateInvoiceId && links?.length) {
+if (candidateInvoiceId) {
   // Re-fetch the invoice row (safe + simple)
   const { data: invoiceRow, error: inv2Err } = await client
     .from('billing_invoices')
