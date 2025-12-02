@@ -298,17 +298,40 @@
       return r.json();
     }
 
-    function applyPrefill(prefill) {
-      if (!prefill?.items?.length) return;
-      const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
-      document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
-        const id = String(inp.dataset.id || '');
-        const it = map.get(id);
-        if (it) inp.value = (Number(it.upcharge_cents || 0) / 100).toFixed(2);
-      });
-      draftInvoiceId = prefill.invoice_id || null;
-      recalc();
-    }
+function applyPrefill(prefill) {
+  if (!prefill) return;
+
+  // 1️⃣ Apply existing upcharges/items (same as before)
+  if (prefill.items?.length) {
+    const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
+    document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
+      const id = String(inp.dataset.id || '');
+      const it = map.get(id);
+      if (it) inp.value = (Number(it.upcharge_cents || 0) / 100).toFixed(2);
+    });
+  }
+
+  // 2️⃣ Apply invoice id
+  draftInvoiceId = prefill.invoice_id || null;
+
+  // 3️⃣ NEW — apply ship_to
+if (prefill.ship_to) {
+  lastBundle.ship_to = {
+    name:   lastBundle.ship_to?.name || "", // keep existing name, since DB does not store it yet
+    line1:  prefill.ship_to.ship_to_line1  || "",
+    line2:  prefill.ship_to.ship_to_line2  || "",
+    city:   prefill.ship_to.ship_to_city   || "",
+    region: prefill.ship_to.ship_to_region || "",
+    postal: prefill.ship_to.ship_to_postal || "",
+    country:prefill.ship_to.ship_to_country|| "US"
+  };
+
+  renderShipToSingle(lastBundle.ship_to);
+}
+
+
+  recalc();
+}
 
     // Ensure a draft exists once rows are present (silent)
     async function ensureDraftExists() {
