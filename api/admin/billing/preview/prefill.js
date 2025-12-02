@@ -169,10 +169,27 @@ export default async function handler(req, res) {
        This keeps deterministic grouping by (email + address).
     ---------------------------------------------------- */
 
-    return json(res, 200, {
-      invoice_id: candidateInvoiceId || null,
-      items: [] // upcharges added later
-    });
+// If we matched an existing invoice, return its ship-to fields
+let shipFields = null;
+
+if (candidateInvoiceId && candidates?.length) {
+  const inv = candidates[0];
+  shipFields = {
+    ship_to_line1: inv.ship_to_line1,
+    ship_to_line2: inv.ship_to_line2,
+    ship_to_city: inv.ship_to_city,
+    ship_to_region: inv.ship_to_region,
+    ship_to_postal: inv.ship_to_postal,
+    ship_to_country: inv.ship_to_country
+  };
+}
+
+return json(res, 200, {
+  invoice_id: candidateInvoiceId || null,
+  ship_to: shipFields,
+  items: []
+});
+
 
   } catch (err) {
     console.error('[prefill] error', err);
