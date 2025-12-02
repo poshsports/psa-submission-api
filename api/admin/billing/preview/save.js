@@ -26,6 +26,7 @@ function json(res, status, payload) {
 function normalizeShipTo(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
+  const name   = String(raw.name   || raw.full_name || raw.contact || '').trim();
   const line1  = String(raw.line1  || raw.address1 || raw.street || '').trim();
   const line2  = String(raw.line2  || raw.address2 || '').trim();
   const city   = String(raw.city   || '').trim();
@@ -33,10 +34,12 @@ function normalizeShipTo(raw) {
   const postal = String(raw.postal || raw.zip || '').trim();
   const country= String(raw.country || 'US').trim();
 
+  // Require at least enough info to be a real address
   if (!line1 && !city && !postal) return null;
 
-  return { line1, line2, city, region, postal, country };
+  return { name, line1, line2, city, region, postal, country };
 }
+
 
 function normalizeShipKeyFromShipTo(shipTo) {
   if (!shipTo) return '';
@@ -258,15 +261,15 @@ export default async function handler(req, res) {
     if (shipTo) {
       const { error: addrErr } = await client
         .from('billing_invoices')
-        .update({
-          ship_to_name: shipTo.name || '',
-          ship_to_line1: shipTo.line1,
-          ship_to_line2: shipTo.line2,
-          ship_to_city: shipTo.city,
-          ship_to_region: shipTo.region,
-          ship_to_postal: shipTo.postal,
-          ship_to_country: shipTo.country
-        })
+.update({
+  ship_to_name:   shipTo.name || '',
+  ship_to_line1:  shipTo.line1,
+  ship_to_line2:  shipTo.line2,
+  ship_to_city:   shipTo.city,
+  ship_to_region: shipTo.region,
+  ship_to_postal: shipTo.postal,
+  ship_to_country: shipTo.country
+})
         .eq('id', invoice_id);
 
       if (addrErr)
@@ -278,9 +281,10 @@ export default async function handler(req, res) {
     ---------------------------------------------- */
     const { error: delErr } = await client
       .from('billing_invoice_items')
-      .delete()
-      .eq('invoice_id', invoice_id)
-      .in('submission_card_uuid', ids);
+.delete()
+.eq('invoice_id', invoice_id)
+.in('card_id', ids);
+
 
     if (delErr)
       return json(res, 500, { error:'Failed to clear items', details: delErr.message });
@@ -370,10 +374,12 @@ export default async function handler(req, res) {
       })
       .eq('id', invoice_id);
 
-    return json(res, 200, {
-      invoice_id,
-      saved: gradingRows.length + upchargeRows.length
-    });
+return json(res, 200, {
+  invoice_id,
+  ship_to: shipTo || null,
+  saved: gradingRows.length + upchargeRows.length
+});
+
 
   } catch (err) {
     console.error('[save] error', err);
