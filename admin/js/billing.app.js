@@ -548,7 +548,7 @@ if (draftBtn) {
   if (!tr) return;
 
   const rowId = String(tr.dataset.id || '');
-
+  
   // -------- INVOICE-BASED ROW --------
   if (rowId.startsWith('inv:')) {
     const invoiceId = rowId.slice(4);
@@ -575,21 +575,18 @@ if (draftBtn) {
     return;
   }
 
-// -------- FIXED: Open the actual bundle for this row --------
-const rowId = String(tr.dataset.id || '');
-const rowBundle = tbl.getRowById(rowId);   // ⭐ THIS is the correct bundle
+  // -------- FIXED: Open the actual bundle for this row --------
+  const rowBundle = tbl.getRowById(rowId);
+  if (!rowBundle) return;
 
-if (!rowBundle) return;
-
-draftBtn.disabled = true;
-try {
-  openBuilder(rowBundle);
-} finally {
-  draftBtn.disabled = false;
+  draftBtn.disabled = true;
+  try {
+    openBuilder(rowBundle);
+  } finally {
+    draftBtn.disabled = false;
+  }
+  return;
 }
-return;
-}
-
 
 // Row click (ignore controls)
 const tr = e.target.closest('tr[data-id]');
