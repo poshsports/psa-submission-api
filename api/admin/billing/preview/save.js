@@ -142,9 +142,9 @@ const {
   items,
   invoice_id: incomingInvoiceId,
   force_new,
-  ship_to,
-  shopify_customer_id
+  ship_to
 } = await readBody(req);
+
 
 
     const email = String(customer_email || '').trim().toLowerCase();
