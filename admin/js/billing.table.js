@@ -47,7 +47,12 @@ export function normalizeRow(r){
     return Math.max(0, Math.round((now - ms) / 86400000));
   })();
   ro.subs_count = Array.isArray(r.submissions) ? r.submissions.length : (r.subs_count || 0);
-  ro.id = ro.id || `cust:${(r.customer_email||'').toLowerCase()}`;
+  // Do NOT overwrite IDs coming from normalizeBundle()
+// Only fallback to email if nothing was provided
+if (!ro.id) {
+  ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
+}
+
   return ro;
 }
 
