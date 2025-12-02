@@ -109,13 +109,15 @@ export default async function handler(req, res) {
     /* -------------------------------------------
        INPUTS
     ------------------------------------------- */
-    const {
-      customer_email,
-      items,
-      invoice_id: incomingInvoiceId,
-      force_new,
-      ship_to
-    } = await readBody(req);
+const {
+  customer_email,
+  items,
+  invoice_id: incomingInvoiceId,
+  force_new,
+  ship_to,
+  shopify_customer_id
+} = await readBody(req);
+
 
     const email = String(customer_email || '').trim().toLowerCase();
     const shipTo = normalizeShipTo(ship_to);
@@ -244,7 +246,7 @@ export default async function handler(req, res) {
 
           // Legacy fields kept for UI compatibility:
           group_code: 'N/A',
-          shopify_customer_id: null
+          shopify_customer_id: shopify_customer_id || null
         }])
         .select('id')
         .single();
