@@ -419,8 +419,11 @@ function normalizeBundle(b) {
 
   const clientEstimate = estimateRowTotalCents(subs);
 
-  return {
-    id: 'cust:' + String(b.customer_email || '').toLowerCase(),
+return {
+    id: 'cust:' 
+        + String(b.customer_email || '').toLowerCase()
+        + ':' 
+        + String(subs[0]?.submission_id || ''),
     customer_name: b.customer_name || '',
     customer_email: b.customer_email || '',
     submissions: subs,
@@ -431,15 +434,11 @@ function normalizeBundle(b) {
     returned_oldest: toIso(returnedOldest),
     est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
     est_total:       (b.estimated_cents ?? clientEstimate ?? null),
-
-    // Split detection stays the same
     is_split: (b.group_codes || groups).some(g =>
       String(g || '').toLowerCase().includes('split')
     ),
-
-    // ⭐ NEW: expose normalized ship_to for openBuilder()
     ship_to: extractNormalizedShipTo(b) || null
-  };
+};
 }
 
 
