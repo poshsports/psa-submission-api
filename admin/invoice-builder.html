@@ -365,11 +365,14 @@
       const btn = $("btnDraftSave");
       if (!silent && btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
-      const body = {
-        customer_email: email,
-        items,
-        invoice_id: draftInvoiceId || null,
-      };
+const body = {
+  customer_email: email,
+  items,
+  invoice_id: draftInvoiceId || null,
+  ship_to: lastBundle?.ship_to || null,
+  shopify_customer_id: lastBundle?.shopify_customer_id || null
+};
+
 
 // Save the address exactly as seen in UI
 if (lastBundle?.ship_to) {
