@@ -14,6 +14,7 @@ function json(res, status, payload) {
 function normalizeShipTo(raw) {
   if (!raw || typeof raw !== "object") return null;
 
+  const name   = String(raw.name   || raw.full_name || raw.contact || "").trim();
   const line1  = String(raw.line1  || raw.address1 || raw.street || "").trim();
   const line2  = String(raw.line2  || raw.address2 || "").trim();
   const city   = String(raw.city   || "").trim();
@@ -21,10 +22,9 @@ function normalizeShipTo(raw) {
   const postal = String(raw.postal || raw.zip || "").trim();
   const country= String(raw.country || "US").trim();
 
-  // If they're missing all key parts, treat as null
   if (!line1 && !city && !postal) return null;
 
-  return { line1, line2, city, region, postal, country };
+  return { name, line1, line2, city, region, postal, country };
 }
 
 // convert invoice DB row → normalized key
@@ -58,7 +58,7 @@ function normalizeShipKeyFromShipTo(shipTo) {
     shipTo.city,
     shipTo.region,
     shipTo.postal,
-    shipTo.country || 'us'
+    (shipTo.country || 'US')
   ];
 
   return fields
