@@ -283,7 +283,7 @@ export default async function handler(req, res) {
       .from('billing_invoice_items')
 .delete()
 .eq('invoice_id', invoice_id)
-.in('card_id', ids);
+.in('submission_card_uuid', ids);
 
 
     if (delErr)
