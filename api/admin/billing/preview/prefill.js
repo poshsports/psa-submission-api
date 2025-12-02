@@ -169,19 +169,41 @@ export default async function handler(req, res) {
        This keeps deterministic grouping by (email + address).
     ---------------------------------------------------- */
 
-// If we matched an existing invoice, return its ship-to fields
+/* ----------------------------------------------------
+   Use matched invoice to return ship-to fields
+---------------------------------------------------- */
 let shipFields = null;
+let matchedInvoice = null;
 
-if (candidateInvoiceId && candidates?.length) {
-  const inv = candidates[0];
-  shipFields = {
-    ship_to_line1: inv.ship_to_line1,
-    ship_to_line2: inv.ship_to_line2,
-    ship_to_city: inv.ship_to_city,
-    ship_to_region: inv.ship_to_region,
-    ship_to_postal: inv.ship_to_postal,
-    ship_to_country: inv.ship_to_country
-  };
+// We can only know matched invoice if invoices existed
+if (candidateInvoiceId && links?.length) {
+  // Re-fetch the invoice row (safe + simple)
+  const { data: invoiceRow, error: inv2Err } = await client
+    .from('billing_invoices')
+    .select(`
+      id,
+      ship_to_line1,
+      ship_to_line2,
+      ship_to_city,
+      ship_to_region,
+      ship_to_postal,
+      ship_to_country
+    `)
+    .eq('id', candidateInvoiceId)
+    .maybeSingle();
+
+  if (!inv2Err && invoiceRow) {
+    matchedInvoice = invoiceRow;
+
+    shipFields = {
+      ship_to_line1: invoiceRow.ship_to_line1,
+      ship_to_line2: invoiceRow.ship_to_line2,
+      ship_to_city: invoiceRow.ship_to_city,
+      ship_to_region: invoiceRow.ship_to_region,
+      ship_to_postal: invoiceRow.ship_to_postal,
+      ship_to_country: invoiceRow.ship_to_country
+    };
+  }
 }
 
 return json(res, 200, {
@@ -189,6 +211,7 @@ return json(res, 200, {
   ship_to: shipFields,
   items: []
 });
+
 
 
   } catch (err) {
