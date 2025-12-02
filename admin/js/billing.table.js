@@ -24,6 +24,12 @@ export function setSort(key, dir) { if (key) sortKey = key; if (dir) sortDir = d
 export function setRows(rows) { allRows = Array.isArray(rows) ? rows : []; pageIndex = 0; }
 export function getSort() { return { sortKey, sortDir }; }
 
+// === Lookup helper: find the full row by its ID ===
+export function getRowById(id) {
+  id = String(id || '').trim();
+  return allRows.find(r => String(r.id || '').trim() === id) || null;
+}
+
 // ===== helpers =====
 function parseMs(v){ if (!v) return null; const ms = Date.parse(v); return Number.isNaN(ms) ? null : ms; }
 
