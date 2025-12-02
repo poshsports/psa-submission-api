@@ -397,12 +397,21 @@ async function batchSendSelected() {
 
 // ---------- Normalization for table rows ----------
 function normalizeBundle(b) {
-  const subs = Array.isArray(b.submissions) ? b.submissions : [];
-  const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
-  const cards = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
+  const addrKey =
+    b.normalized_address_key ||
+    (b.address ? [
+      b.address.street,
+      b.address.address2,
+      b.address.city,
+      b.address.state,
+      b.address.zip,
+      b.address.country
+    ].filter(Boolean).join(' ').toLowerCase().replace(/\s+/g,' ') : '');
 
-  // FIXED: use actual existing fields from admin_submissions_v
-  // We use last_updated_at → created_at (same fallback as API)
+  const subs   = Array.isArray(b.submissions) ? b.submissions : [];
+  const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
+  const cards  = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
+
   const returnedNewest = subs.reduce((acc, s) => {
     const t = Date.parse(s.last_updated_at || s.created_at || '');
     if (Number.isNaN(t)) return acc;
@@ -416,14 +425,14 @@ function normalizeBundle(b) {
   }, null);
 
   const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
-
   const clientEstimate = estimateRowTotalCents(subs);
 
-return {
-    id: 'cust:' 
-        + String(b.customer_email || '').toLowerCase()
-        + ':' 
-        + String(subs[0]?.submission_id || ''),
+  return {
+    id: 'cust:'
+      + String(b.customer_email || '').toLowerCase()
+      + ':'
+      + String(addrKey || ''),
+
     customer_name: b.customer_name || '',
     customer_email: b.customer_email || '',
     submissions: subs,
@@ -438,8 +447,9 @@ return {
       String(g || '').toLowerCase().includes('split')
     ),
     ship_to: extractNormalizedShipTo(b) || null
-};
+  };
 }
+
 
 
 
