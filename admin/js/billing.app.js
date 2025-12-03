@@ -427,6 +427,13 @@ function normalizeBundle(b) {
   const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
   const clientEstimate = estimateRowTotalCents(subs);
 
+  console.log("DEBUG normalizeBundle:", {
+  email: b.customer_email,
+  rawAddress: b.address,
+  normalized_address_key: b.normalized_address_key,
+  computedAddrKey: addrKey
+});
+  
   return {
     id: 'cust:'
       + String(b.customer_email || '').toLowerCase()
