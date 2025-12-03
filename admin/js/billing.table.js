@@ -35,6 +35,7 @@ function parseMs(v){ if (!v) return null; const ms = Date.parse(v); return Numbe
 
 // Normalize billing row (compute derived fields)
 export function normalizeRow(r){
+  console.log("NORMALIZE ROW INPUT:", r.id, r);
   const returnedNewest = r.returned_newest || r.returned || null;
   const returnedOldest = r.returned_oldest || r.returned || null;
   const ro = { ...r };
