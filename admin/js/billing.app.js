@@ -750,7 +750,7 @@ if (normalized.length === 0) {
     rows = await addServerEstimates(rows);
   }
 
-  const normalized = rows.map(normalizeBundle).map(tbl.normalizeRow);
+  const normalized = rows.map(normalizeBundle);
 
 
   // Auto-create drafts for any customers that don't have one yet
