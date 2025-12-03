@@ -397,67 +397,82 @@ async function batchSendSelected() {
 
 // ---------- Normalization for table rows ----------
 function normalizeBundle(b) {
-  const addrKey =
-    b.normalized_address_key ||
-    (b.address ? [
-      b.address.street,
-      b.address.address2,
-      b.address.city,
-      b.address.state,
-      b.address.zip,
-      b.address.country
-    ].filter(Boolean).join(' ').toLowerCase().replace(/\s+/g,' ') : '');
+  // --- 1) Extract address from the FIRST submission ---
+  const subs = Array.isArray(b.submissions) ? b.submissions : [];
+  const first = subs[0] || {};
 
-  const subs   = Array.isArray(b.submissions) ? b.submissions : [];
+  let addr = null;
+
+  try {
+    // submissions[*].address may already be an object OR a JSON string
+    if (first.address) {
+      addr = (typeof first.address === 'string')
+        ? JSON.parse(first.address)
+        : first.address;
+    }
+
+    // fallback: some older submissions stored raw JSON
+    if (!addr && first.raw) {
+      const raw = (typeof first.raw === 'string') ? JSON.parse(first.raw) : first.raw;
+      addr = raw?.address || null;
+    }
+  } catch {
+    addr = null;
+  }
+
+  // --- 2) Build a normalized address key (always lowercase, trimmed, no duplicates) ---
+  const street  = (addr?.street   || addr?.line1    || '').trim().toLowerCase();
+  const line2   = (addr?.address2 || addr?.line2    || '').trim().toLowerCase();
+  const city    = (addr?.city     || '').trim().toLowerCase();
+  const state   = (addr?.state    || addr?.region   || '').trim().toLowerCase();
+  const zip     = (addr?.zip      || addr?.postal   || '').trim().toLowerCase();
+  const country = (addr?.country  || 'us').trim().toLowerCase();
+
+  const addrKey = [street, line2, city, state, zip, country]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ');
+
+  // --- 3) Compute grouping fields ---
   const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
   const cards  = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
 
   const returnedNewest = subs.reduce((acc, s) => {
     const t = Date.parse(s.last_updated_at || s.created_at || '');
-    if (Number.isNaN(t)) return acc;
-    return (acc == null || t > acc) ? t : acc;
+    return (!Number.isNaN(t) && (acc == null || t > acc)) ? t : acc;
   }, null);
 
   const returnedOldest = subs.reduce((acc, s) => {
     const t = Date.parse(s.last_updated_at || s.created_at || '');
-    if (Number.isNaN(t)) return acc;
-    return (acc == null || t < acc) ? t : acc;
+    return (!Number.isNaN(t) && (acc == null || t < acc)) ? t : acc;
   }, null);
 
   const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
-  const clientEstimate = estimateRowTotalCents(subs);
 
-  console.log("DEBUG normalizeBundle:", {
-  email: b.customer_email,
-  rawAddress: b.address,
-  normalized_address_key: b.normalized_address_key,
-  computedAddrKey: addrKey
-});
-  
+  // --- 4) Final normalized row ---
   return {
-    id: 'cust:'
-      + String(b.customer_email || '').toLowerCase()
-      + ':'
-      + String(addrKey || ''),
+    id: `cust:${(b.customer_email || '').toLowerCase()}:${addrKey}`,
 
     customer_name: b.customer_name || '',
     customer_email: b.customer_email || '',
+
     submissions: subs,
     subs_count: subs.length,
+
     groups,
     cards,
+
     returned_newest: toIso(returnedNewest),
     returned_oldest: toIso(returnedOldest),
-    est_total_cents: (b.estimated_cents ?? clientEstimate ?? null),
-    est_total:       (b.estimated_cents ?? clientEstimate ?? null),
-    is_split: (b.group_codes || groups).some(g =>
-      String(g || '').toLowerCase().includes('split')
-    ),
-    ship_to: extractNormalizedShipTo(b) || null
+
+    est_total_cents: b.estimated_cents ?? null,
+    est_total:       b.estimated_cents ?? null,
+
+    is_split: groups.some(g => String(g || '').toLowerCase().includes('split')),
+
+    ship_to: addr || null
   };
 }
-
-
 
 
 // New: normalize invoice records from invoices-list into the same table shape
