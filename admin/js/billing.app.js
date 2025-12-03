@@ -397,43 +397,50 @@ async function batchSendSelected() {
 
 // ---------- Normalization for table rows ----------
 function normalizeBundle(b) {
-  // --- 1) Extract address from the FIRST submission ---
+  // --- Submissions array ---
   const subs = Array.isArray(b.submissions) ? b.submissions : [];
-  const first = subs[0] || {};
 
+  // --- ALWAYS CREATE UNIQUE ROW ID BASED ON SUBMISSION IDS ---
+  // Example:
+  // psa-023 → id = cust:email:psa-023
+  // psa-024 → id = cust:email:psa-024
+  const subIds = subs.map(s => s.submission_id).filter(Boolean).sort();
+  const rowId = `cust:${(b.customer_email || '').toLowerCase()}:${subIds.join(',')}`;
+
+  // --- Extract address for merging logic (NOT for row ID anymore) ---
   let addr = null;
-
   try {
-    // submissions[*].address may already be an object OR a JSON string
+    const first = subs[0] || {};
+
     if (first.address) {
       addr = (typeof first.address === 'string')
         ? JSON.parse(first.address)
         : first.address;
     }
 
-    // fallback: some older submissions stored raw JSON
     if (!addr && first.raw) {
-      const raw = (typeof first.raw === 'string') ? JSON.parse(first.raw) : first.raw;
+      const raw = (typeof first.raw === 'string')
+        ? JSON.parse(first.raw)
+        : first.raw;
       addr = raw?.address || null;
     }
   } catch {
     addr = null;
   }
 
-  // --- 2) Build a normalized address key (always lowercase, trimmed, no duplicates) ---
-  const street  = (addr?.street   || addr?.line1    || '').trim().toLowerCase();
-  const line2   = (addr?.address2 || addr?.line2    || '').trim().toLowerCase();
-  const city    = (addr?.city     || '').trim().toLowerCase();
-  const state   = (addr?.state    || addr?.region   || '').trim().toLowerCase();
-  const zip     = (addr?.zip      || addr?.postal   || '').trim().toLowerCase();
-  const country = (addr?.country  || 'us').trim().toLowerCase();
+  // Normalized address returned to UI (not used for ID)
+  const street  = (addr?.street   || addr?.line1 || '').trim();
+  const line2   = (addr?.address2 || addr?.line2 || '').trim();
+  const city    = (addr?.city     || '').trim();
+  const state   = (addr?.state    || addr?.region || '').trim();
+  const zip     = (addr?.zip      || addr?.postal || '').trim();
+  const country = (addr?.country  || 'US').trim();
 
-  const addrKey = [street, line2, city, state, zip, country]
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ');
+  const normalizedShipTo = (street || line2 || city || state || zip)
+    ? { street, line2, city, state, zip, country }
+    : null;
 
-  // --- 3) Compute grouping fields ---
+  // Grouping + return timestamps
   const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
   const cards  = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
 
@@ -447,11 +454,10 @@ function normalizeBundle(b) {
     return (!Number.isNaN(t) && (acc == null || t < acc)) ? t : acc;
   }, null);
 
-  const toIso = ms => (ms == null ? null : new Date(ms).toISOString());
+  const toIso = (ms) => (ms == null ? null : new Date(ms).toISOString());
 
-  // --- 4) Final normalized row ---
   return {
-    id: `cust:${(b.customer_email || '').toLowerCase()}:${addrKey}`,
+    id: rowId,  // 🔥 UNIQUE ID FIX
 
     customer_name: b.customer_name || '',
     customer_email: b.customer_email || '',
@@ -468,12 +474,13 @@ function normalizeBundle(b) {
     est_total_cents: b.estimated_cents ?? null,
     est_total:       b.estimated_cents ?? null,
 
-    is_split: groups.some(g => String(g || '').toLowerCase().includes('split')),
+    is_split: groups.some(g =>
+      String(g || '').toLowerCase().includes('split')
+    ),
 
-    ship_to: addr || null
+    ship_to: normalizedShipTo
   };
 }
-
 
 // New: normalize invoice records from invoices-list into the same table shape
 function normalizeInvoiceRow(rec) {
