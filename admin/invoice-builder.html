@@ -307,12 +307,7 @@ function normalizeCardRow(r) {
       const subsParam  = encodeURIComponent(submissionIds.join(','));
       const emailParam = encodeURIComponent((lastBundle?.customer_email || '').trim());
       let url = `/api/admin/billing/preview/prefill?subs=${subsParam}&email=${emailParam}`;
-
-      // If we have a ship_to in the bundle, pass it along (helps pick correct invoice if any)
-      if (lastBundle?.ship_to) {
-        url += `&ship_to=${encodeURIComponent(JSON.stringify(lastBundle.ship_to))}`;
-      }
-
+      
       const r = await fetch(url, { credentials: 'same-origin' });
       if (!r.ok) return { invoice_id: null, items: [] };
       return r.json();
@@ -334,21 +329,22 @@ function applyPrefill(prefill) {
   // 2️⃣ Apply invoice id
   draftInvoiceId = prefill.invoice_id || null;
 
-  // 3️⃣ NEW — apply ship_to
+// 3️⃣ NEW — apply ship_to
 if (prefill.ship_to) {
   lastBundle.ship_to = {
-    name:   lastBundle.ship_to?.name || "", // keep existing name, since DB does not store it yet
-    line1:  prefill.ship_to.ship_to_line1  || "",
-    line2:  prefill.ship_to.ship_to_line2  || "",
-    city:   prefill.ship_to.ship_to_city   || "",
-    region: prefill.ship_to.ship_to_region || "",
-    postal: prefill.ship_to.ship_to_postal || "",
-    country:prefill.ship_to.ship_to_country|| "US"
+    name:   prefill.ship_to.ship_to_name   || '',
+    line1:  prefill.ship_to.ship_to_line1  || '',
+    line2:  prefill.ship_to.ship_to_line2  || '',
+    city:   prefill.ship_to.ship_to_city   || '',
+    region: prefill.ship_to.ship_to_region || '',
+    postal: prefill.ship_to.ship_to_postal || '',
+    country: prefill.ship_to.ship_to_country || 'US'
   };
-
-  renderShipToSingle(lastBundle.ship_to);
+} else {
+  lastBundle.ship_to = null;
 }
 
+renderShipToSingle(lastBundle.ship_to);
 
   recalc();
 }
@@ -417,7 +413,6 @@ const body = {
 };
 
 
-// Save the address exactly as seen in UI
 if (lastBundle?.ship_to) {
   body.ship_to = {
     name:   lastBundle.ship_to.name   || '',
@@ -428,7 +423,6 @@ if (lastBundle?.ship_to) {
     postal: lastBundle.ship_to.postal || '',
     country:lastBundle.ship_to.country|| 'US'
   };
-  console.log("SAVE BODY:", body);
 
 }
 
@@ -677,35 +671,12 @@ if (lastBundle?.ship_to) {
       const groups  = (qs.get("groups") || "").split(",").filter(Boolean);
       const email   = qs.get("email") || "";
 
-      let ship_to = null;
-      const shipRaw = qs.get("ship_to");
-      if (shipRaw) {
-        try {
-          ship_to = JSON.parse(shipRaw);
-        } catch {}
-      }
-
-// Normalize ship_to object if present
-let normalizedShipTo = null;
-if (ship_to) {
-  normalizedShipTo = {
-    name:   (ship_to.name   || '').trim(),
-    line1:  (ship_to.line1  || '').trim(),
-    line2:  (ship_to.line2  || '').trim(),
-    city:   (ship_to.city   || '').trim(),
-    region: (ship_to.region || '').trim(),
-    postal: (ship_to.postal || '').trim(),
-    country:(ship_to.country|| 'US').trim()
-  };
-}
-
 const bundle = {
   customer_email: email,
   submissions: subs,
   groups,
-  ship_to: normalizedShipTo
+  ship_to: null // UI should not pre-seed ship_to; backend decides.
 };
-
 
       await populate(bundle);
 
