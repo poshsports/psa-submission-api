@@ -148,8 +148,6 @@ const {
 
 
     const email = String(customer_email || '').trim().toLowerCase();
-    const shipTo = normalizeShipTo(ship_to);
-    const shipKey = shipTo ? normalizeShipKeyFromShipTo(shipTo) : '';
 
     if (!email) return json(res, 400, { error: 'customer_email required' });
 
@@ -206,11 +204,11 @@ const {
 
     let invoice_id = incomingInvoiceId ? String(incomingInvoiceId) : '';
 
-    /* -----------------------------------------------------------
-       INVOICE REUSE LOGIC (exact match with prefill)
+      /* -----------------------------------------------------------
+       INVOICE REUSE LOGIC
        Reuse an invoice only if:
-         – submissions already linked
-         – AND normalized address matches
+         – submissions are already linked
+       (No JS address-key logic; grouping is handled in SQL views)
     ----------------------------------------------------------- */
 
     if (!invoice_id && !force_new) {
@@ -220,13 +218,17 @@ const {
         .select('invoice_id')
         .in('submission_code', subCodes);
 
-      if (linkErr)
-        return json(res, 500, { error: 'Failed to read invoice links', details: linkErr.message });
+      if (linkErr) {
+        return json(res, 500, {
+          error: 'Failed to read invoice links',
+          details: linkErr.message
+        });
+      }
 
       if (links?.length) {
         const invoiceIds = uniq(links.map(l => l.invoice_id));
 
-        const { data: invs } = await client
+        const { data: invs, error: invErr } = await client
           .from('billing_invoices')
           .select(`
             id,
@@ -242,58 +244,22 @@ const {
           .in('id', invoiceIds)
           .in('status', ['pending','draft']);
 
+        if (invErr) {
+          return json(res, 500, {
+            error: 'Failed to read invoices',
+            details: invErr.message
+          });
+        }
+
         if (invs?.length) {
-          let candidates = invs;
-
-          if (shipKey) {
-            candidates = candidates.filter(inv =>
-              normalizeShipKeyFromInvoice(inv) === shipKey
-            );
-          }
-
-          if (candidates.length) {
-            candidates.sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at));
-            invoice_id = candidates[0].id;
-          }
+          // Reuse the most recently updated pending/draft invoice
+          // that is already linked to these submissions.
+          invs.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+          invoice_id = invs[0].id;
         }
       }
     }
-    // 🔹 NEW: If still no invoice_id, try reusing by (customer + address)
-    if (!invoice_id && !force_new && shipKey) {
-      let q = client
-        .from('billing_invoices')
-        .select(`
-          id,
-          status,
-          updated_at,
-          ship_to_line1,
-          ship_to_line2,
-          ship_to_city,
-          ship_to_region,
-          ship_to_postal,
-          ship_to_country,
-          shopify_customer_id
-        `)
-        .in('status', ['pending', 'draft']);
 
-      // If we have a Shopify customer id, restrict to that customer
-      if (resolvedShopifyId) {
-        q = q.eq('shopify_customer_id', resolvedShopifyId);
-      }
-
-      const { data: invsByAddr, error: addrErr } = await q;
-
-      if (!addrErr && invsByAddr?.length) {
-        const candidates = invsByAddr.filter(inv =>
-          normalizeShipKeyFromInvoice(inv) === shipKey
-        );
-
-        if (candidates.length) {
-          candidates.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-          invoice_id = candidates[0].id;
-        }
-      }
-    }
 /* ----------------------------------------------
    If no reusable invoice → ALWAYS create new
 ---------------------------------------------- */
