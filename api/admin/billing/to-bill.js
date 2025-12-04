@@ -194,20 +194,26 @@ export default async function handler(req, res) {
         }
       }
 
-      emailBundles.push({
-        invoice_id: null,
-        customer_email: r.customer_email,
-        submissions: unattachedSubs,
-        submission_ids: unattachedIds,
-        groups: [],        // no group-level grouping here
-        group_codes: [],
-        cards,
-        returned_newest: returnedNewest,
-        returned_oldest: returnedOldest,
-        estimated_cents: null,  // filled later by addServerEstimates
-        is_split: false,
-        address: r.address,     // raw JSON from view (string or jsonb)
-      });
+emailBundles.push({
+  invoice_id: null,
+  customer_email: r.customer_email,
+  submissions: unattachedSubs,
+  submission_ids: unattachedIds,
+  groups: [],
+  group_codes: [],
+  cards,
+  returned_newest: returnedNewest,
+  returned_oldest: returnedOldest,
+  estimated_cents: null,
+  is_split: false,
+
+  // Raw JSON address from SQL view
+  address: r.address,
+
+  // 🔥 NEW: Expose SQL-normalized key for debugging + UI logic
+  normalized_address_key: r.normalized_address_key
+});
+
     }
   } catch (err) {
     console.error("[to-bill] address/view grouping error:", err);
