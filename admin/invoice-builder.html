@@ -721,6 +721,16 @@ const bundle = {
 
       installDirtyLeaveGuards();
     })();
+    // expose key functions globally
+window.save = save;
+window.sendInvoice = sendInvoice;
+window.collectUpcharges = collectUpcharges;
+window.normalizeCardRow = normalizeCardRow;
+Object.defineProperty(window, "lastBundle", {
+  get() { return lastBundle; }
+});
+
+
   </script>
 </body>
 </html>
