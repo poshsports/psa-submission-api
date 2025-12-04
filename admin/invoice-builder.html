@@ -165,19 +165,28 @@
     let lastBundle          = null;
     let pendingNavHref      = null; // for dirty-leave modal
 
-    async function loadSettings() {
-      try {
-        const r = await fetch('/api/admin/settings', { credentials: 'same-origin' });
-        if (r.ok) {
-          const j = await r.json().catch(() => ({}));
-          const s = j?.settings || j || {};
-          SETTINGS = {
-            grade_fee: Number(s.grade_fee) || DEFAULT_SETTINGS.grade_fee,
-            shipping : Number(s.shipping)  || DEFAULT_SETTINGS.shipping,
-          };
-        }
-      } catch {}
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/admin/settings', { credentials: 'same-origin' });
+
+    if (!r.ok) {
+      console.warn("Settings endpoint missing (expected). Using defaults.");
+      return; // ← Prevent module abort
     }
+
+    const j = await r.json().catch(() => ({}));
+    const s = j?.settings || j || {};
+
+    SETTINGS = {
+      grade_fee: Number(s.grade_fee) || DEFAULT_SETTINGS.grade_fee,
+      shipping : Number(s.shipping)  || DEFAULT_SETTINGS.shipping,
+    };
+
+  } catch (err) {
+    console.warn("Settings load failed:", err);
+  }
+}
+
 
     function money(n) {
       const x = Number(n);
