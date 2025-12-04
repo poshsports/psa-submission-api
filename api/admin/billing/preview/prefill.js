@@ -213,16 +213,18 @@ let items = [];
 if (candidateInvoiceId) {
   const { data: itemRows, error: itemErr } = await client
     .from('billing_invoice_items')
-    .select('card_id, upcharge_cents')
-    .eq('invoice_id', candidateInvoiceId);
+    .select('submission_card_uuid, unit_cents, kind')
+    .eq('invoice_id', candidateInvoiceId)
+    .eq('kind', 'upcharge');
 
   if (!itemErr && itemRows) {
     items = itemRows.map(r => ({
-      card_id: String(r.card_id),
-      upcharge_cents: Number(r.upcharge_cents || 0)
+      card_id: String(r.submission_card_uuid),
+      upcharge_cents: Number(r.unit_cents || 0)
     }));
   }
 }
+
 
 /* ----------------------------------------------------
    RETURN FULL PREFILL
