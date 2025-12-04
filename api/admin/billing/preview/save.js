@@ -195,6 +195,9 @@ const {
     const subCodes = uniq(cards.map(r => r.submission_id).filter(Boolean));
     if (!subCodes.length) return json(res, 400, { error: 'Cards missing submission codes' });
 
+    // 🔹 we’ll need this both for reuse and for new invoice
+    const resolvedShopifyId = await resolveShopifyCustomerId(email);
+
     /* -----------------------------------------------------------
        NEW RULE:
        NO group_code logic.
@@ -255,15 +258,47 @@ const {
         }
       }
     }
+    // 🔹 NEW: If still no invoice_id, try reusing by (customer + address)
+    if (!invoice_id && !force_new && shipKey) {
+      let q = client
+        .from('billing_invoices')
+        .select(`
+          id,
+          status,
+          updated_at,
+          ship_to_line1,
+          ship_to_line2,
+          ship_to_city,
+          ship_to_region,
+          ship_to_postal,
+          ship_to_country,
+          shopify_customer_id
+        `)
+        .in('status', ['pending', 'draft']);
 
+      // If we have a Shopify customer id, restrict to that customer
+      if (resolvedShopifyId) {
+        q = q.eq('shopify_customer_id', resolvedShopifyId);
+      }
+
+      const { data: invsByAddr, error: addrErr } = await q;
+
+      if (!addrErr && invsByAddr?.length) {
+        const candidates = invsByAddr.filter(inv =>
+          normalizeShipKeyFromInvoice(inv) === shipKey
+        );
+
+        if (candidates.length) {
+          candidates.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+          invoice_id = candidates[0].id;
+        }
+      }
+    }
 /* ----------------------------------------------
    If no reusable invoice → ALWAYS create new
 ---------------------------------------------- */
 if (!invoice_id) {
   const now = new Date().toISOString();
-
-  // 🔥 IMPORTANT: automatically resolve Shopify ID
-  const resolvedShopifyId = await resolveShopifyCustomerId(email);
 
   const { data: inserted, error: insErr } = await client
     .from('billing_invoices')
@@ -276,21 +311,24 @@ if (!invoice_id) {
       created_at: now,
       updated_at: now,
 
-      // Required fields
-      shopify_customer_id: resolvedShopifyId,   // 🔥 FIXED
+      // 🔥 USE THE RESOLVED VALUE WE ALREADY COMPUTED ABOVE
+      shopify_customer_id: resolvedShopifyId,
 
-      // Legacy field
+      // Legacy
       group_code: 'N/A'
     }])
     .select('id')
     .single();
 
-  if (insErr)
-    return json(res, 500, { error:'Failed to create invoice', details: insErr.message });
+   if (insErr) {
+    return json(res, 500, {
+      error: 'Failed to create invoice',
+      details: insErr.message
+    });
+  }
 
-  invoice_id = inserted.id;
+  invoice_id = inserted.id;   // 🔥 REQUIRED
 }
-
 
     /* ----------------------------------------------
        WRITE ship_to fields
