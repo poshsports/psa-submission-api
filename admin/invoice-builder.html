@@ -349,18 +349,6 @@ renderShipToSingle(lastBundle.ship_to);
   recalc();
 }
 
-    // Ensure a draft exists once rows are present (silent)
-    async function ensureDraftExists() {
-      if (draftInvoiceId) return;
-      const email = (lastBundle?.customer_email || '').trim();
-      if (!email) return;
-
-      const items = collectUpcharges();
-      if (!items.length) return;
-
-      await save(true);
-    }
-
     // ---- Totals ----
     function updateTotals(gradeSum, upchargeSum) {
       const ship     = SETTINGS.shipping;
@@ -650,8 +638,6 @@ if (lastBundle?.ship_to) {
 
       const pre = await loadPrefill(subIds);
       applyPrefill(pre);
-
-      await ensureDraftExists();
     }
 
     // ---- Boot ----
