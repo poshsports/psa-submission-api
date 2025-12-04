@@ -371,20 +371,21 @@ if (!invoice_id) {
     const gradingMap = await fetchGradingCentsByCard(ids);
     const now = new Date().toISOString();
 
-    const gradingRows = ids.map(cid => {
-      const unit = Number(gradingMap[cid]) || DEFAULTS.grade_fee_cents;
-      return {
-        invoice_id,
-        submission_card_uuid: cid,
-        submission_code: codeByCard.get(cid),
-        kind: 'service',
-        title: 'Grading',
-        qty: 1,
-        unit_cents: unit,
-        amount_cents: unit,
-        created_at: now
-      };
-    });
+const gradingRows = ids.map(cid => {
+  const unit = Number(gradingMap[cid]) || DEFAULTS.grade_fee_cents;
+  return {
+    invoice_id,
+    submission_card_uuid: cid,
+    submission_code: codeByCard.get(cid),
+    kind: 'service',
+    title: `Grading – ${descByCard.get(cid) || ''}`,
+    qty: 1,
+    unit_cents: unit,
+    amount_cents: unit,
+    created_at: now
+  };
+});
+
 
     const upchargeRows = ids.map(cid => {
       const cents = upMap.get(cid) || 0;
