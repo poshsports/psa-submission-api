@@ -69,74 +69,6 @@ try {
   };
 }
 
-async function ensureDraftForBundle(b) {
-  const email  = (b?.customer_email || '').trim();
-  const subIds = (Array.isArray(b?.submissions) ? b.submissions : [])
-    .map(s => s?.submission_id)
-    .filter(Boolean);
-
-  if (!email || !subIds.length) return;
-
-  // 1) Get all card IDs for these submissions
-  let cardIds = [];
-  try {
-    const qs = new URLSearchParams({ subs: subIds.join(',') }).toString();
-    const resp = await fetch(`${CARDS_PREVIEW_ENDPOINT}?${qs}`, { credentials: 'same-origin' });
-    const j = await resp.json().catch(() => ({}));
-    const rows = Array.isArray(j?.rows) ? j.rows : [];
-    cardIds = rows.map(r => r?.id || r?.card_id).filter(Boolean);
-  } catch {}
-  if (!cardIds.length) return;
-
-  // 2) Ask server for the existing draft (if any) scoped to these subs+email
-  let prefill = null;
-  try {
-    const shipTo = extractNormalizedShipTo(b);
-const qp = new URLSearchParams({
-  subs: subIds.join(','),
-  email
-});
-if (shipTo) qp.set('ship_to', JSON.stringify(shipTo));
-
-const url = `${PREFILL_ENDPOINT}?${qp.toString()}`;
-
-    prefill = await fetch(url, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
-  } catch {}
-
-  const invoiceId = prefill?.invoice_id || null;
-  const existingIds = new Set(
-    Array.isArray(prefill?.items) ? prefill.items.map(it => String(it.card_id)) : []
-  );
-
-  // 3) Create or append
-  const toSend = (invoiceId == null)
-    ? cardIds
-    : cardIds.filter(id => !existingIds.has(String(id)));
-
-  if (!toSend.length) return;
-
-  try {
-await fetch(PREVIEW_SAVE_ENDPOINT, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  credentials: 'same-origin',
-  body: JSON.stringify({
-    customer_email: email,
-    invoice_id: invoiceId,
-    items: toSend.map(id => ({ card_id: id, upcharge_cents: 0 })),
-    ship_to: extractNormalizedShipTo(b)
-  })
-});
-
-
-  } catch {}
-}
-
-function ensureDraftsForAll(bundles) {
-  // fire-and-forget to avoid blocking table render
-  bundles.forEach(b => { ensureDraftForBundle(b); });
-}
-
 function openBuilder(bundle) {
   if (!bundle) return;
 
@@ -324,9 +256,6 @@ async function sendDraftForEmail(email) {
   // 1) Load the current bundle for this customer
   const bundle = await fetchDraftBundleByEmail(em);
   if (!bundle) return { email: em, ok: false, reason: 'bundle-not-found' };
-
-  // 2) Ensure the draft exists / is up-to-date (creates or appends new cards)
-  await ensureDraftForBundle(bundle);
 
   // 3) Resolve the invoice id via prefill (email + subs)
   const subIds = (Array.isArray(bundle.submissions) ? bundle.submissions : [])
@@ -759,9 +688,6 @@ if (normalized.length === 0) {
 
   const normalized = rows.map(normalizeBundle);
 
-
-  // Auto-create drafts for any customers that don't have one yet
-  ensureDraftsForAll(rows);
 
   tbl.setRows(normalized);
   tbl.applyFilters();
