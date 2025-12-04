@@ -145,7 +145,7 @@ export default async function handler(req, res) {
     console.warn("[to-bill] invoice section error:", err);
   }
 
-  // ======================================================
+   // ======================================================
   // 2) NEW BILLABLE ROWS — DIRECTLY FROM THE VIEW
   // ======================================================
 
@@ -162,25 +162,51 @@ export default async function handler(req, res) {
     }
 
     for (const r of rows) {
-      // Skip any rows already attached to pending invoices
-      const skip = r.submission_ids.some((id) =>
-        invoiceAttachedSubIds.has(id)
-      );
-      if (skip) continue;
+      const subs = Array.isArray(r.submissions) ? r.submissions : [];
+
+      // ✅ Only keep submissions that are NOT already attached
+      const unattachedSubs = [];
+      const unattachedIds  = [];
+
+      for (const s of subs) {
+        const sid = s.submission_id;
+        if (!sid) continue;
+        if (invoiceAttachedSubIds.has(sid)) continue; // skip already-attached
+        unattachedSubs.push(s);
+        unattachedIds.push(sid);
+      }
+
+      // If everything in this row is already attached, skip
+      if (!unattachedIds.length) continue;
+
+      // Recalculate cards + returned_* from the unattached subset
+      let cards = 0;
+      let returnedNewest = null;
+      let returnedOldest = null;
+
+      for (const s of unattachedSubs) {
+        cards += Number(s.cards) || 0;
+
+        const dt = pickReceivedAt(s);
+        if (dt) {
+          if (isNewer(dt, returnedNewest)) returnedNewest = dt;
+          if (isOlder(dt, returnedOldest)) returnedOldest = dt;
+        }
+      }
 
       emailBundles.push({
         invoice_id: null,
         customer_email: r.customer_email,
-        submissions: r.submissions,
-        submission_ids: r.submission_ids,
-        groups: [], // no grouping for UI
+        submissions: unattachedSubs,
+        submission_ids: unattachedIds,
+        groups: [],        // no group-level grouping here
         group_codes: [],
-        cards: r.cards,
-        returned_newest: r.returned_newest,
-        returned_oldest: r.returned_oldest,
-        estimated_cents: null,
+        cards,
+        returned_newest: returnedNewest,
+        returned_oldest: returnedOldest,
+        estimated_cents: null,  // filled later by addServerEstimates
         is_split: false,
-        address: r.address, // already JSON from view
+        address: r.address,     // raw JSON from view (string or jsonb)
       });
     }
   } catch (err) {
