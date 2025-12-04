@@ -145,22 +145,15 @@ export default async function handler(req, res) {
       }
 
       if (invoices?.length) {
-        let candidates = invoices;
-
-        // Must match address exactly if client sent address
-        if (incomingShipKey) {
-          candidates = candidates.filter(inv =>
-            normalizeShipKeyFromInvoice(inv) === incomingShipKey
-          );
-        }
-
-        if (candidates.length) {
-          candidates.sort((a, b) =>
-            new Date(b.updated_at) - new Date(a.updated_at)
-          );
-          candidateInvoiceId = candidates[0].id;
-        }
+        // No more JS address-key logic here.
+        // Just reuse the most recently updated pending/draft invoice
+        // linked to any of these submissions.
+        invoices.sort((a, b) =>
+          new Date(b.updated_at) - new Date(a.updated_at)
+        );
+        candidateInvoiceId = invoices[0].id;
       }
+
     }
 
     /* ----------------------------------------------------
