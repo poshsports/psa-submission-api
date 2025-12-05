@@ -1,114 +1,165 @@
 // /api/admin/billing/bundle.js
-import { createClient } from "@supabase/supabase-js";
+import { sb } from '../../../_util/supabase.js';
+import { requireAdmin } from '../../../_util/adminAuth.js';
+
+function json(res, status, payload) {
+  res.status(status).setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
+}
+
+// Normalize address JSON → ship_to object
+function normalizeShipToFromAddress(addr) {
+  if (!addr) return null;
+
+  let raw = addr;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = null;
+    }
+  }
+  if (!raw || typeof raw !== 'object') return null;
+
+  const name   = String(raw.name   || raw.full_name || raw.contact || '').trim();
+  const line1  = String(raw.street || raw.line1 || raw.address1 || '').trim();
+  const line2  = String(raw.address2 || raw.line2 || '').trim();
+  const city   = String(raw.city   || '').trim();
+  const region = String(raw.state  || raw.region || '').trim();
+  const postal = String(raw.zip    || raw.postal || '').trim();
+  const country= String(raw.country || 'US').trim();
+
+  if (!line1 && !city && !postal) return null;
+
+  return { name, line1, line2, city, region, postal, country };
+}
 
 export default async function handler(req, res) {
-  if (req.method !== "GET")
-    return res.status(405).json({ error: "GET only" });
+  try {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      return json(res, 405, { error: 'Method not allowed' });
+    }
+    if (!requireAdmin(req)) {
+      return json(res, 401, { error: 'Unauthorized' });
+    }
 
-  const subsParam = req.query.subs;
-  if (!subsParam) return res.status(400).json({ error: "Missing subs param" });
+    const subsRaw = String(req.query.subs || '').trim();
+    if (!subsRaw) {
+      return json(res, 400, { error: 'Missing subs query param' });
+    }
 
-  const submission_ids = subsParam.split(",").map(s => s.trim()).filter(Boolean);
-  if (!submission_ids.length)
-    return res.status(400).json({ error: "Invalid subs param" });
+    const submissionCodes = subsRaw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-  );
+    if (!submissionCodes.length) {
+      return json(res, 400, { error: 'No valid submission codes' });
+    }
 
-  /* -----------------------------------------------------------
-     1) Load submissions (email, address, etc.)
-  ----------------------------------------------------------- */
-  const { data: subs, error: subsErr } = await supabase
-    .from("psa_submissions")
-    .select(`
-      submission_id,
-      customer_email,
-      ship_to_name,
-      ship_to_line1,
-      ship_to_line2,
-      ship_to_city,
-      ship_to_region,
-      ship_to_postal,
-      ship_to_country
-    `)
-    .in("submission_id", submission_ids);
+    const client = sb();
 
-  if (subsErr) return res.status(500).json({ error: subsErr });
+    /* -----------------------------------------
+       1) Load submissions (email + address)
+       ----------------------------------------- */
 
-  /* -----------------------------------------------------------
-     2) Load groups linked to these submissions
-  ----------------------------------------------------------- */
-  const { data: grpLinks, error: grpErr } = await supabase
-    .from("psa_group_submissions")
-    .select("group_code, submission_code")
-    .in("submission_code", submission_ids);
+    // ⚠️ If your column names differ, tweak the select() list.
+    const { data: subs, error: subsErr } = await client
+      .from('psa_submissions')
+      .select('submission_id, customer_email, address, shopify_customer_id')
+      .in('submission_id', submissionCodes);
 
-  if (grpErr) return res.status(500).json({ error: grpErr });
+    if (subsErr) {
+      console.error('[bundle] subsErr:', subsErr);
+      return json(res, 500, { error: 'Failed to load submissions' });
+    }
 
-  const groupCodes = [
-    ...new Set(grpLinks.map(r => r.group_code))
-  ];
+    if (!subs || !subs.length) {
+      // Nothing found — return a safe empty bundle
+      return json(res, 200, {
+        customer_email: null,
+        submission_ids: submissionCodes,
+        groups: [],
+        ship_to: null,
+        invoice_id: null,
+        shopify_customer_id: null
+      });
+    }
 
-  /* -----------------------------------------------------------
-     3) Load existing draft invoice if any
-  ----------------------------------------------------------- */
-  const { data: draftLink, error: draftErr } = await supabase
-    .from("billing_invoice_submissions")
-    .select("invoice_id")
-    .in("submission_code", submission_ids)
-    .limit(1);
+    const primary = subs[0];
+    const email = String(primary.customer_email || '').trim().toLowerCase();
+    const ship_to = normalizeShipToFromAddress(primary.address);
+    const shopify_customer_id = primary.shopify_customer_id || null;
 
-  if (draftErr) return res.status(500).json({ error: draftErr });
+    /* -----------------------------------------
+       2) Load groups for these submissions
+       ----------------------------------------- */
 
-  const invoice_id = draftLink?.[0]?.invoice_id || null;
+    let groups = [];
+    try {
+      // ⚠️ Adjust column names if needed:
+      //  - if your linking column is `submission_code` instead of `submission_id`,
+      //    change .select(...) and .in(...) accordingly.
+      const { data: gRows, error: gErr } = await client
+        .from('group_submissions')
+        .select('submission_id, groups(code)')
+        .in('submission_id', submissionCodes);
 
-  /* -----------------------------------------------------------
-     4) If a draft invoice exists, load its upcharges & items
-  ----------------------------------------------------------- */
-  let upcharges = [];
-  if (invoice_id) {
-    const { data: upData, error: upErr } = await supabase
-      .from("billing_invoice_items")
-      .select("card_id, upcharge_cents")
-      .eq("invoice_id", invoice_id);
+      if (!gErr && Array.isArray(gRows)) {
+        const set = new Set();
+        for (const row of gRows) {
+          const code =
+            row.groups?.code || // if using a foreign key join
+            row.group_code ||   // if you stored the code directly
+            null;
+          if (code) set.add(code);
+        }
+        groups = [...set];
+      } else if (gErr) {
+        console.warn('[bundle] group_submissions error:', gErr);
+      }
+    } catch (err) {
+      console.warn('[bundle] groups lookup failed:', err);
+    }
 
-    if (!upErr && upData) upcharges = upData;
+    /* -----------------------------------------
+       3) Try to find an existing invoice_id
+       ----------------------------------------- */
+
+    let invoice_id = null;
+    try {
+      const { data: links, error: linkErr } = await client
+        .from('billing_invoice_submissions')
+        .select('invoice_id')
+        .in('submission_code', submissionCodes)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (!linkErr && links && links.length) {
+        invoice_id = links[0].invoice_id;
+      } else if (linkErr) {
+        console.warn('[bundle] invoice link error:', linkErr);
+      }
+    } catch (err) {
+      console.warn('[bundle] invoice_id lookup failed:', err);
+    }
+
+    /* -----------------------------------------
+       4) Return canonical bundle
+       ----------------------------------------- */
+
+    return json(res, 200, {
+      customer_email: email || null,
+      submission_ids: submissionCodes,
+      groups,
+      ship_to,
+      invoice_id: invoice_id || null,
+      shopify_customer_id
+    });
+
+  } catch (err) {
+    console.error('[bundle] fatal error:', err);
+    return json(res, 500, { error: err?.message || String(err) });
   }
-
-  /* -----------------------------------------------------------
-     5) Build unified ship-to
-        (single address: take first submission's address)
-  ----------------------------------------------------------- */
-  let ship_to = null;
-  if (subs.length > 0) {
-    const s = subs[0];
-    ship_to = {
-      name: s.ship_to_name || "",
-      line1: s.ship_to_line1 || "",
-      line2: s.ship_to_line2 || "",
-      city: s.ship_to_city || "",
-      region: s.ship_to_region || "",
-      postal: s.ship_to_postal || "",
-      country: s.ship_to_country || "US"
-    };
-  }
-
-  /* -----------------------------------------------------------
-     6) Determine customer email (same rule as UI)
-  ----------------------------------------------------------- */
-  const customer_email = subs[0]?.customer_email || "";
-
-  /* -----------------------------------------------------------
-     7) Return unified bundle
-  ----------------------------------------------------------- */
-  return res.json({
-    submissions: submission_ids.map(id => ({ submission_id: id })),
-    customer_email,
-    groups: groupCodes,
-    ship_to,
-    invoice_id,
-    upcharges
-  });
 }
