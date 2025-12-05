@@ -370,7 +370,23 @@ function normalizeBundle(b) {
     : null;
 
   // Grouping + return timestamps
-  const groups = Array.from(new Set(subs.map(s => s.group_code).filter(Boolean)));
+  // 1) Prefer group_code on each submission (old behaviour)
+  const groupsFromSubs = Array.from(new Set(
+    subs
+      .map(s => s.group_code || s.group || s.group_code1)
+      .filter(Boolean)
+  ));
+
+  // 2) Fallback to top-level groups / group_codes coming from the view
+  let rawGroups =
+    Array.isArray(b.groups) ? b.groups :
+    Array.isArray(b.group_codes) ? b.group_codes :
+    (b.groups || b.group_codes || null);
+
+  const groups = groupsFromSubs.length
+    ? groupsFromSubs
+    : (Array.isArray(rawGroups) ? rawGroups.filter(Boolean) : [rawGroups].filter(Boolean));
+
   const cards  = subs.reduce((n, s) => n + (Number(s.cards) || 0), 0);
 
   const returnedNewest = subs.reduce((acc, s) => {
