@@ -316,7 +316,7 @@ function normalizeCardRow(r) {
 function applyPrefill(prefill) {
   if (!prefill) return;
 
-  // 1️⃣ Apply existing upcharges/items (same as before)
+  // upcharges
   if (prefill.items?.length) {
     const map = new Map(prefill.items.map(it => [String(it.card_id), it]));
     document.querySelectorAll('#cardsTbody input.js-up').forEach(inp => {
@@ -326,28 +326,26 @@ function applyPrefill(prefill) {
     });
   }
 
-  // 2️⃣ Apply invoice id
-  draftInvoiceId = prefill.invoice_id || null;
+  // invoice id
+  draftInvoiceId = prefill.invoice_id || draftInvoiceId;
 
-// 3️⃣ NEW — apply ship_to
-if (prefill.ship_to) {
-  lastBundle.ship_to = {
-    name:   prefill.ship_to.ship_to_name   || '',
-    line1:  prefill.ship_to.ship_to_line1  || '',
-    line2:  prefill.ship_to.ship_to_line2  || '',
-    city:   prefill.ship_to.ship_to_city   || '',
-    region: prefill.ship_to.ship_to_region || '',
-    postal: prefill.ship_to.ship_to_postal || '',
-    country: prefill.ship_to.ship_to_country || 'US'
-  };
-} else {
-  lastBundle.ship_to = null;
-}
+  // 🚀 ONLY SET ship_to IF BACKEND RETURNS A REAL ONE
+  if (prefill.ship_to) {
+    lastBundle.ship_to = {
+      name:   prefill.ship_to.ship_to_name   || '',
+      line1:  prefill.ship_to.ship_to_line1  || '',
+      line2:  prefill.ship_to.ship_to_line2  || '',
+      city:   prefill.ship_to.ship_to_city   || '',
+      region: prefill.ship_to.ship_to_region || '',
+      postal: prefill.ship_to.ship_to_postal || '',
+      country: prefill.ship_to.ship_to_country || 'US'
+    };
+  }
 
-renderShipToSingle(lastBundle.ship_to);
-
+  renderShipToSingle(lastBundle.ship_to);
   recalc();
 }
+
 
     // ---- Totals ----
     function updateTotals(gradeSum, upchargeSum) {
