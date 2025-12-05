@@ -658,24 +658,32 @@ if (lastBundle?.ship_to) {
       const email   = qs.get("email") || "";
 
       // NEW: hydrate ship_to from query param (best guess from submissions)
-      let ship_to = null;
-      const shipRaw = qs.get("ship_to");
-      if (shipRaw) {
-        try {
-          const parsed = JSON.parse(shipRaw);
-          ship_to = {
-            name:   parsed.name   || parsed.contact || parsed.full_name || '',
-            line1:  parsed.line1  || parsed.address1 || parsed.street || '',
-            line2:  parsed.line2  || parsed.address2 || '',
-            city:   parsed.city   || '',
-            region: parsed.region || parsed.state || '',
-            postal: parsed.postal || parsed.zip || '',
-            country: parsed.country || 'US'
-          };
-        } catch (e) {
-          console.warn('Failed to parse ship_to from query:', e);
-        }
-      }
+function decodeShipTo(raw) {
+  try {
+    if (!raw) return null;
+    const decoded = decodeURIComponent(raw);
+    return JSON.parse(decoded);
+  } catch (e) {
+    console.warn("Ship_to decode failed:", raw, e);
+    return null;
+  }
+}
+
+const parsedShip = decodeShipTo(qs.get("ship_to"));
+let ship_to = null;
+
+if (parsedShip) {
+  ship_to = {
+    name:   parsedShip.name   || parsedShip.contact || parsedShip.full_name || '',
+    line1:  parsedShip.line1  || parsedShip.address1 || parsedShip.street || '',
+    line2:  parsedShip.line2  || parsedShip.address2 || '',
+    city:   parsedShip.city   || '',
+    region: parsedShip.region || parsedShip.state || '',
+    postal: parsedShip.postal || parsedShip.zip || '',
+    country: parsedShip.country || 'US'
+  };
+}
+
 
       const bundle = {
         customer_email: email,
