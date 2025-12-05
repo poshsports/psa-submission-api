@@ -580,6 +580,32 @@ if (lastBundle?.ship_to) {
         }
       });
     }
+    // ---- Load canonical bundle (email, groups, ship_to) ----
+    async function fetchBundle(submissionIds, fallbackEmail = '') {
+      if (!submissionIds?.length) return null;
+
+      const qs = new URLSearchParams({ subs: submissionIds.join(',') }).toString();
+
+      try {
+        const r = await fetch(`/api/admin/billing/bundle?${qs}`, {
+          credentials: 'same-origin'
+        });
+        if (!r.ok) return null;
+        const b = await r.json().catch(() => null);
+        if (!b) return null;
+
+        return {
+          customer_email: b.customer_email || fallbackEmail || '',
+          submissions: (b.submission_ids || submissionIds).map(id => ({ submission_id: id })),
+          groups: Array.isArray(b.groups) ? b.groups : [],
+          ship_to: b.ship_to || null,
+          shopify_customer_id: b.shopify_customer_id || null
+        };
+      } catch (err) {
+        console.warn('[invoice-builder] fetchBundle failed:', err);
+        return null;
+      }
+    }
 
     // ---- Populate UI ----
     async function populate(bundle) {
@@ -650,48 +676,37 @@ if (lastBundle?.ship_to) {
 
       await loadSettings();
 
-      const qs      = new URLSearchParams(location.search);
-      const subs    = (qs.get("subs") || "").split(",").filter(Boolean).map(id => ({ submission_id: id }));
-      const groups  = (qs.get("groups") || "").split(",").filter(Boolean);
-      const email   = qs.get("email") || "";
+      const qs = new URLSearchParams(location.search);
 
-      // NEW: hydrate ship_to from query param (best guess from submissions)
-function decodeShipTo(raw) {
-  try {
-    if (!raw) return null;
-    const decoded = decodeURIComponent(raw);
-    return JSON.parse(decoded);
-  } catch (e) {
-    console.warn("Ship_to decode failed:", raw, e);
-    return null;
-  }
-}
+      // Raw submission codes from URL (?subs=psa-001,psa-002)
+      const subIds = (qs.get("subs") || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
 
-const parsedShip = decodeShipTo(qs.get("ship_to"));
-let ship_to = null;
+      const fallbackEmail = qs.get("email") || "";
 
-if (parsedShip) {
-  ship_to = {
-    name:   parsedShip.name   || parsedShip.contact || parsedShip.full_name || '',
-    line1:  parsedShip.line1  || parsedShip.address1 || parsedShip.street || '',
-    line2:  parsedShip.line2  || parsedShip.address2 || '',
-    city:   parsedShip.city   || '',
-    region: parsedShip.region || parsedShip.state || '',
-    postal: parsedShip.postal || parsedShip.zip || '',
-    country: parsedShip.country || 'US'
-  };
-}
+      // 1️⃣ Try to load canonical bundle from backend
+      let bundle = await fetchBundle(subIds, fallbackEmail);
 
+      // 2️⃣ Hard fallback if endpoint not wired yet
+      if (!bundle) {
+        console.warn('[invoice-builder] Falling back to URL-only bundle');
+        const fallbackGroups = (qs.get("groups") || "")
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean);
 
-      const bundle = {
-        customer_email: email,
-        submissions: subs,
-        groups,
-        ship_to
-      };
+        bundle = {
+          customer_email: fallbackEmail,
+          submissions: subIds.map(id => ({ submission_id: id })),
+          groups: fallbackGroups,
+          ship_to: null,
+          shopify_customer_id: null
+        };
+      }
 
       await populate(bundle);
-
 
       $("btnDraftSave")?.addEventListener("click", () => save(false));
       $("btnConfirmSave")?.addEventListener("click", () => save(false));
@@ -705,6 +720,7 @@ if (parsedShip) {
 
       installDirtyLeaveGuards();
     })();
+
     // expose key functions globally
 window.save = save;
 window.sendInvoice = sendInvoice;
