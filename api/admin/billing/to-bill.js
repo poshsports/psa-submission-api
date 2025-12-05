@@ -164,22 +164,22 @@ export default async function handler(req, res) {
     for (const r of rows) {
       const subs = Array.isArray(r.submissions) ? r.submissions : [];
 
-      // ✅ Only keep submissions that are NOT already attached
+      // Only keep submissions NOT already attached
       const unattachedSubs = [];
       const unattachedIds  = [];
 
       for (const s of subs) {
         const sid = s.submission_id;
         if (!sid) continue;
-        if (invoiceAttachedSubIds.has(sid)) continue; // skip already-attached
+        if (invoiceAttachedSubIds.has(sid)) continue;
         unattachedSubs.push(s);
         unattachedIds.push(sid);
       }
 
-      // If everything in this row is already attached, skip
+      // Skip if all submissions were already attached
       if (!unattachedIds.length) continue;
 
-      // Recalculate cards + returned_* from the unattached subset
+      // Compute cards + received timestamps
       let cards = 0;
       let returnedNewest = null;
       let returnedOldest = null;
@@ -194,30 +194,59 @@ export default async function handler(req, res) {
         }
       }
 
-emailBundles.push({
-  invoice_id: null,
-  customer_email: r.customer_email,
-  submissions: unattachedSubs,
-  submission_ids: unattachedIds,
-  groups: [],
-  group_codes: [],
-  cards,
-  returned_newest: returnedNewest,
-  returned_oldest: returnedOldest,
-  estimated_cents: null,
-  is_split: false,
+      // Push NEW billable bundle
+      emailBundles.push({
+        invoice_id: null,
+        customer_email: r.customer_email,
+        submissions: unattachedSubs,
+        submission_ids: unattachedIds,
 
-  // Raw JSON address from SQL view
-  address: r.address,
+        // FIX: include groups
+        groups: Array.isArray(r.groups)
+          ? r.groups
+          : (r.group_code ? [r.group_code] : []),
 
-  // 🔥 NEW: Expose SQL-normalized key for debugging + UI logic
-  normalized_address_key: r.normalized_address_key
-});
+        group_codes: Array.isArray(r.groups)
+          ? r.groups
+          : (r.group_code ? [r.group_code] : []),
 
-    }
+        cards,
+        returned_newest: returnedNewest,
+        returned_oldest: returnedOldest,
+        estimated_cents: null,
+        is_split: false,
+
+        address: r.address,
+        normalized_address_key: r.normalized_address_key,
+
+        // FIX: build ship_to for Invoice Builder
+        ship_to: (function () {
+          try {
+            if (!r.address) return null;
+            const raw = typeof r.address === "string"
+              ? JSON.parse(r.address)
+              : r.address;
+            if (!raw || typeof raw !== "object") return null;
+
+            return {
+              name: raw.name || raw.full_name || raw.contact || "",
+              line1: raw.line1 || raw.street || raw.address1 || "",
+              line2: raw.line2 || raw.address2 || "",
+              city: raw.city || "",
+              region: raw.region || raw.state || "",
+              postal: raw.postal || raw.zip || "",
+              country: raw.country || "US",
+            };
+          } catch {
+            return null;
+          }
+        })()
+      });
+    } // <-- closes for-loop
   } catch (err) {
     console.error("[to-bill] address/view grouping error:", err);
   }
+
 
   // ======================================================
   // 3) FINAL RESULT
