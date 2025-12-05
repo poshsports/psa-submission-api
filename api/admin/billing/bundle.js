@@ -91,37 +91,29 @@ export default async function handler(req, res) {
     const email = String(primary.customer_email || '').trim().toLowerCase();
     const ship_to = normalizeShipToFromAddress(primary.address);
     const shopify_customer_id = primary.shopify_customer_id || null;
+/* -----------------------------------------
+   2) Load groups for these submissions
+   ----------------------------------------- */
 
-    /* -----------------------------------------
-       2) Load groups for these submissions
-       ----------------------------------------- */
+let groups = [];
+try {
+  const { data: gRows, error: gErr } = await client
+    .from('group_submissions')
+    .select('submission_id, group_code')
+    .in('submission_id', submissionCodes);
 
-    let groups = [];
-    try {
-      // ⚠️ Adjust column names if needed:
-      //  - if your linking column is `submission_code` instead of `submission_id`,
-      //    change .select(...) and .in(...) accordingly.
-      const { data: gRows, error: gErr } = await client
-        .from('group_submissions')
-        .select('submission_id, groups(code)')
-        .in('submission_id', submissionCodes);
-
-      if (!gErr && Array.isArray(gRows)) {
-        const set = new Set();
-        for (const row of gRows) {
-          const code =
-            row.groups?.code || // if using a foreign key join
-            row.group_code ||   // if you stored the code directly
-            null;
-          if (code) set.add(code);
-        }
-        groups = [...set];
-      } else if (gErr) {
-        console.warn('[bundle] group_submissions error:', gErr);
-      }
-    } catch (err) {
-      console.warn('[bundle] groups lookup failed:', err);
+  if (!gErr && Array.isArray(gRows)) {
+    const set = new Set();
+    for (const row of gRows) {
+      if (row.group_code) set.add(row.group_code);
     }
+    groups = [...set];
+  } else if (gErr) {
+    console.warn('[bundle] group_submissions error:', gErr);
+  }
+} catch (err) {
+  console.warn('[bundle] groups lookup failed:', err);
+}
 
     /* -----------------------------------------
        3) Try to find an existing invoice_id
