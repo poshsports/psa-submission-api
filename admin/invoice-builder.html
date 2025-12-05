@@ -657,14 +657,35 @@ if (lastBundle?.ship_to) {
       const groups  = (qs.get("groups") || "").split(",").filter(Boolean);
       const email   = qs.get("email") || "";
 
-const bundle = {
-  customer_email: email,
-  submissions: subs,
-  groups,
-  ship_to: null // UI should not pre-seed ship_to; backend decides.
-};
+      // NEW: hydrate ship_to from query param (best guess from submissions)
+      let ship_to = null;
+      const shipRaw = qs.get("ship_to");
+      if (shipRaw) {
+        try {
+          const parsed = JSON.parse(shipRaw);
+          ship_to = {
+            name:   parsed.name   || parsed.contact || parsed.full_name || '',
+            line1:  parsed.line1  || parsed.address1 || parsed.street || '',
+            line2:  parsed.line2  || parsed.address2 || '',
+            city:   parsed.city   || '',
+            region: parsed.region || parsed.state || '',
+            postal: parsed.postal || parsed.zip || '',
+            country: parsed.country || 'US'
+          };
+        } catch (e) {
+          console.warn('Failed to parse ship_to from query:', e);
+        }
+      }
+
+      const bundle = {
+        customer_email: email,
+        submissions: subs,
+        groups,
+        ship_to
+      };
 
       await populate(bundle);
+
 
       $("btnDraftSave")?.addEventListener("click", () => save(false));
       $("btnConfirmSave")?.addEventListener("click", () => save(false));
