@@ -1,6 +1,6 @@
 // /api/admin/billing/bundle.js
-import { sb } from '../../../_util/supabase.js';
-import { requireAdmin } from '../../../_util/adminAuth.js';
+import { sb } from '../../_util/supabase.js';
+import { requireAdmin } from '../../_util/adminAuth.js';
 
 function json(res, status, payload) {
   res.status(status).setHeader('Content-Type', 'application/json');
