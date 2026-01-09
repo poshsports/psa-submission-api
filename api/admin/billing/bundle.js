@@ -93,27 +93,33 @@ export default async function handler(req, res) {
     const shopify_customer_id = primary.shopify_customer_id || null;
 /* -----------------------------------------
    2) Load groups for these submissions
+   (LABEL ONLY — no billing logic)
    ----------------------------------------- */
 
 let groups = [];
 try {
   const { data: gRows, error: gErr } = await client
     .from('group_submissions')
-    .select('submission_id, group_code')
+    .select(`
+      submission_id,
+      groups ( code )
+    `)
     .in('submission_id', submissionCodes);
 
   if (!gErr && Array.isArray(gRows)) {
     const set = new Set();
     for (const row of gRows) {
-      if (row.group_code) set.add(row.group_code);
+      const code = row.groups?.code;
+      if (code) set.add(code);
     }
     groups = [...set];
   } else if (gErr) {
-    console.warn('[bundle] group_submissions error:', gErr);
+    console.warn('[bundle] group lookup error:', gErr);
   }
 } catch (err) {
   console.warn('[bundle] groups lookup failed:', err);
 }
+
 
     /* -----------------------------------------
        3) Try to find an existing invoice_id
