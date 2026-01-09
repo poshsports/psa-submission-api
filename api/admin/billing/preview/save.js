@@ -137,13 +137,18 @@ export default async function handler(req, res) {
     /* -------------------------------------------
        INPUTS
     ------------------------------------------- */
+const body = await readBody(req);
+
 const {
   customer_email,
   items,
   invoice_id: incomingInvoiceId,
-  force_new,
-  ship_to
-} = await readBody(req);
+  force_new
+} = body;
+
+// normalize once
+const shipTo = body.ship_to ? normalizeShipTo(body.ship_to) : null;
+
 
 
 
