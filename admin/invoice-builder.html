@@ -268,16 +268,15 @@ async function loadSettings() {
 
     // ---- Card rows ----
 function normalizeCardRow(r) {
-  // Normalize both new + legacy structures
   const cid =
-    r.card_id ||            // preferred — from DB view
-    r.id ||                 // fallback — old API responses
-    r.uuid ||               // legacy submissions table
+    r.card_id ||
+    r.id ||
+    r.uuid ||
     null;
 
   return {
-    id: cid,                 // keep old "id" field for backwards compatibility
-    card_id: cid,            // NEW: explicit card_id for correct upcharge/save logic
+    id: cid,
+    card_id: cid,
 
     submission: r.submission_id || r.submission_code || r.submission || "",
     date:       r.break_date || r.break_at || r.date_of_break || null,
@@ -287,9 +286,13 @@ function normalizeCardRow(r) {
     service:    r.grading_service || "",
     grading_cents:
       Number(r.grading_amount ?? r.grading_cents ?? 0) ||
-      priceCentsForService(r.grading_service)
+      priceCentsForService(r.grading_service),
+
+    // 🔴 ADD THIS
+    upcharge_cents: Number(r.upcharge_amount ?? 0)
   };
 }
+
 
 
     async function fetchCardsForSubs(subIds) {
@@ -637,20 +640,25 @@ if (lastBundle?.ship_to) {
       const subIds = subs.map(s => s.submission_id);
       const rows   = await fetchCardsForSubs(subIds);
 
-      $("cardsTbody").innerHTML = rows.map((r, i) => `
-        <tr data-row="${i}" data-grade-cents="${r.grading_cents || 0}">
-          <td>${esc(r.submission)}</td>
-          <td>${esc(r.date || '')}</td>
-          <td>${esc(r.channel || '—')}</td>
-          <td style="text-align:right;">${esc(r.breakNo || '—')}</td>
-          <td>${esc(r.desc || '—')}</td>
-          <td style="text-align:right;">${money((r.grading_cents || 0) / 100)}</td>
-          <td style="text-align:right;">
-            <input class="js-up" data-id="${esc(r.card_id || r.id || '')}"
-                   type="number" step="0.01" value="0.00"
-                   style="width:100px;text-align:right;" />
-          </td>
-        </tr>`).join("");
+$("cardsTbody").innerHTML = rows.map((r, i) => `
+  <tr data-row="${i}" data-grade-cents="${r.grading_cents || 0}">
+    <td>${esc(r.submission)}</td>
+    <td>${esc(r.date || '')}</td>
+    <td>${esc(r.channel || '—')}</td>
+    <td style="text-align:right;">${esc(r.breakNo || '—')}</td>
+    <td>${esc(r.desc || '—')}</td>
+    <td style="text-align:right;">${money((r.grading_cents || 0) / 100)}</td>
+    <td style="text-align:right;">
+      <input class="js-up"
+             data-id="${esc(r.card_id || r.id || '')}"
+             type="number"
+             step="0.01"
+             value="${((r.upcharge_cents || 0) / 100).toFixed(2)}"
+             style="width:100px;text-align:right;" />
+    </td>
+  </tr>
+`).join("");
+
 
       $("cardsTbody").addEventListener("input", () => {
         hasUnsavedChanges = true;
