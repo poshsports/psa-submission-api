@@ -380,19 +380,33 @@ const gradingRows = ids.map(cid => {
     /* ----------------------------------------------
        REBUILD invoice ↔ submission links
     ---------------------------------------------- */
-    await client
-      .from('billing_invoice_submissions')
-      .delete()
-      .eq('invoice_id', invoice_id);
+/* ----------------------------------------------
+   ENSURE invoice ↔ submission links (NON-DESTRUCTIVE)
+---------------------------------------------- */
 
-    const linkRows = uniq(subCodes).map(code => ({
-      invoice_id,
-      submission_code: code
-    }));
+// Find which of these submissions are already linked
+const { data: existingLinks } = await client
+  .from('billing_invoice_submissions')
+  .select('submission_code')
+  .eq('invoice_id', invoice_id)
+  .in('submission_code', subCodes);
 
-    await client
-      .from('billing_invoice_submissions')
-      .insert(linkRows);
+const already = new Set((existingLinks || []).map(r => r.submission_code));
+
+// Only insert missing links
+const linkRows = uniq(subCodes)
+  .filter(code => !already.has(code))
+  .map(code => ({
+    invoice_id,
+    submission_code: code
+  }));
+
+if (linkRows.length) {
+  await client
+    .from('billing_invoice_submissions')
+    .insert(linkRows);
+}
+
 
     /* ----------------------------------------------
        RECALCULATE totals
