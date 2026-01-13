@@ -191,28 +191,24 @@ if (itemsErr) {
   const line_items = [];
   let subtotal = 0;
 
-  // Group service items by unit_cents to avoid dozens of identical lines
-  const groupedService = new Map(); // key: unit_cents -> { qty }
-  for (const it of serviceItems) {
-    const unit = Math.max(0, Number(it.unit_cents || it.amount_cents || 0));
-    const qty  = Math.max(1, Number(it.qty || 1));
-    if (!unit) continue;
-    const g = groupedService.get(unit) || { qty: 0 };
-    g.qty += qty;
-    groupedService.set(unit, g);
-  }
+// One Shopify line per *card-level* service row
+for (const it of serviceItems) {
+  const unit = Math.max(0, Number(it.unit_cents || it.amount_cents || 0));
+  const qty  = Math.max(1, Number(it.qty || 1));
+  if (!unit) continue;
 
-  for (const [unit, g] of groupedService.entries()) {
-    line_items.push({
-      title: 'PSA Grading',
-      quantity: g.qty,
-      price: moneyStrFromCents(unit),
-      properties: [
-        { name: 'Kind', value: 'Service' }
-      ]
-    });
-    subtotal += g.qty * unit;
-  }
+  line_items.push({
+    title: it.title || 'PSA Grading',
+    quantity: qty,
+    price: moneyStrFromCents(unit),
+    properties: [
+      { name: 'Kind', value: 'Service' },
+      ...(it.submission_code ? [{ name: 'Submission', value: it.submission_code }] : [])
+    ]
+  });
+
+  subtotal += qty * unit;
+}
 
   // Each upcharge stays as its own line (preserves card description titles)
   for (const u of upchargeItems) {
