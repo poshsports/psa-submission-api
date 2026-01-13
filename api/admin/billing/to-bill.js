@@ -176,54 +176,6 @@ if (unattached.length === 0) continue;
 const unattachedSubs = subs.filter(s => unattached.includes(s.submission_id));
 const unattachedIds  = unattached;
       
-// Find an existing open invoice for this customer+address
-const { data: openInv } = await supabase
-  .from("billing_invoices")
-  .select("id")
-  .eq("status", "pending")
-  .eq("customer_email", r.customer_email)
-  .eq("normalized_address_key", r.normalized_address_key)
-  .limit(1)
-  .maybeSingle();
-
-let invoiceId = openInv?.id || null;
-
-// If we have no invoice yet, create one
-if (!invoiceId) {
-  const { data: created } = await supabase
-    .from("billing_invoices")
-    .insert([{
-      status: "pending",
-      customer_email: r.customer_email,
-      normalized_address_key: r.normalized_address_key,
-      ship_to_name: null,
-      ship_to_line1: null,
-      ship_to_line2: null,
-      ship_to_city: null,
-      ship_to_region: null,
-      ship_to_postal: null,
-      ship_to_country: "US"
-    }])
-    .select("id")
-    .single();
-
-  invoiceId = created.id;
-}
-
-// Attach all missing submissions
-if (unattached.length) {
-  const rows = unattached.map((sid) => ({
-    invoice_id: invoiceId,
-    submission_code: sid,
-  }));
-
-  await supabase
-    .from("billing_invoice_submissions")
-    .insert(rows);
-
-  unattached.forEach((sid) => invoiceAttachedSubIds.add(sid));
-}
-
 
       // Compute cards + received timestamps
       let cards = 0;
