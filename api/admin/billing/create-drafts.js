@@ -123,156 +123,116 @@ async function createDraftForInvoice(client, invoiceId /*, RATE_CENTS (unused) *
 
   const codes = (links || []).map(l => l.submission_code).filter(Boolean);
 
-  // 3) Read saved invoice items (service + upcharge + shipping)
-const { data: items, error: itemsErr } = await client
-  .from('billing_invoice_items')
-  .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
-  .eq('invoice_id', inv.id);
-
-if (itemsErr) {
-  return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+// 3) Build Shopify line items from cards (canonical source of truth)
+if (!codes.length) {
+  return { ok: false, error: 'no-linked-submissions' };
 }
 
-// --- ENSURE EVERY LINKED SUBMISSION HAS A SERVICE LINE ---
+const { data: cards, error: cardsErr } = await client
+  .from('billing_invoice_cards_v')
+  .select(`
+    card_id,
+    submission_id,
+    card_description,
+    break_date,
+    break_channel,
+    break_number,
+    grading_service,
+    grading_amount,
+    upcharge_amount
+  `)
+  .in('submission_id', codes)
+  .order('submission_id', { ascending: true });
 
-  // Load submission details so we can auto-create missing service rows
-  const { data: subs, error: subsErr } = await client
-    .from('psa_submissions')
-    .select('submission_id, cards, grading_service')
-    .in('submission_id', codes);
+if (cardsErr) {
+  return { ok: false, error: 'load-cards-failed', details: cardsErr.message };
+}
+if (!cards || !cards.length) {
+  return { ok: false, error: 'no-cards-for-linked-submissions' };
+}
 
-  if (subsErr) {
-    return { ok: false, error: 'load-subs-failed', details: subsErr.message };
-  }
+const line_items = [];
+let subtotal = 0;
 
-  const existingServiceBySub = new Set(
-    (items || [])
-      .filter(i => i.kind === 'service' && i.submission_code)
-      .map(i => i.submission_code)
-  );
+// Helper for “Option C” title formatting
+function fmtBreakInfo(row) {
+  const parts = [];
+  if (row.break_date) parts.push(String(row.break_date));
+  if (row.break_channel) parts.push(String(row.break_channel));
+  if (row.break_number) parts.push(`Break #${row.break_number}`);
+  return parts.length ? `(${parts.join(' • ')})` : '';
+}
 
-  const missing = (subs || []).filter(
-    s => !existingServiceBySub.has(s.submission_id)
-  );
+for (const c of cards) {
+  const gradingCents = Math.max(0, Number(c.grading_amount || 0));
+  const upchargeCents = Math.max(0, Number(c.upcharge_amount || 0));
 
-  if (missing.length) {
-    const rows = missing.map(s => {
-      const qty = Math.max(1, Number(s.cards || 1));
-      const unit = 2000; // $20 default per card
+  const desc = (c.card_description || 'Card').toString().trim();
+  const svc = (c.grading_service || 'PSA Grading').toString().trim();
+  const breakInfo = fmtBreakInfo(c);
 
-      return {
-        invoice_id: inv.id,
-        submission_code: s.submission_id,
-        kind: 'service',
-        title: `${s.submission_id} — ${s.grading_service || 'PSA Grading'}`,
-        qty,
-        unit_cents: unit,
-        amount_cents: qty * unit,
-        meta: {}
-      };
+  // 1) One grading line per card
+  if (gradingCents > 0) {
+    line_items.push({
+      title: `${c.submission_id} — ${desc} ${breakInfo} — ${svc}`.replace(/\s+/g, ' ').trim(),
+      quantity: 1,
+      price: moneyStrFromCents(gradingCents),
+      properties: [
+        { name: 'Kind', value: 'Grading' },
+        { name: 'Submission', value: c.submission_id },
+        { name: 'Card ID', value: String(c.card_id) },
+        { name: 'Service', value: svc },
+        ...(c.break_channel ? [{ name: 'Break channel', value: String(c.break_channel) }] : []),
+        ...(c.break_number ? [{ name: 'Break #', value: String(c.break_number) }] : []),
+        ...(c.break_date ? [{ name: 'Break date', value: String(c.break_date) }] : [])
+      ]
     });
-
-    await client.from('billing_invoice_items').insert(rows);
-
-    // Re-load items so downstream logic sees the full set
-    const { data: refreshed } = await client
-      .from('billing_invoice_items')
-      .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
-      .eq('invoice_id', inv.id);
-
-    items.length = 0;
-    items.push(...(refreshed || []));
+    subtotal += gradingCents;
   }
 
-  const serviceItems  = (items || []).filter(x => x.kind === 'service');
-  const upchargeItems = (items || []).filter(x => x.kind === 'upcharge');
-  const shippingItem  = (items || []).find(x => x.kind === 'shipping');
+  // 2) One upcharge line per card (if any)
+  if (upchargeCents > 0) {
+    line_items.push({
+      title: `${c.submission_id} — ${desc} ${breakInfo} — Upcharge`.replace(/\s+/g, ' ').trim(),
+      quantity: 1,
+      price: moneyStrFromCents(upchargeCents),
+      properties: [
+        { name: 'Kind', value: 'Upcharge' },
+        { name: 'Submission', value: c.submission_id },
+        { name: 'Card ID', value: String(c.card_id) }
+      ]
+    });
+    subtotal += upchargeCents;
+  }
+}
 
-  const line_items = [];
-  let subtotal = 0;
+// 4) Shipping: prefer invoice.shipping_cents else fallback
+let shippingCents = 0;
 
-// One Shopify line per *card-level* service row
-for (const it of serviceItems) {
-  const unit = Math.max(0, Number(it.unit_cents || it.amount_cents || 0));
-  const qty  = Math.max(1, Number(it.qty || 1));
-  if (!unit) continue;
+if (Number.isFinite(Number(inv.shipping_cents)) && Number(inv.shipping_cents) > 0) {
+  shippingCents = Number(inv.shipping_cents);
+} else {
+  shippingCents = DEFAULT_SHIPPING_CENTS;
+}
 
+if (shippingCents > 0) {
   line_items.push({
-    title: it.title || 'PSA Grading',
-    quantity: qty,
-    price: moneyStrFromCents(unit),
-    properties: [
-      { name: 'Kind', value: 'Service' },
-      ...(it.submission_code ? [{ name: 'Submission', value: it.submission_code }] : [])
-    ]
+    title: 'Shipping (flat)',
+    quantity: 1,
+    price: moneyStrFromCents(shippingCents),
+    properties: [{ name: 'Kind', value: 'Shipping' }]
   });
-
-  subtotal += qty * unit;
+  subtotal += shippingCents;
 }
 
-  // Each upcharge stays as its own line (preserves card description titles)
-  for (const u of upchargeItems) {
-    const cents = Math.max(0, Number(u.amount_cents ?? u.unit_cents ?? 0));
-    if (!cents) continue;
-    line_items.push({
-      title: u.title || 'PSA Upcharge',
-      quantity: 1,
-      price: moneyStrFromCents(cents),
-      properties: [
-        { name: 'Kind', value: 'Upcharge' }
-      ]
-    });
-    subtotal += cents;
-  }
+if (!line_items.length) {
+  return { ok: false, error: 'no-invoice-items' };
+}
 
-  // Shipping: prefer explicit shipping item, else invoice.shipping_cents, else fallback
-  let shippingCents = 0;
-
-  if (shippingItem) {
-    shippingCents = Math.max(
-      0,
-      Number(shippingItem.amount_cents ?? shippingItem.unit_cents ?? 0)
-    );
-  } else if (Number.isFinite(Number(inv.shipping_cents)) && Number(inv.shipping_cents) > 0) {
-    shippingCents = Number(inv.shipping_cents);
-  } else {
-    shippingCents = DEFAULT_SHIPPING_CENTS;
-  }
-
-  if (shippingCents > 0) {
-    line_items.push({
-      title: shippingItem?.title || 'Shipping (flat)',
-      quantity: 1,
-      price: moneyStrFromCents(shippingCents),
-      properties: [
-        { name: 'Kind', value: 'Shipping' }
-      ]
-    });
-    subtotal += shippingCents;
-
-    // If we had no shipping row, persist the fallback so DB matches Shopify
-    if (!shippingItem) {
-      await client.from('billing_invoice_items').insert([{
-        invoice_id: inv.id,
-        submission_code: null,
-        kind: 'shipping',
-        title: 'Shipping (flat)',
-        qty: 1,
-        unit_cents: shippingCents,
-        amount_cents: shippingCents,
-        meta: {}
-      }]);
-    }
-  }
-
-  if (!line_items.length) {
-    return { ok: false, error: 'no-invoice-items' };
-  }
-
-  // 4) Build shipping address from invoice ship_to_* (if present)
+  // 5) Build shipping address from invoice ship_to_* (if present)
   const shipping_address = buildShippingAddressFromInvoice(inv);
 
-  // 5) Create Shopify Draft Order
+  // 6) Create Shopify Draft Order
   const cleanedCustomerId =
     Number(String(inv.shopify_customer_id).replace(/\D/g, '')) ||
     inv.shopify_customer_id;
@@ -306,7 +266,7 @@ for (const it of serviceItems) {
   const now = new Date().toISOString();
   const total_cents = subtotal;
 
-  // 6) Update invoice totals & IDs
+  // 7) Update invoice totals & IDs
   await client.from('billing_invoices')
     .update({
       status: 'draft',
