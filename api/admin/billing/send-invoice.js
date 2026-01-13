@@ -152,6 +152,22 @@ const shipKey = [
   .join(', ')
   .replace(/\s+/g, ' ')
   .trim();
+// DEBUG: show how we’re resolving the bundle at send-time
+console.log('[send-invoice] invoice_id=', invoice_id);
+console.log('[send-invoice] toEmail=', toEmail);
+console.log('[send-invoice] computed shipKey=', shipKey);
+
+// Fetch all candidate bundles for this customer (to see the address keys the DB expects)
+const { data: candidates, error: candErr } = await client
+  .from('billing_to_bill_v')
+  .select('normalized_address_key, submission_ids')
+  .eq('customer_email', toEmail);
+
+if (candErr) {
+  console.log('[send-invoice] candidates error=', candErr.message);
+} else {
+  console.log('[send-invoice] candidate bundles=', candidates);
+}
 
 // What *should* be bundled right now
 const { data: bundle } = await client
@@ -162,6 +178,7 @@ const { data: bundle } = await client
   .maybeSingle();
 
 const shouldHave = new Set(bundle?.submission_ids || []);
+console.log('[send-invoice] matched bundle submission_ids=', [...shouldHave]);
 
 // What is *already* linked
 const { data: existing } = await client
@@ -170,14 +187,18 @@ const { data: existing } = await client
   .eq('invoice_id', invoice_id);
 
 const already = new Set((existing || []).map(r => r.submission_code));
+console.log('[send-invoice] already linked submission_codes=', [...already]);
 
 // Attach anything missing
 const missing = [...shouldHave].filter(x => !already.has(x));
+console.log('[send-invoice] missing to attach=', missing);
+
 if (missing.length) {
   await client.from('billing_invoice_submissions').insert(
     missing.map(code => ({ invoice_id, submission_code: code }))
   );
 }
+
 
     // 3) Send the invoice email via Shopify
 const label = inv.group_code || inv.id;
