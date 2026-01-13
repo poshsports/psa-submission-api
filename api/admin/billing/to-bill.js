@@ -167,7 +167,6 @@ export default async function handler(req, res) {
     const subs = Array.isArray(r.submissions) ? r.submissions : [];
     
 // Split into attached vs unattached
-const attached = ids.filter((sid) => invoiceAttachedSubIds.has(sid));
 const unattached = ids.filter((sid) => !invoiceAttachedSubIds.has(sid));
 
 // If nothing is unattached, this bundle is already fully materialized
@@ -194,7 +193,7 @@ const unattachedIds  = unattached;
 
       // Push NEW billable bundle
       emailBundles.push({
-        invoice_id: invoiceId,
+        invoice_id: null,
         customer_email: r.customer_email,
         submissions: unattachedSubs,
         submission_ids: unattachedIds,
