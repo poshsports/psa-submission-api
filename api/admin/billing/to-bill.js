@@ -162,22 +162,17 @@ export default async function handler(req, res) {
     }
 
     for (const r of rows) {
-      const subs = Array.isArray(r.submissions) ? r.submissions : [];
-
-      // Only keep submissions NOT already attached
-      const unattachedSubs = [];
-      const unattachedIds  = [];
-
-      for (const s of subs) {
-        const sid = s.submission_id;
-        if (!sid) continue;
-        if (invoiceAttachedSubIds.has(sid)) continue;
-        unattachedSubs.push(s);
-        unattachedIds.push(sid);
-      }
-
-      // Skip if all submissions were already attached
-      if (!unattachedIds.length) continue;
+    const ids = Array.isArray(r.submission_ids) ? r.submission_ids : [];
+    const subs = Array.isArray(r.submissions) ? r.submissions : [];
+    
+    const hasAnyAttached = ids.some((sid) => invoiceAttachedSubIds.has(sid));
+    
+    // If *any* submission in this combined bundle is already attached to a
+    // pending invoice, skip the entire bundle (avoid duplicates/splitting).
+    if (hasAnyAttached) continue;
+    
+    const unattachedSubs = subs;
+    const unattachedIds  = ids;
 
       // Compute cards + received timestamps
       let cards = 0;
