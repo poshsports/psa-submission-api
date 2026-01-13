@@ -64,8 +64,9 @@ export default async function handler(req, res) {
         total_cents,
         created_at
       `)
-      .eq("status", "pending")
+      .in("status", ["sent", "paid"])
       .order("created_at", { ascending: false });
+
 
     if (!invErr && invoices?.length) {
       const invoiceIds = invoices.map((i) => i.id);
