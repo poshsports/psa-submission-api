@@ -124,13 +124,64 @@ async function createDraftForInvoice(client, invoiceId /*, RATE_CENTS (unused) *
   const codes = (links || []).map(l => l.submission_code).filter(Boolean);
 
   // 3) Read saved invoice items (service + upcharge + shipping)
-  const { data: items, error: itemsErr } = await client
-    .from('billing_invoice_items')
-    .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
-    .eq('invoice_id', inv.id);
+const { data: items, error: itemsErr } = await client
+  .from('billing_invoice_items')
+  .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
+  .eq('invoice_id', inv.id);
 
-  if (itemsErr) {
-    return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+if (itemsErr) {
+  return { ok: false, error: 'load-items-failed', details: itemsErr.message };
+}
+
+// --- ENSURE EVERY LINKED SUBMISSION HAS A SERVICE LINE ---
+
+  // Load submission details so we can auto-create missing service rows
+  const { data: subs, error: subsErr } = await client
+    .from('psa_submissions')
+    .select('submission_id, cards, grading_service')
+    .in('submission_id', codes);
+
+  if (subsErr) {
+    return { ok: false, error: 'load-subs-failed', details: subsErr.message };
+  }
+
+  const existingServiceBySub = new Set(
+    (items || [])
+      .filter(i => i.kind === 'service' && i.submission_code)
+      .map(i => i.submission_code)
+  );
+
+  const missing = (subs || []).filter(
+    s => !existingServiceBySub.has(s.submission_id)
+  );
+
+  if (missing.length) {
+    const rows = missing.map(s => {
+      const qty = Math.max(1, Number(s.cards || 1));
+      const unit = 2000; // $20 default per card
+
+      return {
+        invoice_id: inv.id,
+        submission_code: s.submission_id,
+        kind: 'service',
+        title: `${s.submission_id} — ${s.grading_service || 'PSA Grading'}`,
+        qty,
+        unit_cents: unit,
+        amount_cents: qty * unit,
+        meta: {}
+      };
+    });
+
+    await client.from('billing_invoice_items').insert(rows);
+
+    // Re-load items so downstream logic sees the full set
+    const { data: refreshed } = await client
+      .from('billing_invoice_items')
+      .select('kind, title, qty, unit_cents, amount_cents, submission_code, meta')
+      .eq('invoice_id', inv.id);
+
+    items.length = 0;
+    items.push(...(refreshed || []));
   }
 
   const serviceItems  = (items || []).filter(x => x.kind === 'service');
