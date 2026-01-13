@@ -170,6 +170,11 @@ if (candErr) {
 }
 
 // What *should* be bundled right now
+// Resolve what *should* be on this invoice.
+// First try strict address match; if that fails, fall back to *all*
+// current billable submissions for this customer so nothing is left behind.
+let shouldHave = new Set();
+
 const { data: bundle } = await client
   .from('billing_to_bill_v')
   .select('submission_ids')
@@ -177,8 +182,21 @@ const { data: bundle } = await client
   .eq('normalized_address_key', shipKey)
   .maybeSingle();
 
-const shouldHave = new Set(bundle?.submission_ids || []);
-console.log('[send-invoice] matched bundle submission_ids=', [...shouldHave]);
+if (bundle?.submission_ids?.length) {
+  shouldHave = new Set(bundle.submission_ids);
+} else {
+  // Fallback: grab *all* billable bundles for this customer
+  const { data: fb } = await client
+    .from('billing_to_bill_v')
+    .select('submission_ids')
+    .eq('customer_email', toEmail);
+
+  const all = (fb || []).flatMap(r => r.submission_ids || []);
+  shouldHave = new Set(all);
+}
+
+console.log('[send-invoice] resolved shouldHave=', [...shouldHave]);
+
 
 // What is *already* linked
 const { data: existing } = await client
