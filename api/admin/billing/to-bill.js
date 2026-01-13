@@ -213,7 +213,7 @@ export default async function handler(req, res) {
         cards,
         returned_newest: returnedNewest,
         returned_oldest: returnedOldest,
-        estimated_cents: null,
+        estimated_cents: r.estimated_cents,
         is_split: false,
 
         address: r.address,
