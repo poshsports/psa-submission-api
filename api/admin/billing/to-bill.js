@@ -64,7 +64,7 @@ export default async function handler(req, res) {
         total_cents,
         created_at
       `)
-      .in("status", ["sent", "paid"])
+      .in("status", ["pending", "draft", "sent", "paid"])
       .order("created_at", { ascending: false });
 
 
