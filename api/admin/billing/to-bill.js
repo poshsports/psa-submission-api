@@ -166,14 +166,64 @@ export default async function handler(req, res) {
     const ids = Array.isArray(r.submission_ids) ? r.submission_ids : [];
     const subs = Array.isArray(r.submissions) ? r.submissions : [];
     
-    const hasAnyAttached = ids.some((sid) => invoiceAttachedSubIds.has(sid));
-    
-    // If *any* submission in this combined bundle is already attached to a
-    // pending invoice, skip the entire bundle (avoid duplicates/splitting).
-    if (hasAnyAttached) continue;
-    
-    const unattachedSubs = subs;
-    const unattachedIds  = ids;
+// Split into attached vs unattached
+const attached = ids.filter((sid) => invoiceAttachedSubIds.has(sid));
+const unattached = ids.filter((sid) => !invoiceAttachedSubIds.has(sid));
+
+// If nothing is unattached, this bundle is already fully materialized
+if (unattached.length === 0) continue;
+
+const unattachedSubs = subs.filter(s => unattached.includes(s.submission_id));
+const unattachedIds  = unattached;
+      
+// Find an existing open invoice for this customer+address
+const { data: openInv } = await supabase
+  .from("billing_invoices")
+  .select("id")
+  .eq("status", "pending")
+  .eq("customer_email", r.customer_email)
+  .eq("normalized_address_key", r.normalized_address_key)
+  .limit(1)
+  .maybeSingle();
+
+let invoiceId = openInv?.id || null;
+
+// If we have no invoice yet, create one
+if (!invoiceId) {
+  const { data: created } = await supabase
+    .from("billing_invoices")
+    .insert([{
+      status: "pending",
+      customer_email: r.customer_email,
+      normalized_address_key: r.normalized_address_key,
+      ship_to_name: null,
+      ship_to_line1: null,
+      ship_to_line2: null,
+      ship_to_city: null,
+      ship_to_region: null,
+      ship_to_postal: null,
+      ship_to_country: "US"
+    }])
+    .select("id")
+    .single();
+
+  invoiceId = created.id;
+}
+
+// Attach all missing submissions
+if (unattached.length) {
+  const rows = unattached.map((sid) => ({
+    invoice_id: invoiceId,
+    submission_code: sid,
+  }));
+
+  await supabase
+    .from("billing_invoice_submissions")
+    .insert(rows);
+
+  unattached.forEach((sid) => invoiceAttachedSubIds.add(sid));
+}
+
 
       // Compute cards + received timestamps
       let cards = 0;
@@ -192,7 +242,7 @@ export default async function handler(req, res) {
 
       // Push NEW billable bundle
       emailBundles.push({
-        invoice_id: null,
+        invoice_id: invoiceId,
         customer_email: r.customer_email,
         submissions: unattachedSubs,
         submission_ids: unattachedIds,
