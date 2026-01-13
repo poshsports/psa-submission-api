@@ -120,6 +120,64 @@ createdDraftHere = true;
     if (!toEmail) {
       return json(res, 400, { error: 'No destination email found. Pass { to: "email@domain" } or ensure submission has customer_email.' });
     }
+// Ensure all bundle-eligible submissions are attached before sending
+const { data: invRow } = await client
+  .from('billing_invoices')
+  .select(`
+    id,
+    ship_to_line1,
+    ship_to_line2,
+    ship_to_city,
+    ship_to_region,
+    ship_to_postal,
+    ship_to_country
+  `)
+  .eq('id', invoice_id)
+  .single();
+
+if (!invRow) {
+  return json(res, 400, { error: 'Invoice missing ship-to address; cannot bundle.' });
+}
+
+const shipKey = [
+  invRow.ship_to_line1,
+  invRow.ship_to_line2,
+  invRow.ship_to_city,
+  invRow.ship_to_region,
+  invRow.ship_to_postal,
+  invRow.ship_to_country || 'US'
+]
+  .map(v => String(v || '').trim().toLowerCase())
+  .filter(Boolean)
+  .join(', ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+// What *should* be bundled right now
+const { data: bundle } = await client
+  .from('billing_to_bill_v')
+  .select('submission_ids')
+  .eq('customer_email', toEmail)
+  .eq('normalized_address_key', shipKey)
+  .maybeSingle();
+
+const shouldHave = new Set(bundle?.submission_ids || []);
+
+// What is *already* linked
+const { data: existing } = await client
+  .from('billing_invoice_submissions')
+  .select('submission_code')
+  .eq('invoice_id', invoice_id);
+
+const already = new Set((existing || []).map(r => r.submission_code));
+
+// Attach anything missing
+const missing = [...shouldHave].filter(x => !already.has(x));
+if (missing.length) {
+  await client.from('billing_invoice_submissions').insert(
+    missing.map(code => ({ invoice_id, submission_code: code }))
+  );
+}
 
     // 3) Send the invoice email via Shopify
 const label = inv.group_code || inv.id;
