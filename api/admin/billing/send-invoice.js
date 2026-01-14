@@ -65,25 +65,48 @@ if (!invoice_id) {
     });
   }
 
-  // Pick a group_code when auto-creating (billing_invoices.group_code is NOT NULL)
-  const groupCode =
-    Array.isArray(groups) && groups.length
-      ? String(groups[0])   // first group for this invoice
-      : null;
+  // Determine group_code when auto-creating (billing_invoices.group_code is NOT NULL)
+let groupCode = null;
 
-  if (!groupCode) {
-    return fail(400, 'create_invoice', 'No group_code available for invoice creation');
+// Prefer explicit groups[] if provided
+if (Array.isArray(groups) && groups.length) {
+  groupCode = String(groups[0]);
+}
+
+// Otherwise derive from first submission
+if (!groupCode && Array.isArray(subs) && subs.length) {
+  const { data: subRow, error: subErr } = await client
+    .from('psa_submissions')
+    .select('group_code')
+    .eq('submission_id', String(subs[0]))
+    .single();
+
+  if (subErr) {
+    return fail(500, 'derive_group', subErr);
   }
 
-  const { data: inv, error: invErr } = await client
-    .from('billing_invoices')
-    .insert({
-      customer_email,
-      group_code: groupCode,
-      status: 'pending'
-    })
-    .select('id')
-    .single();
+  groupCode = subRow?.group_code || null;
+}
+
+if (!groupCode) {
+  return fail(400, 'create_invoice', 'Unable to determine group_code for invoice creation');
+}
+
+const { data: inv, error: invErr } = await client
+  .from('billing_invoices')
+  .insert({
+    customer_email,
+    group_code: groupCode,
+    status: 'pending'
+  })
+  .select('id')
+  .single();
+
+if (invErr || !inv) {
+  return fail(500, 'create_invoice', invErr || 'insert returned no row');
+}
+
+invoice_id = inv.id;
 
   if (invErr || !inv) {
     return fail(500, 'create_invoice', invErr || 'insert returned no row');
