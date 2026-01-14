@@ -65,18 +65,20 @@ export default async function handler(req, res) {
         });
       }
 
-      const { data: inv, error: invErr } = await client
-        .from('billing_invoices')
-        .insert({
-          customer_email,
-          status: 'pending'
-        })
-        .select('id')
-        .single();
+const { data: inv, error: invErr } = await client
+  .from('billing_invoices')
+  .insert({
+    status: 'pending'
+  })
+  .select('id')
+  .single();
 
-    if (invErr || !inv) {
+if (invErr || !inv) {
   return fail(500, 'create_invoice', invErr || 'insert returned no row');
 }
+
+invoice_id = inv.id;
+
 
 
       invoice_id = inv.id;
