@@ -42,86 +42,38 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const ok = await requireAdmin(req, res);
-if (!ok) return; // 401 already sent by requireAdmin
+    if (!ok) return;
     if (!STORE || !ADMIN_TOKEN) return json(res, 500, { error: 'Missing Shopify env vars' });
 
-let { invoice_id, to, customer_email, subject, message, subs } = await readBody(req);
+    const client = sb();
 
-// If no invoice_id, create one here (Option A: send-invoice owns creation)
-if (!invoice_id) {
-  if (!customer_email || !Array.isArray(subs) || !subs.length) {
-    return json(res, 400, {
-      error: 'invoice_id is required or provide { customer_email, subs[] }'
-    });
-  }
+    let { invoice_id, to, customer_email, subject, message, subs } = await readBody(req);
 
-  const client = sb();
+    // If no invoice_id, create one here (Option A: send-invoice owns creation)
+    if (!invoice_id) {
+      if (!customer_email || !Array.isArray(subs) || !subs.length) {
+        return json(res, 400, {
+          error: 'invoice_id is required or provide { customer_email, subs[] }'
+        });
+      }
 
-  const { data: inv, error: invErr } = await client
-    .from('billing_invoices')
-    .insert({
-      customer_email,
-      status: 'pending'
-    })
-    .select('id')
-    .single();
+      const { data: invNew, error: invErr } = await client
+        .from('billing_invoices')
+        .insert({
+          customer_email,
+          status: 'pending'
+        })
+        .select('id')
+        .single();
 
-  if (invErr || !inv) {
-    return json(res, 500, { error: 'Failed to create invoice' });
-  }
+      if (invErr || !invNew) {
+        return json(res, 500, { error: 'Failed to create invoice' });
+      }
 
-  invoice_id = inv.id;
-}
-
-
-   const client = sb();
-// Track whether we created a Shopify draft in this request
-let createdDraftHere = false;
-
-    // 1) Load the invoice row
-    const { data: inv, error: invErr } = await client
-      .from('billing_invoices')
-      .select('id, group_code, draft_id, status')
-      .eq('id', invoice_id)
-      .single();
-    if (invErr || !inv) return json(res, 404, { error: 'Invoice not found' });
-    // If there's no Shopify draft yet, try to create it now via our own API
-if (!inv.draft_id) {
-  try {
-  const draftResp = await fetch(`${getOrigin(req)}/api/admin/billing/create-drafts`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    // forward session so requireAdmin() passes
-    'cookie': req.headers.cookie || ''
-  },
-  body: JSON.stringify({ invoice_ids: [String(invoice_id)] })
-});
-
-if (!draftResp.ok) {
-  const errText = await draftResp.text().catch(()=>'');
-  return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)', details: errText });
-}
-createdDraftHere = true;
-
-    // Re-load the invoice so we see the draft_id persisted by create-drafts
-    const client2 = sb();
-    const { data: inv2 } = await client2
-      .from('billing_invoices')
-      .select('id, group_code, draft_id, status')
-      .eq('id', invoice_id)
-      .single();
-
-    if (inv2?.draft_id) {
-      inv.draft_id = inv2.draft_id;
-    } else {
-      return json(res, 400, { error: 'Invoice has no draft_id (post-create attempt)' });
+      invoice_id = invNew.id;
     }
-  } catch (e) {
-    return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)' });
-  }
-}
-    // 2) Find a customer email from linked submissions (same customer across all)
+
+    // Resolve destination email early
     let toEmail = (to || customer_email || '').trim();
     if (!toEmail) {
       const { data: link, error: linkErr } = await client
@@ -129,6 +81,7 @@ createdDraftHere = true;
         .select('submission_code')
         .eq('invoice_id', invoice_id)
         .limit(1);
+
       if (linkErr) return json(res, 500, { error: 'Failed loading invoice links', details: linkErr.message });
 
       const code = link && link.length ? link[0].submission_code : null;
@@ -146,157 +99,178 @@ createdDraftHere = true;
     if (!toEmail) {
       return json(res, 400, { error: 'No destination email found. Pass { to: "email@domain" } or ensure submission has customer_email.' });
     }
-// Ensure all intended submissions are attached before sending
 
-let shouldHave = new Set();
+    // Ensure all intended submissions are attached before sending
+    let shouldHave = new Set();
 
-// If caller provided subs (Invoice Builder "Send"), trust them
-if (Array.isArray(subs) && subs.length) {
-  shouldHave = new Set(subs);
-} else {
-  // Legacy path: resolve via billing_to_bill_v using ship-to
-  const { data: invRow } = await client
-    .from('billing_invoices')
-    .select(`
-      id,
-      ship_to_line1,
-      ship_to_line2,
-      ship_to_city,
-      ship_to_region,
-      ship_to_postal,
-      ship_to_country
-    `)
-    .eq('id', invoice_id)
-    .single();
-
-  if (!invRow) {
-    return json(res, 400, { error: 'Invoice missing ship-to address; cannot bundle.' });
-  }
-
-  const shipKey = [
-    invRow.ship_to_line1,
-    invRow.ship_to_line2,
-    invRow.ship_to_city,
-    invRow.ship_to_region,
-    invRow.ship_to_postal,
-    invRow.ship_to_country || 'US'
-  ]
-    .map(v => String(v || '').trim().toLowerCase())
-    .filter(Boolean)
-    .join(', ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const { data: bundle } = await client
-    .from('billing_to_bill_v')
-    .select('submission_ids')
-    .eq('customer_email', toEmail)
-    .eq('normalized_address_key', shipKey)
-    .maybeSingle();
-
-  if (bundle?.submission_ids?.length) {
-    shouldHave = new Set(bundle.submission_ids);
-  } else {
-    const { data: fb } = await client
-      .from('billing_to_bill_v')
-      .select('submission_ids')
-      .eq('customer_email', toEmail);
-
-    const all = (fb || []).flatMap(r => r.submission_ids || []);
-    shouldHave = new Set(all);
-  }
-}
-
-// What is *already* linked
-const { data: existing } = await client
-  .from('billing_invoice_submissions')
-  .select('submission_code')
-  .eq('invoice_id', invoice_id);
-
-const already = new Set((existing || []).map(r => r.submission_code));
-console.log('[send-invoice] already linked submission_codes=', [...already]);
-
-// Attach anything missing
-const missing = [...shouldHave].filter(x => !already.has(x));
-console.log('[send-invoice] missing to attach=', missing);
-
-if (missing.length) {
-  await client.from('billing_invoice_submissions').insert(
-    missing.map(code => ({ invoice_id, submission_code: code }))
-  );
-}
-
-
-    // 3) Send the invoice email via Shopify
-const label = inv.group_code || inv.id;
-const payload = {
-  draft_order_invoice: {
-    to: toEmail,
-    subject: subject || `PSA Balance — ${label}`,
-    custom_message: message || `Your PSA grading balance${inv.group_code ? ` for group ${inv.group_code}` : ''} is ready.`
-  }
-};
-   let result;
-try {
-  result = await sendWithRetry(inv.draft_id, payload);
-} catch (e) {
-  // If we created a draft during this request and sending failed,
-  // clean up the draft and return the invoice to "pending" so it
-  // shows in the "To send" tab again.
-  try {
-    if (createdDraftHere && inv.draft_id) {
-      // best-effort cleanup in Shopify
-      try { await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'DELETE'); } catch {}
-      // clear draft refs in DB
-      await client.from('billing_invoices')
-        .update({
-          status: 'pending',
-          draft_id: null,
-          invoice_url: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', invoice_id);
+    if (Array.isArray(subs) && subs.length) {
+      shouldHave = new Set(subs);
     } else {
-      // if a draft existed already, just bump status back to pending
-      await client.from('billing_invoices')
-        .update({ status: 'pending', updated_at: new Date().toISOString() })
-        .eq('id', invoice_id);
+      const { data: invRow } = await client
+        .from('billing_invoices')
+        .select(`
+          id,
+          ship_to_line1,
+          ship_to_line2,
+          ship_to_city,
+          ship_to_region,
+          ship_to_postal,
+          ship_to_country
+        `)
+        .eq('id', invoice_id)
+        .single();
+
+      if (!invRow) {
+        return json(res, 400, { error: 'Invoice missing ship-to address; cannot bundle.' });
+      }
+
+      const shipKey = [
+        invRow.ship_to_line1,
+        invRow.ship_to_line2,
+        invRow.ship_to_city,
+        invRow.ship_to_region,
+        invRow.ship_to_postal,
+        invRow.ship_to_country || 'US'
+      ]
+        .map(v => String(v || '').trim().toLowerCase())
+        .filter(Boolean)
+        .join(', ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const { data: bundle } = await client
+        .from('billing_to_bill_v')
+        .select('submission_ids')
+        .eq('customer_email', toEmail)
+        .eq('normalized_address_key', shipKey)
+        .maybeSingle();
+
+      if (bundle?.submission_ids?.length) {
+        shouldHave = new Set(bundle.submission_ids);
+      } else {
+        const { data: fb } = await client
+          .from('billing_to_bill_v')
+          .select('submission_ids')
+          .eq('customer_email', toEmail);
+
+        const all = (fb || []).flatMap(r => r.submission_ids || []);
+        shouldHave = new Set(all);
+      }
     }
-  } catch {}
-  return json(res, 502, {
-    error: 'Shopify could not send the invoice yet. Please try again.',
-    details: String(e?.message || e)
-  });
-}
 
-// Move submissions to balance_due only AFTER a successful send
-try {
-  const { data: links2 } = await client
-    .from('billing_invoice_submissions')
-    .select('submission_code')
-    .eq('invoice_id', invoice_id);
+    const { data: existing } = await client
+      .from('billing_invoice_submissions')
+      .select('submission_code')
+      .eq('invoice_id', invoice_id);
 
-  const codes = (links2 || []).map(l => l.submission_code).filter(Boolean);
-  if (codes.length) {
-    await client
-      .from('psa_submissions')
-      .update({ status: 'balance_due' })
-      .in('submission_id', codes);
-  }
-} catch {}
+    const already = new Set((existing || []).map(r => r.submission_code));
+    const missing = [...shouldHave].filter(x => !already.has(x));
 
-    // Ensure invoice_url is present on the invoice row (rarely missing)
-try {
-  const draft = await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'GET');
-  const url = draft?.draft_order?.invoice_url || null;
-  if (url) {
-    await client.from('billing_invoices')
-      .update({ invoice_url: url, updated_at: new Date().toISOString() })
-      .eq('id', invoice_id);
-  }
-} catch {}
+    if (missing.length) {
+      await client.from('billing_invoice_submissions').insert(
+        missing.map(code => ({ invoice_id, submission_code: code }))
+      );
+    }
 
-    // 4) Mark invoice as sent
+    // Track whether we created a Shopify draft in this request
+    let createdDraftHere = false;
+
+    const { data: inv, error: invErr2 } = await client
+      .from('billing_invoices')
+      .select('id, group_code, draft_id, status')
+      .eq('id', invoice_id)
+      .single();
+
+    if (invErr2 || !inv) return json(res, 404, { error: 'Invoice not found' });
+
+    if (!inv.draft_id) {
+      const draftResp = await fetch(`${getOrigin(req)}/api/admin/billing/create-drafts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'cookie': req.headers.cookie || ''
+        },
+        body: JSON.stringify({ invoice_ids: [String(invoice_id)] })
+      });
+
+      if (!draftResp.ok) {
+        const errText = await draftResp.text().catch(()=>'');
+        return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)', details: errText });
+      }
+
+      createdDraftHere = true;
+
+      const { data: inv2 } = await client
+        .from('billing_invoices')
+        .select('id, group_code, draft_id, status')
+        .eq('id', invoice_id)
+        .single();
+
+      if (inv2?.draft_id) {
+        inv.draft_id = inv2.draft_id;
+      } else {
+        return json(res, 400, { error: 'Invoice has no draft_id (post-create attempt)' });
+      }
+    }
+
+    const label = inv.group_code || inv.id;
+    const payload = {
+      draft_order_invoice: {
+        to: toEmail,
+        subject: subject || `PSA Balance — ${label}`,
+        custom_message: message || `Your PSA grading balance${inv.group_code ? ` for group ${inv.group_code}` : ''} is ready.`
+      }
+    };
+
+    let result;
+    try {
+      result = await sendWithRetry(inv.draft_id, payload);
+    } catch (e) {
+      if (createdDraftHere && inv.draft_id) {
+        try { await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'DELETE'); } catch {}
+        await client.from('billing_invoices')
+          .update({
+            status: 'pending',
+            draft_id: null,
+            invoice_url: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', invoice_id);
+      } else {
+        await client.from('billing_invoices')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('id', invoice_id);
+      }
+
+      return json(res, 502, {
+        error: 'Shopify could not send the invoice yet. Please try again.',
+        details: String(e?.message || e)
+      });
+    }
+
+    const { data: links2 } = await client
+      .from('billing_invoice_submissions')
+      .select('submission_code')
+      .eq('invoice_id', invoice_id);
+
+    const codes = (links2 || []).map(l => l.submission_code).filter(Boolean);
+    if (codes.length) {
+      await client
+        .from('psa_submissions')
+        .update({ status: 'balance_due' })
+        .in('submission_id', codes);
+    }
+
+    try {
+      const draft = await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'GET');
+      const url = draft?.draft_order?.invoice_url || null;
+      if (url) {
+        await client.from('billing_invoices')
+          .update({ invoice_url: url, updated_at: new Date().toISOString() })
+          .eq('id', invoice_id);
+      }
+    } catch {}
+
     await client
       .from('billing_invoices')
       .update({ status: 'sent', updated_at: new Date().toISOString() })
@@ -308,23 +282,21 @@ try {
     return json(res, 500, { error: String(err?.message || err) });
   }
 }
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Retry wrapper for Shopify "not finished calculating" 422s
 async function sendWithRetry(draftId, payload, maxAttempts = 6) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await shopifyFetch(`/draft_orders/${draftId}/send_invoice.json`, 'POST', payload);
     } catch (e) {
       const msg = String(e?.message || e);
-      // Shopify uses 422 with this exact phrase
       if (msg.includes('not finished calculating')) {
-        // Touch the draft (GET) and back off a bit, then retry
         try { await shopifyFetch(`/draft_orders/${draftId}.json`, 'GET'); } catch {}
-        await sleep(500 * attempt);  // backoff: 400ms, 800ms, 1200ms, ...
+        await sleep(500 * attempt);
         continue;
       }
-      throw e; // real error -> bubble up
+      throw e;
     }
   }
   throw new Error('Draft still calculating after retries');
