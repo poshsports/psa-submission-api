@@ -58,19 +58,42 @@ if (!invoice_id) {
     email: customer_email
   });
 
-  const pre = await fetch(
-    `${getOrigin(req)}/api/admin/billing/preview/prefill?${qp.toString()}`,
+  // Try to prefill first (existing draft)
+const pre = await fetch(
+  `${getOrigin(req)}/api/admin/billing/preview/prefill?${qp.toString()}`,
+  {
+    method: 'GET',
+    headers: { 'cookie': req.headers.cookie || '' }
+  }
+).then(r => r.ok ? r.json() : null);
+
+invoice_id = pre?.invoice_id || null;
+
+// If still no invoice, CREATE one via preview/save
+if (!invoice_id) {
+  const create = await fetch(
+    `${getOrigin(req)}/api/admin/billing/preview/save`,
     {
-      method: 'GET',
-      headers: { 'cookie': req.headers.cookie || '' }
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'cookie': req.headers.cookie || ''
+      },
+      body: JSON.stringify({
+        customer_email,
+        items: [],
+        invoice_id: null
+      })
     }
   ).then(r => r.ok ? r.json() : null);
 
-  invoice_id = pre?.invoice_id || null;
+  invoice_id = create?.invoice_id || null;
+}
 
-  if (!invoice_id) {
-    return json(res, 400, { error: 'Could not auto-create invoice' });
-  }
+if (!invoice_id) {
+  return json(res, 400, { error: 'Could not auto-create invoice' });
+}
+
 }
 
    const client = sb();
