@@ -62,10 +62,13 @@ export function normalizeRow(r){
       ? r.cards
       : 0;
 
-  // Do NOT overwrite IDs coming from server rows
-  if (!ro.id) {
-    ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
-  }
+// Prefer server identity
+if (r.invoice_id) {
+  ro.id = String(r.invoice_id);
+} else if (!ro.id) {
+  ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
+}
+
 
   return ro;
 }
