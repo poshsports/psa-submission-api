@@ -107,7 +107,7 @@ if (invErr || !inv) {
 }
 
 invoice_id = inv.id;
-
+}
     // Resolve destination email early
     let toEmail = (to || customer_email || '').trim();
     if (!toEmail) {
