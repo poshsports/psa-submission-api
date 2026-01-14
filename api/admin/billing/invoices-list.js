@@ -107,25 +107,32 @@ const subById = new Map((subRows || []).map(s => [s.submission_id, s]));
       cardsByInvoice.set(it.invoice_id, (cardsByInvoice.get(it.invoice_id) || 0) + (Number(it.qty) || 0));
     });
 
-// Build a view URL per invoice:
-// - awaiting: use customer invoice_url (pay link)
-// - paid: try to resolve admin order URL from the draft; fall back to invoice_url
-const viewUrlById = new Map();
-if (statusParam === 'awaiting') {
-  for (const inv of invs) viewUrlById.set(inv.id, inv.invoice_url || null);
-} else if (statusParam === 'paid') {
-  for (const inv of invs) {
-    let url = inv.invoice_url || null; // fallback
-    try {
-      if (inv.draft_id && STORE && ADMIN_TOKEN) {
-        const jd = await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'GET');
-        const orderId = jd?.draft_order?.order_id;
-        if (orderId) url = `https://${STORE}/admin/orders/${orderId}`;
+// Build admin-safe URLs per invoice
+const adminUrlById = new Map();
+
+for (const inv of invs) {
+  let url = null;
+
+  try {
+    if (inv.draft_id && STORE && ADMIN_TOKEN) {
+      const jd = await shopifyFetch(`/draft_orders/${inv.draft_id}.json`, 'GET');
+
+      const orderId = jd?.draft_order?.order_id;
+      if (orderId) {
+        // Draft converted → open real order
+        url = `https://${STORE}/admin/orders/${orderId}`;
+      } else {
+        // Still a draft → open draft in admin
+        url = `https://${STORE}/admin/draft_orders/${inv.draft_id}`;
       }
-    } catch { /* non-fatal */ }
-    viewUrlById.set(inv.id, url);
+    }
+  } catch {
+    /* non-fatal */
   }
+
+  adminUrlById.set(inv.id, url);
 }
+
 
 // 5) Build rows
 let rows = invs.map(inv => {
@@ -151,13 +158,18 @@ let rows = invs.map(inv => {
     if (!returned_newest || Date.parse(dt) > Date.parse(returned_newest)) returned_newest = dt;
   }
 
-  return {
-    invoice_id: inv.id,
-    status: inv.status,
-    group_code: inv.group_code || null,
-    customer_email: email,
-    invoice_url: inv.invoice_url || null,
-    view_url: viewUrlById.get(inv.id) || inv.invoice_url || null,
+return {
+  invoice_id: inv.id,
+  status: inv.status,
+  group_code: inv.group_code || null,
+  customer_email: email,
+
+  // public link (for emailing customers)
+  invoice_url: inv.invoice_url || null,
+
+  // admin-only link (for PSA Admin UI)
+  admin_url: adminUrlById.get(inv.id) || null,
+
 
     submissions: subs,
     subs_count: subs.length,
