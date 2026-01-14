@@ -71,21 +71,22 @@ invoice_id = pre?.invoice_id || null;
 
 // If still no invoice, CREATE one via preview/save
 if (!invoice_id) {
-  const create = await fetch(
-    `${getOrigin(req)}/api/admin/billing/preview/save`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'cookie': req.headers.cookie || ''
-      },
-      body: JSON.stringify({
-        customer_email,
-        items: [],
-        invoice_id: null
-      })
-    }
-  ).then(r => r.ok ? r.json() : null);
+const create = await fetch(
+  `${getOrigin(req)}/api/admin/billing/preview/save?subs=${encodeURIComponent(subs.join(','))}&email=${encodeURIComponent(customer_email)}`,
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'cookie': req.headers.cookie || ''
+    },
+    body: JSON.stringify({
+      customer_email,
+      items: [],
+      invoice_id: null
+    })
+  }
+).then(r => r.ok ? r.json() : null);
+
 
   invoice_id = create?.invoice_id || null;
 }
