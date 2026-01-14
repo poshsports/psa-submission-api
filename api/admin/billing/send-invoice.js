@@ -73,8 +73,6 @@ if (!invoice_id) {
   }
 }
 
-
-
    const client = sb();
 // Track whether we created a Shopify draft in this request
 let createdDraftHere = false;
