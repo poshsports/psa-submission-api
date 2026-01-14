@@ -140,26 +140,30 @@ export const COLUMNS = [
   label: 'Est. Total',
   sortable: true,
   format: (_val, r) => {
-    // prefer cents if present; both are already set in normalizeBundle/normalizeInvoiceRecord
     const cents =
-      Number.isFinite(Number(r.est_total_cents)) ? Number(r.est_total_cents) :
-      Number.isFinite(Number(r.est_total))       ? Number(r.est_total)       :
+      Number.isFinite(Number(r.total_cents))      ? Number(r.total_cents) :
+      Number.isFinite(Number(r.estimated_cents))  ? Number(r.estimated_cents) :
+      Number.isFinite(Number(r.est_total_cents))  ? Number(r.est_total_cents) :
       null;
 
     if (!Number.isFinite(cents) || cents <= 0) return '—';
-
-    const dollars = cents / 100;
-    // simple USD formatting without Intl (keeps this file tiny)
-    return `$${dollars.toFixed(2)}`;
+    return `$${(cents / 100).toFixed(2)}`;
   },
 },
 
 
+
   // Actions: single "Create Draft" button
-  {
-    key: 'actions',
-    label: 'Actions',
-    sortable: false,
-    format: (_val, r) => actionsButton(r),
-  },
+{
+  key: 'actions',
+  label: 'Actions',
+  format: (_, r) => {
+    if (r.invoice_id) {
+      return r.view_url
+        ? `<a class="btn" href="${r.view_url}" target="_blank">View Invoice</a>`
+        : '';
+    }
+    return `<button class="btn">Create Draft</button>`;
+  }
+},
 ];
