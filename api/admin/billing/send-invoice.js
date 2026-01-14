@@ -47,57 +47,32 @@ if (!ok) return; // 401 already sent by requireAdmin
 
 let { invoice_id, to, customer_email, subject, message, subs } = await readBody(req);
 
-// If no invoice_id, auto-create one from subs+email
+// If no invoice_id, create one here (Option A: send-invoice owns creation)
 if (!invoice_id) {
   if (!customer_email || !Array.isArray(subs) || !subs.length) {
-    return json(res, 400, { error: 'invoice_id is required or provide { customer_email, subs[] }' });
+    return json(res, 400, {
+      error: 'invoice_id is required or provide { customer_email, subs[] }'
+    });
   }
 
-  const qp = new URLSearchParams({
-    subs: subs.join(','),
-    email: customer_email
-  });
+  const client = sb();
 
-  // Try to prefill first (existing draft)
-const pre = await fetch(
-  `${getOrigin(req)}/api/admin/billing/preview/prefill?${qp.toString()}`,
-  {
-    method: 'GET',
-    headers: { 'cookie': req.headers.cookie || '' }
-  }
-).then(r => r.ok ? r.json() : null);
-
-invoice_id = pre?.invoice_id || null;
-
-// If still no invoice, CREATE one via preview/save
-if (!invoice_id) {
-const create = await fetch(
-  `${getOrigin(req)}/api/admin/billing/preview/save`,
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'cookie': req.headers.cookie || ''
-    },
-    body: JSON.stringify({
+  const { data: inv, error: invErr } = await client
+    .from('billing_invoices')
+    .insert({
       customer_email,
-      subs,
-      items: [],
-      invoice_id: null
+      status: 'pending'
     })
+    .select('id')
+    .single();
+
+  if (invErr || !inv) {
+    return json(res, 500, { error: 'Failed to create invoice' });
   }
-).then(r => r.ok ? r.json() : null);
 
-
-
-  invoice_id = create?.invoice_id || null;
+  invoice_id = inv.id;
 }
 
-if (!invoice_id) {
-  return json(res, 400, { error: 'Could not auto-create invoice' });
-}
-
-}
 
    const client = sb();
 // Track whether we created a Shopify draft in this request
