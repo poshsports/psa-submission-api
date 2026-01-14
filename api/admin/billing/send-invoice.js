@@ -59,11 +59,12 @@ export default async function handler(req, res) {
 
 // If no invoice_id, create one here (Option A: send-invoice owns creation)
 if (!invoice_id) {
-  if (!customer_email || !Array.isArray(subs) || !subs.length) {
+  if (!Array.isArray(subs) || !subs.length) {
     return json(res, 400, {
-      error: 'invoice_id is required or provide { customer_email, subs[] }'
+      error: 'invoice_id is required or provide { subs[] }'
     });
   }
+
 
 // Determine group_code when auto-creating (billing_invoices.group_code is NOT NULL)
 let groupCode = null;
