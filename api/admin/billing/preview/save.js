@@ -27,7 +27,9 @@ export default async function handler(req, res) {
       res.setHeader('Allow', 'POST');
       return json(res, 405, { error: 'Method not allowed' });
     }
-    if (!requireAdmin(req)) return json(res, 401, { error: 'Unauthorized' });
+    const ok = await requireAdmin(req, res);
+    if (!ok) return; // requireAdmin already sent the 401
+
 
    const body = await readBody(req);
 const items = Array.isArray(body?.items) ? body.items : [];
