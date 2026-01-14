@@ -168,83 +168,66 @@ createdDraftHere = true;
     if (!toEmail) {
       return json(res, 400, { error: 'No destination email found. Pass { to: "email@domain" } or ensure submission has customer_email.' });
     }
-// Ensure all bundle-eligible submissions are attached before sending
-const { data: invRow } = await client
-  .from('billing_invoices')
-  .select(`
-    id,
-    ship_to_line1,
-    ship_to_line2,
-    ship_to_city,
-    ship_to_region,
-    ship_to_postal,
-    ship_to_country
-  `)
-  .eq('id', invoice_id)
-  .single();
+// Ensure all intended submissions are attached before sending
 
-if (!invRow) {
-  return json(res, 400, { error: 'Invoice missing ship-to address; cannot bundle.' });
-}
-
-const shipKey = [
-  invRow.ship_to_line1,
-  invRow.ship_to_line2,
-  invRow.ship_to_city,
-  invRow.ship_to_region,
-  invRow.ship_to_postal,
-  invRow.ship_to_country || 'US'
-]
-  .map(v => String(v || '').trim().toLowerCase())
-  .filter(Boolean)
-  .join(', ')
-  .replace(/\s+/g, ' ')
-  .trim();
-// DEBUG: show how we’re resolving the bundle at send-time
-console.log('[send-invoice] invoice_id=', invoice_id);
-console.log('[send-invoice] toEmail=', toEmail);
-console.log('[send-invoice] computed shipKey=', shipKey);
-
-// Fetch all candidate bundles for this customer (to see the address keys the DB expects)
-const { data: candidates, error: candErr } = await client
-  .from('billing_to_bill_v')
-  .select('normalized_address_key, submission_ids')
-  .eq('customer_email', toEmail);
-
-if (candErr) {
-  console.log('[send-invoice] candidates error=', candErr.message);
-} else {
-  console.log('[send-invoice] candidate bundles=', candidates);
-}
-
-// What *should* be bundled right now
-// Resolve what *should* be on this invoice.
-// First try strict address match; if that fails, fall back to *all*
-// current billable submissions for this customer so nothing is left behind.
 let shouldHave = new Set();
 
-const { data: bundle } = await client
-  .from('billing_to_bill_v')
-  .select('submission_ids')
-  .eq('customer_email', toEmail)
-  .eq('normalized_address_key', shipKey)
-  .maybeSingle();
-
-if (bundle?.submission_ids?.length) {
-  shouldHave = new Set(bundle.submission_ids);
+// If caller provided subs (Invoice Builder "Send"), trust them
+if (Array.isArray(subs) && subs.length) {
+  shouldHave = new Set(subs);
 } else {
-  // Fallback: grab *all* billable bundles for this customer
-  const { data: fb } = await client
+  // Legacy path: resolve via billing_to_bill_v using ship-to
+  const { data: invRow } = await client
+    .from('billing_invoices')
+    .select(`
+      id,
+      ship_to_line1,
+      ship_to_line2,
+      ship_to_city,
+      ship_to_region,
+      ship_to_postal,
+      ship_to_country
+    `)
+    .eq('id', invoice_id)
+    .single();
+
+  if (!invRow) {
+    return json(res, 400, { error: 'Invoice missing ship-to address; cannot bundle.' });
+  }
+
+  const shipKey = [
+    invRow.ship_to_line1,
+    invRow.ship_to_line2,
+    invRow.ship_to_city,
+    invRow.ship_to_region,
+    invRow.ship_to_postal,
+    invRow.ship_to_country || 'US'
+  ]
+    .map(v => String(v || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const { data: bundle } = await client
     .from('billing_to_bill_v')
     .select('submission_ids')
-    .eq('customer_email', toEmail);
+    .eq('customer_email', toEmail)
+    .eq('normalized_address_key', shipKey)
+    .maybeSingle();
 
-  const all = (fb || []).flatMap(r => r.submission_ids || []);
-  shouldHave = new Set(all);
+  if (bundle?.submission_ids?.length) {
+    shouldHave = new Set(bundle.submission_ids);
+  } else {
+    const { data: fb } = await client
+      .from('billing_to_bill_v')
+      .select('submission_ids')
+      .eq('customer_email', toEmail);
+
+    const all = (fb || []).flatMap(r => r.submission_ids || []);
+    shouldHave = new Set(all);
+  }
 }
-
-console.log('[send-invoice] resolved shouldHave=', [...shouldHave]);
-
 
 // What is *already* linked
 const { data: existing } = await client
