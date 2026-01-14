@@ -431,46 +431,44 @@ function normalizeBundle(b) {
   };
 }
 
-// New: normalize invoice records from invoices-list into the same table shape
-function normalizeInvoiceRow(rec) {
-  return {
-    id: 'inv:' + String(rec.invoice_id || ''),
-    customer_name: '', // not needed for now
-    customer_email: rec.customer_email || '',
-    submissions: Array.isArray(rec.submissions) ? rec.submissions : [],
-    subs_count: rec.subs_count ?? (rec.submissions?.length || 0),
-    groups: rec.group_code ? [rec.group_code] : [],
-    cards: Number(rec.cards || 0),
-    // Reuse the "est_total_cents" column to show invoice total
-    est_total_cents: (Number.isFinite(rec.total_cents) ? rec.total_cents
-                     : Number.isFinite(rec.subtotal_cents) ? rec.subtotal_cents
-                     : null),
-    // Reuse returned_* columns for date sorting/display
-    returned_newest: rec.updated_at || null,
-    returned_oldest: rec.created_at || null,
-    status: rec.status || '',
-  };
-}
+// Normalize invoice records (Awaiting / Paid tabs) into table row shape
 function normalizeInvoiceRecord(rec) {
-  // rec is returned by /api/admin/billing/to-bill?tab=awaiting|paid
-  // Expected fields: invoice_id, invoice_url, customer_email, customer_name,
-  // total_cents, groups[], submissions_count/cards_count (optional)
   return {
     id: 'inv:' + String(rec.invoice_id || ''),
     customer_name: rec.customer_name || '',
     customer_email: rec.customer_email || '',
-    submissions: [],                      // not used in these tabs
-    subs_count: Number(rec.submissions_count || rec.cards_count || 0),
-    groups: Array.isArray(rec.groups) ? rec.groups : [],
-    cards: Number(rec.cards_count || 0),
-    returned_newest: null,
-    returned_oldest: null,
-    est_total_cents: Number.isFinite(rec.total_cents) ? rec.total_cents : null,
-    est_total:       Number.isFinite(rec.total_cents) ? rec.total_cents : null,
-    __invoice_url: rec.invoice_url || null, // carry url for click-open
+
+    // API already returns submissions for these tabs
+    submissions: Array.isArray(rec.submissions) ? rec.submissions : [],
+    subs_count: Number(
+      rec.subs_count ??
+      rec.submissions?.length ??
+      0
+    ),
+
+    // API returns a single group_code
+    groups: rec.group_code ? [rec.group_code] : [],
+
+    cards: Number(rec.cards || 0),
+
+    // Use invoice totals
+    est_total_cents:
+      Number.isFinite(rec.total_cents)    ? rec.total_cents :
+      Number.isFinite(rec.subtotal_cents) ? rec.subtotal_cents :
+      null,
+    est_total:
+      Number.isFinite(rec.total_cents)    ? rec.total_cents :
+      Number.isFinite(rec.subtotal_cents) ? rec.subtotal_cents :
+      null,
+
+    // Use invoice timestamps for sorting/display
+    returned_newest: rec.updated_at || null,
+    returned_oldest: rec.created_at || null,
+
+    status: rec.status || '',
+    __invoice_url: rec.view_url || rec.invoice_url || null,
   };
 }
-
 
 // ---------- Selection (header checkbox + enabling batch button) ----------
 function ensureSelectionColumn() {
