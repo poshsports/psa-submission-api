@@ -108,13 +108,6 @@ if (invErr || !inv) {
 
 invoice_id = inv.id;
 
-  if (invErr || !inv) {
-    return fail(500, 'create_invoice', invErr || 'insert returned no row');
-  }
-
-  invoice_id = inv.id;
-}
-
     // Resolve destination email early
     let toEmail = (to || customer_email || '').trim();
     if (!toEmail) {
