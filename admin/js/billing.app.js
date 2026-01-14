@@ -596,7 +596,20 @@ if (tr) {
 function extractEmailFromRow(tr) {
   if (!tr) return '';
   const id = String(tr.dataset.id || '');
-  if (id.startsWith('cust:')) return id.slice(5);
+  if (id.startsWith('cust:')) {
+    const rest = id.slice(5);
+    return rest.split(':')[0]; // extract just the email
+  }
+
+  const byDataCol = tr.querySelector('td[data-col="customer"]');
+  if (byDataCol) return (byDataCol.textContent || '').trim();
+
+  const cells = tr.querySelectorAll('td');
+  if (cells.length) return (cells[1]?.textContent || cells[0]?.textContent || '').trim();
+
+  return '';
+}
+
 
   // Fallbacks: try to find a "customer" cell or the second cell
   const byDataCol = tr.querySelector('td[data-col="customer"]');
