@@ -31,36 +31,13 @@ export default async function handler(req, res) {
     if (!ok) return; // requireAdmin already sent the 401
 
 
-   const body = await readBody(req);
+const body = await readBody(req);
 const items = Array.isArray(body?.items) ? body.items : [];
-const invoiceId = body?.invoice_id || null;
-const email = body?.customer_email || null;
-const subs = Array.isArray(body?.subs) ? body.subs : [];
 
-// If this is a "Send" path (no items, no invoice yet), create an empty invoice shell
-if (!items.length && !invoiceId) {
-  if (!email || !subs.length) {
-    return json(res, 400, { error: 'Missing email or subs for auto-create' });
-  }
-
-  const client = sb();
-  const { data: inv, error: invErr } = await client
-    .from('billing_invoices')
-    .insert({
-      customer_email: email,
-      status: 'pending'
-    })
-    .select('id')
-    .single();
-
-  if (invErr || !inv) {
-    return json(res, 500, { error: 'Failed to create invoice shell' });
-  }
-
-  return json(res, 200, { ok: true, invoice_id: inv.id });
+if (!items.length) {
+  return json(res, 400, { error: 'No items to save' });
 }
 
-if (!items.length) return json(res, 400, { error: 'No items to save' });
 
 
     // Normalize inputs
