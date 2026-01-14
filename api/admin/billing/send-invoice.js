@@ -66,38 +66,43 @@ if (!invoice_id) {
   }
 
 
-// Determine group_code when auto-creating (billing_invoices.group_code is NOT NULL)
 let groupCode = null;
+let shopifyCustomerId = null;
 
 // Prefer explicit groups[] if provided
 if (Array.isArray(groups) && groups.length) {
   groupCode = String(groups[0]);
 }
 
-// Otherwise derive from first submission via admin_submissions_v
-if (!groupCode && Array.isArray(subs) && subs.length) {
+// Derive from first submission via admin_submissions_v
+if (Array.isArray(subs) && subs.length) {
   const { data: row, error } = await client
     .from('admin_submissions_v')
-    .select('group_code')
+    .select('group_code, shopify_customer_id')
     .eq('submission_id', String(subs[0]))
     .single();
 
   if (error) {
-    return fail(500, 'derive_group', error);
+    return fail(500, 'derive_invoice_fields', error);
   }
 
-  groupCode = row?.group_code || null;
+  if (!groupCode) groupCode = row?.group_code || null;
+  shopifyCustomerId = row?.shopify_customer_id || null;
 }
 
 if (!groupCode) {
   return fail(400, 'create_invoice', 'Unable to determine group_code for invoice creation');
 }
 
+if (!shopifyCustomerId) {
+  return fail(400, 'create_invoice', 'Unable to determine shopify_customer_id for invoice creation');
+}
 
 const { data: inv, error: invErr } = await client
   .from('billing_invoices')
   .insert({
     group_code: groupCode,
+    shopify_customer_id: shopifyCustomerId,
     status: 'pending'
   })
   .select('id')
