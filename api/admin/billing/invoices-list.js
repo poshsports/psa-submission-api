@@ -85,6 +85,14 @@ export default async function handler(req, res) {
       if (subsErr) return json(res, 500, { error: 'Failed to load submissions', details: subsErr.message });
       emailByCode = new Map((subs || []).map(s => [s.submission_id, (s.customer_email || '').trim()]));
     }
+const { data: subRows, error: subRowsErr } = await client
+  .from('admin_submissions_v')
+  .select('submission_id, group_code, cards, created_at, last_updated_at')
+  .in('submission_id', codeList);
+
+if (subRowsErr) return json(res, 500, { error: 'Failed to load submission rows', details: subRowsErr.message });
+
+const subById = new Map((subRows || []).map(s => [s.submission_id, s]));
 
     // 4) Optional: compute "cards" count from service lines
     const { data: items, error: itemsErr } = await client
@@ -119,27 +127,53 @@ if (statusParam === 'awaiting') {
   }
 }
 
-    // 5) Build rows
-    let rows = invs.map(inv => {
-      const codes = subsByInvoice.get(inv.id) || [];
-      const email = codes.length ? (emailByCode.get(codes[0]) || '') : '';
-return {
-  invoice_id: inv.id,
-  status: inv.status,
-  group_code: inv.group_code || null,
-  customer_email: email,
-  invoice_url: inv.invoice_url || null,
-  view_url: viewUrlById.get(inv.id) || inv.invoice_url || null,
-  submissions: codes.map(code => ({ submission_id: code })),
-  subs_count: codes.length,
-  cards: cardsByInvoice.get(inv.id) || 0,
-  subtotal_cents: inv.subtotal_cents ?? null,
-  shipping_cents: inv.shipping_cents ?? null,
-  total_cents: inv.total_cents ?? null,
-  updated_at: inv.updated_at,
-  created_at: inv.created_at,
-};
-    });
+// 5) Build rows
+let rows = invs.map(inv => {
+  const codes = subsByInvoice.get(inv.id) || [];
+  const email = codes.length ? (emailByCode.get(codes[0]) || '') : '';
+
+  // Expand submissions with real data
+  const subs = codes
+    .map(code => subById.get(code))
+    .filter(Boolean);
+
+  // Compute cards from submissions (not invoice items)
+  const cards = subs.reduce((sum, s) => sum + (Number(s.cards) || 0), 0);
+
+  // Compute returned dates
+  let returned_oldest = null;
+  let returned_newest = null;
+
+  for (const s of subs) {
+    const dt = s.last_updated_at || s.created_at;
+    if (!dt) continue;
+    if (!returned_oldest || Date.parse(dt) < Date.parse(returned_oldest)) returned_oldest = dt;
+    if (!returned_newest || Date.parse(dt) > Date.parse(returned_newest)) returned_newest = dt;
+  }
+
+  return {
+    invoice_id: inv.id,
+    status: inv.status,
+    group_code: inv.group_code || null,
+    customer_email: email,
+    invoice_url: inv.invoice_url || null,
+    view_url: viewUrlById.get(inv.id) || inv.invoice_url || null,
+
+    submissions: subs,
+    subs_count: subs.length,
+    cards,
+
+    returned_oldest,
+    returned_newest,
+
+    subtotal_cents: inv.subtotal_cents ?? null,
+    shipping_cents: inv.shipping_cents ?? null,
+    total_cents: inv.total_cents ?? null,
+    updated_at: inv.updated_at,
+    created_at: inv.created_at,
+  };
+});
+
 
     // 6) In-memory search filter (email, group code, submission code)
     if (q) {
