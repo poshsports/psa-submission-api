@@ -55,49 +55,42 @@ export default async function handler(req, res) {
 
     const client = sb();
 
-    let { invoice_id, to, customer_email, subject, message, subs } = await readBody(req);
+    let { invoice_id, to, customer_email, subject, message, subs, groups } = await readBody(req);
 
-    // If no invoice_id, create one here (Option A: send-invoice owns creation)
-    if (!invoice_id) {
-      if (!customer_email || !Array.isArray(subs) || !subs.length) {
-        return json(res, 400, {
-          error: 'invoice_id is required or provide { customer_email, subs[] }'
-        });
-      }
+// If no invoice_id, create one here (Option A: send-invoice owns creation)
+if (!invoice_id) {
+  if (!customer_email || !Array.isArray(subs) || !subs.length) {
+    return json(res, 400, {
+      error: 'invoice_id is required or provide { customer_email, subs[] }'
+    });
+  }
 
-// Pick a group_code when auto-creating (billing_invoices.group_code is NOT NULL)
-const groupCode =
-  Array.isArray(subs) && subs.length
-    ? String(subs[0])   // first submission/group in this send
-    : null;
+  // Pick a group_code when auto-creating (billing_invoices.group_code is NOT NULL)
+  const groupCode =
+    Array.isArray(groups) && groups.length
+      ? String(groups[0])   // first group for this invoice
+      : null;
 
-if (!groupCode) {
-  return fail(400, 'create_invoice', 'No group_code available for invoice creation');
+  if (!groupCode) {
+    return fail(400, 'create_invoice', 'No group_code available for invoice creation');
+  }
+
+  const { data: inv, error: invErr } = await client
+    .from('billing_invoices')
+    .insert({
+      customer_email,
+      group_code: groupCode,
+      status: 'pending'
+    })
+    .select('id')
+    .single();
+
+  if (invErr || !inv) {
+    return fail(500, 'create_invoice', invErr || 'insert returned no row');
+  }
+
+  invoice_id = inv.id;
 }
-
-const { data: inv, error: invErr } = await client
-  .from('billing_invoices')
-  .insert({
-    customer_email,
-    group_code: groupCode,
-    status: 'pending'
-  })
-  .select('id')
-  .single();
-
-if (invErr || !inv) {
-  return fail(500, 'create_invoice', invErr || 'insert returned no row');
-}
-
-invoice_id = inv.id;
-
-
-
-
-      invoice_id = inv.id;
-    }
-
-    // ... rest of file unchanged ...
 
     // Resolve destination email early
     let toEmail = (to || customer_email || '').trim();
