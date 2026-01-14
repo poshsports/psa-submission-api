@@ -65,7 +65,7 @@ if (!invoice_id) {
     });
   }
 
-  // Determine group_code when auto-creating (billing_invoices.group_code is NOT NULL)
+// Determine group_code when auto-creating (billing_invoices.group_code is NOT NULL)
 let groupCode = null;
 
 // Prefer explicit groups[] if provided
@@ -73,24 +73,25 @@ if (Array.isArray(groups) && groups.length) {
   groupCode = String(groups[0]);
 }
 
-// Otherwise derive from first submission
+// Otherwise derive from first submission via admin_submissions_v
 if (!groupCode && Array.isArray(subs) && subs.length) {
-  const { data: subRow, error: subErr } = await client
-    .from('psa_submissions')
+  const { data: row, error } = await client
+    .from('admin_submissions_v')
     .select('group_code')
     .eq('submission_id', String(subs[0]))
     .single();
 
-  if (subErr) {
-    return fail(500, 'derive_group', subErr);
+  if (error) {
+    return fail(500, 'derive_group', error);
   }
 
-  groupCode = subRow?.group_code || null;
+  groupCode = row?.group_code || null;
 }
 
 if (!groupCode) {
   return fail(400, 'create_invoice', 'Unable to determine group_code for invoice creation');
 }
+
 
 const { data: inv, error: invErr } = await client
   .from('billing_invoices')
