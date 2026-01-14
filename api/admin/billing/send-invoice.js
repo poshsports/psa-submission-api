@@ -96,7 +96,6 @@ if (!groupCode) {
 const { data: inv, error: invErr } = await client
   .from('billing_invoices')
   .insert({
-    customer_email,
     group_code: groupCode,
     status: 'pending'
   })
