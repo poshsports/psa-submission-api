@@ -441,59 +441,54 @@ if (lastBundle?.ship_to) {
     }
 
     // ---- Send ----
-    async function sendInvoice() {
-      const email = (lastBundle?.customer_email || '').trim();
-      const btn   = $("btnDraftSend");
+   async function sendInvoice() {
+  const email = (lastBundle?.customer_email || '').trim();
+  const btn   = $("btnDraftSend");
 
-      if (!email) { alert('Missing customer email.'); return; }
+  if (!email) { alert('Missing customer email.'); return; }
 
-      // Ensure latest changes are saved first
-      if (hasUnsavedChanges) {
-        await save(true);
-        if (hasUnsavedChanges) return;
-      }
+  if (hasUnsavedChanges) {
+    await save(true);
+    if (hasUnsavedChanges) return;
+  }
 
-      // Ensure we have an invoice id
-      if (!draftInvoiceId) {
-        await save(true);
-        if (!draftInvoiceId) {
-          alert('Could not determine invoice id.');
-          return;
-        }
-      }
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
 
-      try {
-        btn.disabled = true;
-        btn.textContent = 'Sending…';
+    const subIds = (lastBundle?.submissions || [])
+      .map(s => s.submission_id)
+      .filter(Boolean);
 
-        const res = await fetch(SEND_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({
-            invoice_id: draftInvoiceId,
-            customer_email: email
-          })
-        });
+    const res = await fetch(SEND_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        invoice_id: draftInvoiceId || null,
+        customer_email: email,
+        subs: subIds
+      })
+    });
 
-        if (!res.ok) {
-          const t = await res.text().catch(() => '');
-          console.error('Send failed', t);
-          alert('Failed to send invoice.');
-          btn.disabled = false;
-          btn.textContent = 'Send';
-          return;
-        }
-
-        hasUnsavedChanges = false;
-        window.location.href = '/admin/billing.html';
-      } catch (err) {
-        console.error(err);
-        alert('Failed to send invoice.');
-        btn.disabled = false;
-        btn.textContent = 'Send';
-      }
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      console.error('Send failed', t);
+      alert('Failed to send invoice.');
+      btn.disabled = false;
+      btn.textContent = 'Send';
+      return;
     }
+
+    hasUnsavedChanges = false;
+    window.location.href = '/admin/billing.html';
+  } catch (err) {
+    console.error(err);
+    alert('Failed to send invoice.');
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
 
     // ---- Modals ----
     function showConfirm(show) {
