@@ -286,12 +286,16 @@ const url = `${PREFILL_ENDPOINT}?${qp.toString()}`;
   if (!invoiceId) return { email: em, ok: false, reason: 'no-invoice' };
 
   // 4) Send the invoice
-  const res = await fetch(SEND_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ invoice_id: invoiceId, customer_email: em })
-  });
+const res = await fetch(SEND_ENDPOINT, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'same-origin',
+  body: JSON.stringify({
+    invoice_id: invoiceId || null,
+    customer_email: em,
+    subs: subIds
+  })
+});
 
   return { email: em, ok: res.ok, reason: res.ok ? null : 'send-failed' };
 }
