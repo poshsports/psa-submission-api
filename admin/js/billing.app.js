@@ -611,15 +611,6 @@ function extractEmailFromRow(tr) {
 }
 
 
-  // Fallbacks: try to find a "customer" cell or the second cell
-  const byDataCol = tr.querySelector('td[data-col="customer"]');
-  if (byDataCol) return (byDataCol.textContent || '').trim();
-
-  const cells = tr.querySelectorAll('td');
-  if (cells.length) return (cells[1]?.textContent || cells[0]?.textContent || '').trim();
-
-  return '';
-}
 // --- Estimate helpers (client-side fallback for "To send")
 function estimateCentsForServiceName(name = '') {
   const s = String(name).toLowerCase();
