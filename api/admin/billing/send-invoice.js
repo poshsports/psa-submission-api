@@ -39,6 +39,14 @@ async function shopifyFetch(path, method = 'GET', body) {
 }
 
 export default async function handler(req, res) {
+    const trace = `send-invoice:${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  const log = (...args) => console.log(`[${trace}]`, ...args);
+  const fail = (status, phase, err) => {
+    const msg = err?.message || String(err || '');
+    console.error(`[${trace}] FAIL @ ${phase}`, err);
+    return json(res, status, { error: phase, message: msg, trace });
+  };
+
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const ok = await requireAdmin(req, res);
@@ -66,9 +74,10 @@ export default async function handler(req, res) {
         .select('id')
         .single();
 
-      if (invErr || !inv) {
-        return json(res, 500, { error: 'Failed to create invoice' });
-      }
+    if (invErr || !inv) {
+  return fail(500, 'create_invoice', invErr || 'insert returned no row');
+}
+
 
       invoice_id = inv.id;
     }
@@ -195,10 +204,11 @@ export default async function handler(req, res) {
         body: JSON.stringify({ invoice_ids: [String(invoice_id)] })
       });
 
-      if (!draftResp.ok) {
-        const errText = await draftResp.text().catch(()=>'');
-        return json(res, 400, { error: 'Invoice has no draft_id (create-drafts failed)', details: errText });
-      }
+if (!draftResp.ok) {
+  const errText = await draftResp.text().catch(()=> '');
+  return fail(400, 'create_draft', errText);
+}
+
 
       createdDraftHere = true;
 
@@ -244,10 +254,8 @@ export default async function handler(req, res) {
           .eq('id', invoice_id);
       }
 
-      return json(res, 502, {
-        error: 'Shopify could not send the invoice yet. Please try again.',
-        details: String(e?.message || e)
-      });
+return fail(502, 'send_invoice', e);
+
     }
 
     const { data: links2 } = await client
