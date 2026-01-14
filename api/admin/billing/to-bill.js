@@ -263,5 +263,4 @@ const unattachedIds  = unattached;
 
   return res.status(200).json({ items });
 
-  });
 }
