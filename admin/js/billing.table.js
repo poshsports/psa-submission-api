@@ -35,27 +35,41 @@ function parseMs(v){ if (!v) return null; const ms = Date.parse(v); return Numbe
 
 // Normalize billing row (compute derived fields)
 export function normalizeRow(r){
-  console.log("NORMALIZE ROW INPUT:", r.id, r);
   const returnedNewest = r.returned_newest || r.returned || null;
   const returnedOldest = r.returned_oldest || r.returned || null;
+
   const ro = { ...r };
+
+  // unify returned fields
   ro.returned = returnedNewest;
   ro.returned_ms = parseMs(returnedNewest);
+
   ro.age_days = (() => {
     const ms = parseMs(returnedOldest);
     if (ms == null) return null;
     const now = Date.now();
     return Math.max(0, Math.round((now - ms) / 86400000));
   })();
-  ro.subs_count = Array.isArray(r.submissions) ? r.submissions.length : (r.subs_count || 0);
-  // Do NOT overwrite IDs coming from normalizeBundle()
-// Only fallback to email if nothing was provided
-if (!ro.id) {
-  ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
-}
+
+  // IMPORTANT: trust API-provided values first
+  ro.subs_count =
+    typeof r.subs_count === 'number'
+      ? r.subs_count
+      : (Array.isArray(r.submissions) ? r.submissions.length : 0);
+
+  ro.cards =
+    typeof r.cards === 'number'
+      ? r.cards
+      : 0;
+
+  // Do NOT overwrite IDs coming from server rows
+  if (!ro.id) {
+    ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
+  }
 
   return ro;
 }
+
 
 // ===== header =====
 export function renderHead(order = COLUMNS.map(c => c.key), hidden = []){
