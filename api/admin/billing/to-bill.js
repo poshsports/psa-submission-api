@@ -128,19 +128,21 @@ export default async function handler(req, res) {
         }
       }
 
-      invoiceBundles = [...bundles.values()].map((b) => ({
-        invoice_id: b.invoice_id,
-        customer_email: b.customer_email,
-        submissions: b.submissions,
-        submission_ids: b.submission_ids,
-        groups: [...b.groupsSet],
-        group_codes: [...b.groupsSet],
-        cards: b.cards,
-        returned_newest: b.returned_newest,
-        returned_oldest: b.returned_oldest,
-        estimated_cents: b.estimated_cents,
-        is_split: b.is_split,
-      }));
+invoiceBundles = [...bundles.values()].map((b) => ({
+  invoice_id: b.invoice_id,
+  status: invoices.find(i => i.id === b.invoice_id)?.status || null,
+  customer_email: b.customer_email,
+  submissions: b.submissions,
+  submission_ids: b.submission_ids,
+  groups: [...b.groupsSet],
+  group_codes: [...b.groupsSet],
+  cards: b.cards,
+  returned_newest: b.returned_newest,
+  returned_oldest: b.returned_oldest,
+  estimated_cents: b.estimated_cents,
+  is_split: b.is_split,
+}));
+
     }
   } catch (err) {
     console.warn("[to-bill] invoice section error:", err);
@@ -244,11 +246,22 @@ const unattachedIds  = unattached;
     console.error("[to-bill] address/view grouping error:", err);
   }
 
+  let items;
 
-  // ======================================================
-  // 3) FINAL RESULT
-  // ======================================================
-  return res.status(200).json({
-    items: [...invoiceBundles, ...emailBundles],
+  if (tab === "to-send") {
+    // Only things that do NOT have an invoice yet
+    items = emailBundles;
+  } else if (tab === "awaiting") {
+    // Invoices that have been sent but not paid
+    items = invoiceBundles.filter(b => b.invoice_id && b.status !== "paid");
+  } else if (tab === "paid") {
+    // Invoices that are paid
+    items = invoiceBundles.filter(b => b.invoice_id && b.status === "paid");
+  } else {
+    items = [...invoiceBundles, ...emailBundles];
+  }
+
+  return res.status(200).json({ items });
+
   });
 }
