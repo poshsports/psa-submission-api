@@ -45,8 +45,35 @@ export default async function handler(req, res) {
 if (!ok) return; // 401 already sent by requireAdmin
     if (!STORE || !ADMIN_TOKEN) return json(res, 500, { error: 'Missing Shopify env vars' });
 
-    const { invoice_id, to, customer_email, subject, message } = await readBody(req);
-    if (!invoice_id) return json(res, 400, { error: 'invoice_id is required' });
+let { invoice_id, to, customer_email, subject, message, subs } = await readBody(req);
+
+// If no invoice_id, auto-create one from subs+email
+if (!invoice_id) {
+  if (!customer_email || !Array.isArray(subs) || !subs.length) {
+    return json(res, 400, { error: 'invoice_id is required or provide { customer_email, subs[] }' });
+  }
+
+  const qp = new URLSearchParams({
+    subs: subs.join(','),
+    email: customer_email
+  });
+
+  const pre = await fetch(
+    `${getOrigin(req)}/api/admin/billing/preview/prefill?${qp.toString()}`,
+    {
+      method: 'GET',
+      headers: { 'cookie': req.headers.cookie || '' }
+    }
+  ).then(r => r.ok ? r.json() : null);
+
+  invoice_id = pre?.invoice_id || null;
+
+  if (!invoice_id) {
+    return json(res, 400, { error: 'Could not auto-create invoice' });
+  }
+}
+
+
 
    const client = sb();
 // Track whether we created a Shopify draft in this request
