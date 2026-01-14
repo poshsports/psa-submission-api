@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const ok = await requireAdmin(req, res);
-    if (!ok) return;
+    if (!ok) return; // 401 already sent by requireAdmin
     if (!STORE || !ADMIN_TOKEN) return json(res, 500, { error: 'Missing Shopify env vars' });
 
     const client = sb();
@@ -57,7 +57,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const { data: invNew, error: invErr } = await client
+      const { data: inv, error: invErr } = await client
         .from('billing_invoices')
         .insert({
           customer_email,
@@ -66,12 +66,14 @@ export default async function handler(req, res) {
         .select('id')
         .single();
 
-      if (invErr || !invNew) {
+      if (invErr || !inv) {
         return json(res, 500, { error: 'Failed to create invoice' });
       }
 
-      invoice_id = invNew.id;
+      invoice_id = inv.id;
     }
+
+    // ... rest of file unchanged ...
 
     // Resolve destination email early
     let toEmail = (to || customer_email || '').trim();
