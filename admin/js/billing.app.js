@@ -673,9 +673,10 @@ if (tab !== 'to-send') {
   const normalized = recs.map(normalizeInvoiceRecord).map(tbl.normalizeRow);
 recs.forEach((r) => {
   const rowId = 'inv:' + String(r.invoice_id || '');
-  const url = r.view_url || r.invoice_url || null;
+  const url = r.admin_url || null;   // ← only admin links here
   if (url) URL_BY_ROWID.set(rowId, url);
 });
+
 
   tbl.setRows(normalized);
   tbl.applyFilters();
