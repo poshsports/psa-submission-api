@@ -35,12 +35,11 @@ function parseMs(v){ if (!v) return null; const ms = Date.parse(v); return Numbe
 
 // Normalize billing row (compute derived fields)
 export function normalizeRow(r){
+  const ro = { ...r };
+
   const returnedNewest = r.returned_newest || r.returned || null;
   const returnedOldest = r.returned_oldest || r.returned || null;
 
-  const ro = { ...r };
-
-  // unify returned fields
   ro.returned = returnedNewest;
   ro.returned_ms = parseMs(returnedNewest);
 
@@ -51,7 +50,7 @@ export function normalizeRow(r){
     return Math.max(0, Math.round((now - ms) / 86400000));
   })();
 
-  // IMPORTANT: trust API-provided values first
+  // trust server
   ro.subs_count =
     typeof r.subs_count === 'number'
       ? r.subs_count
@@ -62,17 +61,24 @@ export function normalizeRow(r){
       ? r.cards
       : 0;
 
-// Prefer server identity
-if (r.invoice_id) {
-  ro.id = String(r.invoice_id);
-} else if (!ro.id) {
-  ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
-}
+  // 🔧 propagate groups from submissions if not provided
+  if (!Array.isArray(ro.groups)) {
+    const gs = new Set();
+    (r.submissions || []).forEach(s => {
+      if (s?.group_code) gs.add(s.group_code);
+    });
+    ro.groups = [...gs];
+  }
 
+  // identity
+  if (r.invoice_id) {
+    ro.id = String(r.invoice_id);
+  } else if (!ro.id) {
+    ro.id = `cust:${(r.customer_email || '').toLowerCase()}`;
+  }
 
   return ro;
 }
-
 
 // ===== header =====
 export function renderHead(order = COLUMNS.map(c => c.key), hidden = []){
