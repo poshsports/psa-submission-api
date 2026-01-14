@@ -65,9 +65,21 @@ export default async function handler(req, res) {
         });
       }
 
+// Pick a group_code when auto-creating (billing_invoices.group_code is NOT NULL)
+const groupCode =
+  Array.isArray(subs) && subs.length
+    ? String(subs[0])   // first submission/group in this send
+    : null;
+
+if (!groupCode) {
+  return fail(400, 'create_invoice', 'No group_code available for invoice creation');
+}
+
 const { data: inv, error: invErr } = await client
   .from('billing_invoices')
   .insert({
+    customer_email,
+    group_code: groupCode,
     status: 'pending'
   })
   .select('id')
@@ -78,6 +90,7 @@ if (invErr || !inv) {
 }
 
 invoice_id = inv.id;
+
 
 
 
