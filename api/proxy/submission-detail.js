@@ -170,30 +170,47 @@ cards = cards.map((c, i) => {
   console.log('OVERLAY_THROW', e);
 }
 
-// ---- invoice context (mirror /submissions endpoint) ----
+// ---- invoice context (same logic as /submissions.js) ----
 let invoice_pay_url = null;
 let invoice_url = null;
 let order_id = null;
 
 try {
-  const { data: inv, error: invErr } = await supabase
-    .from('billing_invoice_submissions_v')
-    .select(`
-      invoice_pay_url,
-      invoice_url,
-      order_id
-    `)
-    .eq('submission_id', r.submission_id)
-    .maybeSingle();
+  // 1) Find invoice_id for this submission
+  const { data: linkRows, error: linkErr } = await supabase
+    .from('billing_invoice_submissions')
+    .select('submission_code, invoice_id')
+    .eq('submission_code', r.submission_id)
+    .limit(1);
 
-  if (!invErr && inv) {
-    invoice_pay_url = inv.invoice_pay_url || null;
-    invoice_url = inv.invoice_url || null;
-    order_id = inv.order_id || null;
+  if (!linkErr && linkRows && linkRows.length) {
+    const invoiceId = linkRows[0].invoice_id;
+
+    // 2) Fetch invoice row
+    const { data: invRows, error: invErr } = await supabase
+      .from('billing_invoices')
+      .select('id, status, invoice_url, order_id')
+      .eq('id', invoiceId)
+      .limit(1);
+
+    if (!invErr && invRows && invRows.length) {
+      const inv = invRows[0];
+
+      // Match the table behavior exactly
+      if (inv.status === 'sent') {
+        invoice_pay_url = inv.invoice_url || null;
+      }
+
+      if (inv.status === 'paid' && inv.order_id) {
+        invoice_url = `https://shopify.com/71088374036/account/orders/${inv.order_id}`;
+        order_id = inv.order_id || null;
+      }
+    }
   }
 } catch (e) {
   console.error('invoice lookup failed', e);
 }
+
 
 return res.status(200).json({
   ok: true,
