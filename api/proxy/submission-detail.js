@@ -123,46 +123,17 @@ export default async function handler(req, res) {
       return res.status(404).json({ ok: false, error: 'not_found' });
     }
 
-    const r = data[0];
-    const display_id = r.submission_id || r.id;
-    const created_at = r.submitted_at_iso || r.created_at;
+   const r = data[0];
+const display_id = r.submission_id || r.id;
+const created_at = r.submitted_at_iso || r.created_at;
 
-    // Prefer column; fall back to deriving from card_info for legacy rows
-    const service = r.grading_service || deriveServiceFromCards(r.card_info) || null;
+// Prefer column; fall back to deriving from card_info for legacy rows
+const service = r.grading_service || deriveServiceFromCards(r.card_info) || null;
 
-    // --- Hybrid cards loader ---
-    let cards = Array.isArray(r.card_info) ? r.card_info : [];
-
-       try {
-const { data: rows, error: rowsErr } = await supabase
-  .from('submission_cards')
-  .select(`
-    break_date,
-    break_channel,
-    break_number,
-    card_description,
-    grading_service,
-    service_price_cents,
-    upcharge_cents
-  `)
-  .eq('submission_id', r.submission_id)
-  .order('card_index', { ascending: true });
+// User portal always reads from psa_submissions.card_info
+const cards = Array.isArray(r.card_info) ? r.card_info : [];
 
 
-      if (!rowsErr && rows && rows.length) {
-        cards = rows.map(o => ({
-          break_date: o.break_date,
-          break_channel: o.break_channel,
-          break_number: o.break_number,
-          card_description: o.card_description,
-          grading_service: o.grading_service || null,
-          service_price_cents: o.service_price_cents || 0,
-          upcharge_cents: o.upcharge_cents || 0
-        }));
-      }
-    } catch (_) {
-      // silent fallback to r.card_info
-    }
 
 
     return res.status(200).json({
