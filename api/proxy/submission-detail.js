@@ -133,7 +133,7 @@ export default async function handler(req, res) {
     // --- Hybrid cards loader ---
     let cards = Array.isArray(r.card_info) ? r.card_info : [];
 
-    try {
+       try {
       const { data: rows, error: rowsErr } = await supabase
         .from('submission_cards')
         .select(`
@@ -141,6 +141,8 @@ export default async function handler(req, res) {
           break_channel,
           break_number,
           card_description,
+          grading_service,
+          service_price_cents,
           upcharge_cents
         `)
         .eq('submission_id', r.submission_id)
@@ -152,12 +154,15 @@ export default async function handler(req, res) {
           break_channel: o.break_channel,
           break_number: o.break_number,
           card_description: o.card_description,
-          upcharge_cents: o.upcharge_cents
+          grading_service: o.grading_service || null,
+          service_price_cents: o.service_price_cents || 0,
+          upcharge_cents: o.upcharge_cents || 0
         }));
       }
     } catch (_) {
       // silent fallback to r.card_info
     }
+
 
     return res.status(200).json({
       ok: true,
