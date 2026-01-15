@@ -146,7 +146,13 @@ try {
     `)
     .eq('submission_id', r.submission_id);
 
+  console.log('SUBMISSION_ID', r.submission_id);
+  console.log('ROWS_ERR', rowsErr);
+  console.log('ROWS', rows);
+
   if (!rowsErr && rows && rows.length) {
+    console.log('OVERLAY_APPLYING', rows.length);
+
     const byIndex = new Map(rows.map(o => [o.card_index, o]));
 
     cards = cards.map((c, i) => {
@@ -157,10 +163,13 @@ try {
         service_price_cents: op?.service_price_cents ?? null
       };
     });
+  } else {
+    console.log('OVERLAY_SKIPPED');
   }
-} catch (_) {
-  // silent fallback: base cards only
+} catch (e) {
+  console.log('OVERLAY_THROW', e);
 }
+
 
     return res.status(200).json({
       ok: true,
