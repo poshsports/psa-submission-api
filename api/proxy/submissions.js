@@ -142,19 +142,33 @@ if (submissionKeys.length) {
     }
 
     if (invoiceIds.size) {
-      const { data: invRows, error: invErr } = await supabase
-        .from('billing_invoices')
-        .select('id, status, invoice_url')
-        .in('id', Array.from(invoiceIds));
+const { data: invRows, error: invErr } = await supabase
+  .from('billing_invoices')
+  .select('id, status, invoice_url, order_id')
+  .in('id', Array.from(invoiceIds));
+
 
       if (invErr) {
         console.error('Supabase billing_invoices query error:', invErr);
       } else {
         for (const inv of (invRows || [])) {
-          invoiceById.set(inv.id, {
-            status: inv.status || null,
-            invoice_url: inv.invoice_url || null,
-          });
+ let viewUrl = null;
+let payUrl = null;
+
+if (inv.status === 'sent') {
+  payUrl = inv.invoice_url || null;
+}
+
+if (inv.status === 'paid' && inv.order_id) {
+  viewUrl = `https://poshsports.com/orders/${inv.order_id}`;
+}
+
+invoiceById.set(inv.id, {
+  status: inv.status || null,
+  pay_url: payUrl,
+  view_url: viewUrl,
+});
+
         }
       }
     }
@@ -222,7 +236,8 @@ return {
   // --- additive invoice metadata ---
   invoice_id: invoiceId,
   invoice_status: invoice?.status || null,
-  invoice_url: invoice?.invoice_url || null,
+  invoice_pay_url: invoice?.pay_url || null,
+  invoice_view_url: invoice?.view_url || null,
   has_invoice: Boolean(invoiceId),
 };
 });
