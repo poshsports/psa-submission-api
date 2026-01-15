@@ -92,6 +92,27 @@ if (error) {
   console.error('Supabase query error:', error);
   return res.status(500).json({ ok: false, error: 'db_error' });
 }
+// --- Upcharge rollup (so portal totals include upcharges even without card_info) ---
+const submissionUuids = (data || []).map(r => r.id).filter(Boolean);
+
+let upchargeBySubmissionId = new Map();
+
+if (submissionUuids.length) {
+  const { data: cardRows, error: cardErr } = await supabase
+    .from('psa_cards')
+    .select('submission_id, upcharge_cents')
+    .in('submission_id', submissionUuids);
+
+  if (cardErr) {
+    console.error('Supabase psa_cards query error:', cardErr);
+  } else {
+    for (const row of (cardRows || [])) {
+      const sid = row.submission_id;
+      const cents = Number(row.upcharge_cents) || 0;
+      upchargeBySubmissionId.set(sid, (upchargeBySubmissionId.get(sid) || 0) + cents);
+    }
+  }
+}
 
 // Normalize to what the front-end expects
 const submissions = (data || []).map((r) => {
@@ -118,17 +139,35 @@ const submissions = (data || []).map((r) => {
     display_id = datePart ? `SUB-${datePart}-${tail}` : `SUB-${tail}`;
   }
 
-  return {
-    id: rawId, // unchanged for compatibility
-    submission_id: r.submission_id || null,
-    display_id, // what the UI shows as "Submission #"
-    created_at: r.submitted_at_iso || r.created_at,
-    cards: r.cards ?? 0,
-    grading_total: (r.totals && r.totals.grading) ?? null,
-    status: r.status || "received",
-    totals: r.totals || null,
-    grading_service: r.grading_service || null
-  };
+const baseTotals = (r.totals && typeof r.totals === 'object') ? { ...r.totals } : {};
+
+const gradingCents =
+  Number(baseTotals.grading_cents) ||
+  (Number(baseTotals.per_card_cents) || 0) * Number(r.cards ?? 0) ||
+  0;
+
+const evalCents = Number(baseTotals.evaluation_cents) || 0;
+
+// Pull the aggregated upcharge cents for this submission UUID
+const upchargeCents = upchargeBySubmissionId.get(rawId) || 0;
+
+// Set/override grand_cents so the portal table always matches the modal subtotal logic
+baseTotals.grand_cents = gradingCents + evalCents + upchargeCents;
+
+// (Optional but useful to have explicitly)
+baseTotals.upcharge_cents = upchargeCents;
+
+return {
+  id: rawId, // unchanged for compatibility
+  submission_id: r.submission_id || null,
+  display_id, // what the UI shows as "Submission #"
+  created_at: r.submitted_at_iso || r.created_at,
+  cards: r.cards ?? 0,
+  grading_total: (r.totals && r.totals.grading) ?? null,
+  status: r.status || "received",
+  totals: baseTotals,
+  grading_service: r.grading_service || null
+};
 });
 
 return res.status(200).json({
