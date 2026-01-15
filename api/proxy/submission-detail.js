@@ -134,10 +134,6 @@ const service = r.grading_service || deriveServiceFromCards(r.card_info) || null
 let cards = Array.isArray(r.card_info)
   ? r.card_info.map((c, i) => ({ ...c, _idx: i }))
   : [];
-// User portal always reads from psa_submissions.card_info
-let cards = Array.isArray(r.card_info)
-  ? r.card_info.map((c, i) => ({ ...c, _idx: i }))
-  : [];
 
 // Overlay operational fields (upcharges, pricing) from submission_cards
 try {
