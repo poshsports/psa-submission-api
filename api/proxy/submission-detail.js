@@ -145,7 +145,7 @@ const { data: rows, error: rowsErr } = await supabase
     service_price_cents,
     upcharge_cents
   `)
-  .eq('submission_id', r.id)   // <-- UUID FK, not psa-### code
+  .in('submission_id', [r.id, r.submission_id])   // <-- UUID FK, not psa-### code
   .order('card_index', { ascending: true });
 
 
