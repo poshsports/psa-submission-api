@@ -160,8 +160,9 @@ if (inv.status === 'sent') {
 }
 
 if (inv.status === 'paid' && inv.order_id) {
-  viewUrl = `https://poshsports.com/account/orders/${inv.order_id}`;
+  viewUrl = `https://shopify.com/71088374036/account/orders/${inv.order_id}`;
 }
+
 
 
 invoiceById.set(inv.id, {
@@ -224,23 +225,29 @@ const invoiceId = invoiceIdBySubmission.get(r.submission_id) || null;
 const invoice = invoiceId ? invoiceById.get(invoiceId) : null;
 
 return {
-  id: rawId, // unchanged for compatibility
+  id: rawId,
   submission_id: r.submission_id || null,
-  display_id, // what the UI shows as "Submission #"
+  display_id,
   created_at: r.submitted_at_iso || r.created_at,
   cards: r.cards ?? 0,
-  grading_total: (r.totals && r.totals.grading) ?? null,
   status: r.status || "received",
   totals: baseTotals,
   grading_service: r.grading_service || null,
 
-  // --- additive invoice metadata ---
+  // invoice metadata
   invoice_id: invoiceId,
   invoice_status: invoice?.status || null,
   invoice_pay_url: invoice?.pay_url || null,
-  invoice_view_url: invoice?.view_url || null,
+
+  // ADD THESE:
+  invoice_url: invoice?.view_url || null,
+  order_id: invoice?.view_url && invoice?.status === 'paid'
+    ? (invoiceId ? invRows?.find(i => i.id === invoiceId)?.order_id : null)
+    : null,
+
   has_invoice: Boolean(invoiceId),
 };
+
 });
 
 return res.status(200).json({
