@@ -160,8 +160,9 @@ if (inv.status === 'sent') {
 }
 
 if (inv.status === 'paid' && inv.order_id) {
-  viewUrl = `https://poshsports.com/orders/${inv.order_id}`;
+  viewUrl = `https://poshsports.com/account/orders/${inv.order_id}`;
 }
+
 
 invoiceById.set(inv.id, {
   status: inv.status || null,
