@@ -131,10 +131,34 @@ const created_at = r.submitted_at_iso || r.created_at;
 const service = r.grading_service || deriveServiceFromCards(r.card_info) || null;
 
 // User portal always reads from psa_submissions.card_info
-const cards = Array.isArray(r.card_info) ? r.card_info : [];
+let cards = Array.isArray(r.card_info)
+  ? r.card_info.map((c, i) => ({ ...c, _idx: i }))
+  : [];
+// Overlay operational fields (upcharges, pricing) from submission_cards
+try {
+  const { data: rows, error: rowsErr } = await supabase
+    .from('submission_cards')
+    .select(`
+      card_index,
+      upcharge_cents,
+      service_price_cents
+    `)
+    .eq('submission_id', r.submission_id);
 
-
-
+  if (!rowsErr && rows && rows.length) {
+    const byIndex = new Map(rows.map(o => [o.card_index, o]));
+    cards = cards.map((c, i) => {
+      const op = byIndex.get(i);
+      return {
+        ...c,
+        upcharge_cents: op?.upcharge_cents ?? 0,
+        service_price_cents: op?.service_price_cents ?? null
+      };
+    });
+  }
+} catch (_) {
+  // silent fallback: base cards only
+}
 
     return res.status(200).json({
       ok: true,
