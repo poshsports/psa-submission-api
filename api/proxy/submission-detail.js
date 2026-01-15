@@ -137,14 +137,14 @@ let cards = Array.isArray(r.card_info)
 
 // Overlay operational fields (upcharges, pricing) from submission_cards
 try {
-  const { data: rows, error: rowsErr } = await supabase
-    .from('submission_cards')
-    .select(`
-      card_index,
-      upcharge_cents,
-      service_price_cents
-    `)
-    .eq('submission_id', r.submission_id);
+const { data: rows, error: rowsErr } = await supabase
+  .from('submission_cards')
+  .select(`
+    card_index,
+    upcharge_cents
+  `)
+  .eq('submission_id', r.submission_id);
+
 
   console.log('SUBMISSION_ID', r.submission_id);
   console.log('ROWS_ERR', rowsErr);
@@ -155,14 +155,14 @@ try {
 
     const byIndex = new Map(rows.map(o => [o.card_index, o]));
 
-    cards = cards.map((c, i) => {
-      const op = byIndex.get(i);
-      return {
-        ...c,
-        upcharge_cents: op?.upcharge_cents ?? 0,
-        service_price_cents: op?.service_price_cents ?? null
-      };
-    });
+cards = cards.map((c, i) => {
+  const op = byIndex.get(i);
+  return {
+    ...c,
+    upcharge_cents: op?.upcharge_cents ?? 0
+  };
+});
+
   } else {
     console.log('OVERLAY_SKIPPED');
   }
