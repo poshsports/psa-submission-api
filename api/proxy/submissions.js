@@ -119,6 +119,48 @@ if (submissionKeys.length) {
   }
 }
 
+    // --- Invoice enrichment (additive, does not affect totals) ---
+let invoiceIdBySubmission = new Map(); // submission_code -> invoice_id
+let invoiceById = new Map();           // invoice_id -> { status, invoice_url }
+
+if (submissionKeys.length) {
+  const { data: linkRows, error: linkErr } = await supabase
+    .from('billing_invoice_submissions')
+    .select('submission_code, invoice_id')
+    .in('submission_code', submissionKeys);
+
+  if (linkErr) {
+    console.error('Supabase billing_invoice_submissions query error:', linkErr);
+  } else {
+    const invoiceIds = new Set();
+
+    for (const row of (linkRows || [])) {
+      if (row.submission_code && row.invoice_id) {
+        invoiceIdBySubmission.set(row.submission_code, row.invoice_id);
+        invoiceIds.add(row.invoice_id);
+      }
+    }
+
+    if (invoiceIds.size) {
+      const { data: invRows, error: invErr } = await supabase
+        .from('billing_invoices')
+        .select('id, status, invoice_url')
+        .in('id', Array.from(invoiceIds));
+
+      if (invErr) {
+        console.error('Supabase billing_invoices query error:', invErr);
+      } else {
+        for (const inv of (invRows || [])) {
+          invoiceById.set(inv.id, {
+            status: inv.status || null,
+            invoice_url: inv.invoice_url || null,
+          });
+        }
+      }
+    }
+  }
+}
+
 
 // Normalize to what the front-end expects
 const submissions = (data || []).map((r) => {
@@ -163,6 +205,9 @@ baseTotals.grand_cents = gradingCents + evalCents + upchargeCents;
 // (Optional but useful to have explicitly)
 baseTotals.upcharge_cents = upchargeCents;
 
+const invoiceId = invoiceIdBySubmission.get(r.submission_id) || null;
+const invoice = invoiceId ? invoiceById.get(invoiceId) : null;
+
 return {
   id: rawId, // unchanged for compatibility
   submission_id: r.submission_id || null,
@@ -172,7 +217,13 @@ return {
   grading_total: (r.totals && r.totals.grading) ?? null,
   status: r.status || "received",
   totals: baseTotals,
-  grading_service: r.grading_service || null
+  grading_service: r.grading_service || null,
+
+  // --- additive invoice metadata ---
+  invoice_id: invoiceId,
+  invoice_status: invoice?.status || null,
+  invoice_url: invoice?.invoice_url || null,
+  has_invoice: Boolean(invoiceId),
 };
 });
 
