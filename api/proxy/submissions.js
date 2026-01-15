@@ -169,7 +169,9 @@ invoiceById.set(inv.id, {
   status: inv.status || null,
   pay_url: payUrl,
   view_url: viewUrl,
+  order_id: inv.order_id || null,
 });
+
 
         }
       }
@@ -239,11 +241,10 @@ return {
   invoice_status: invoice?.status || null,
   invoice_pay_url: invoice?.pay_url || null,
 
-  // ADD THESE:
-  invoice_url: invoice?.view_url || null,
-  order_id: invoice?.view_url && invoice?.status === 'paid'
-    ? (invoiceId ? invRows?.find(i => i.id === invoiceId)?.order_id : null)
-    : null,
+// ADD THESE:
+invoice_url: invoice?.view_url || null,
+order_id: invoice?.order_id || null,
+
 
   has_invoice: Boolean(invoiceId),
 };
