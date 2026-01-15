@@ -130,6 +130,35 @@ export default async function handler(req, res) {
     // Prefer column; fall back to deriving from card_info for legacy rows
     const service = r.grading_service || deriveServiceFromCards(r.card_info) || null;
 
+    // --- Hybrid cards loader ---
+    let cards = Array.isArray(r.card_info) ? r.card_info : [];
+
+    try {
+      const { data: rows, error: rowsErr } = await supabase
+        .from('submission_cards')
+        .select(`
+          break_date,
+          break_channel,
+          break_number,
+          card_description,
+          upcharge_cents
+        `)
+        .eq('submission_id', r.submission_id)
+        .order('card_index', { ascending: true });
+
+      if (!rowsErr && rows && rows.length) {
+        cards = rows.map(o => ({
+          break_date: o.break_date,
+          break_channel: o.break_channel,
+          break_number: o.break_number,
+          card_description: o.card_description,
+          upcharge_cents: o.upcharge_cents
+        }));
+      }
+    } catch (_) {
+      // silent fallback to r.card_info
+    }
+
     return res.status(200).json({
       ok: true,
       submission: {
@@ -141,12 +170,13 @@ export default async function handler(req, res) {
         evaluation: r.evaluation ?? 0,
         totals: r.totals || {},
         address: r.address || null,
-        card_info: r.card_info || [],
+        card_info: cards,
         paid_at_iso: r.paid_at_iso || null,
         paid_amount: r.paid_amount || null,
         grading_service: service
       }
     });
+
   } catch (e) {
     console.error('proxy/submission-detail error', e);
     return res.status(500).json({ ok: false, error: 'server_error' });
