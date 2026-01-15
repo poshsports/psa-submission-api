@@ -145,7 +145,7 @@ export default async function handler(req, res) {
           service_price_cents,
           upcharge_cents
         `)
-        .eq('submission_id', r.submission_id)
+        .eq('submission_id', r.id)
         .order('card_index', { ascending: true });
 
       if (!rowsErr && rows && rows.length) {
