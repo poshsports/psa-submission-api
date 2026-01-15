@@ -170,24 +170,54 @@ cards = cards.map((c, i) => {
   console.log('OVERLAY_THROW', e);
 }
 
+// ---- invoice context (mirror /submissions endpoint) ----
+let invoice_pay_url = null;
+let invoice_url = null;
+let order_id = null;
 
-    return res.status(200).json({
-      ok: true,
-      submission: {
-        id: r.id,
-        display_id,
-        created_at,
-        status: r.status || 'received',
-        cards: r.cards ?? 0,
-        evaluation: r.evaluation ?? 0,
-        totals: r.totals || {},
-        address: r.address || null,
-        card_info: cards,
-        paid_at_iso: r.paid_at_iso || null,
-        paid_amount: r.paid_amount || null,
-        grading_service: service
-      }
-    });
+try {
+  const { data: inv, error: invErr } = await supabase
+    .from('billing_invoice_submissions_v')
+    .select(`
+      invoice_pay_url,
+      invoice_url,
+      order_id
+    `)
+    .eq('submission_id', r.submission_id)
+    .maybeSingle();
+
+  if (!invErr && inv) {
+    invoice_pay_url = inv.invoice_pay_url || null;
+    invoice_url = inv.invoice_url || null;
+    order_id = inv.order_id || null;
+  }
+} catch (e) {
+  console.error('invoice lookup failed', e);
+}
+
+return res.status(200).json({
+  ok: true,
+  submission: {
+    id: r.id,
+    display_id,
+    created_at,
+    status: r.status || 'received',
+    cards: r.cards ?? 0,
+    evaluation: r.evaluation ?? 0,
+    totals: r.totals || {},
+    address: r.address || null,
+    card_info: cards,
+    paid_at_iso: r.paid_at_iso || null,
+    paid_amount: r.paid_amount || null,
+    grading_service: service,
+
+    // ⬇️ these three are what the modal is missing
+    invoice_pay_url,
+    invoice_url,
+    order_id
+  }
+});
+
 
   } catch (e) {
     console.error('proxy/submission-detail error', e);
