@@ -93,26 +93,32 @@ if (error) {
   return res.status(500).json({ ok: false, error: 'db_error' });
 }
 // --- Upcharge rollup (so portal totals include upcharges even without card_info) ---
-const submissionUuids = (data || []).map(r => r.id).filter(Boolean);
+const submissionKeys = (data || [])
+  .map(r => r.submission_id)
+  .filter(Boolean);
 
 let upchargeBySubmissionId = new Map();
 
-if (submissionUuids.length) {
+if (submissionKeys.length) {
   const { data: cardRows, error: cardErr } = await supabase
-    .from('psa_cards')
+    .from('submission_cards')
     .select('submission_id, upcharge_cents')
-    .in('submission_id', submissionUuids);
+    .in('submission_id', submissionKeys);
 
   if (cardErr) {
-    console.error('Supabase psa_cards query error:', cardErr);
+    console.error('Supabase submission_cards query error:', cardErr);
   } else {
     for (const row of (cardRows || [])) {
-      const sid = row.submission_id;
+      const sid = row.submission_id;           // "psa-022"
       const cents = Number(row.upcharge_cents) || 0;
-      upchargeBySubmissionId.set(sid, (upchargeBySubmissionId.get(sid) || 0) + cents);
+      upchargeBySubmissionId.set(
+        sid,
+        (upchargeBySubmissionId.get(sid) || 0) + cents
+      );
     }
   }
 }
+
 
 // Normalize to what the front-end expects
 const submissions = (data || []).map((r) => {
@@ -149,7 +155,7 @@ const gradingCents =
 const evalCents = Number(baseTotals.evaluation_cents) || 0;
 
 // Pull the aggregated upcharge cents for this submission UUID
-const upchargeCents = upchargeBySubmissionId.get(rawId) || 0;
+const upchargeCents = upchargeBySubmissionId.get(r.submission_id) || 0;
 
 // Set/override grand_cents so the portal table always matches the modal subtotal logic
 baseTotals.grand_cents = gradingCents + evalCents + upchargeCents;
