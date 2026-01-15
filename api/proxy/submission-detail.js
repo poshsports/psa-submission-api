@@ -134,19 +134,20 @@ export default async function handler(req, res) {
     let cards = Array.isArray(r.card_info) ? r.card_info : [];
 
        try {
-      const { data: rows, error: rowsErr } = await supabase
-        .from('submission_cards')
-        .select(`
-          break_date,
-          break_channel,
-          break_number,
-          card_description,
-          grading_service,
-          service_price_cents,
-          upcharge_cents
-        `)
-        .eq('submission_id', r.id)
-        .order('card_index', { ascending: true });
+const { data: rows, error: rowsErr } = await supabase
+  .from('submission_cards')
+  .select(`
+    break_date,
+    break_channel,
+    break_number,
+    card_description,
+    grading_service,
+    service_price_cents,
+    upcharge_cents
+  `)
+  .eq('submission_id', r.id)   // <-- UUID FK, not psa-### code
+  .order('card_index', { ascending: true });
+
 
       if (!rowsErr && rows && rows.length) {
         cards = rows.map(o => ({
