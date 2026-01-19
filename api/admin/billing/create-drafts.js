@@ -216,7 +216,6 @@ if (Number.isFinite(Number(inv.shipping_cents)) && Number(inv.shipping_cents) > 
 }
 
 if (shippingCents > 0) {
- if (shippingCents > 0) {
   line_items.push({
     title: 'Return Shipping',
     quantity: 1,
@@ -228,8 +227,6 @@ if (shippingCents > 0) {
   subtotal += shippingCents;
 }
 
-  subtotal += shippingCents;
-}
 
 if (!line_items.length) {
   return { ok: false, error: 'no-invoice-items' };
