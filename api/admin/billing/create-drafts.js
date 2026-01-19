@@ -216,12 +216,18 @@ if (Number.isFinite(Number(inv.shipping_cents)) && Number(inv.shipping_cents) > 
 }
 
 if (shippingCents > 0) {
+ if (shippingCents > 0) {
   line_items.push({
-    title: 'Shipping (flat)',
+    title: 'Return Shipping',
     quantity: 1,
     price: moneyStrFromCents(shippingCents),
+    requires_shipping: true,
+    taxable: false,
     properties: [{ name: 'Kind', value: 'Shipping' }]
   });
+  subtotal += shippingCents;
+}
+
   subtotal += shippingCents;
 }
 
