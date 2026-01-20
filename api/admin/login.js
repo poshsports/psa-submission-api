@@ -1,11 +1,20 @@
 // /api/admin/login.js
 import { createClient } from '@supabase/supabase-js';
 
-const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+const {
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_ANON_KEY,
+} = process.env;
 
-// Create a server-side Supabase client with the Service Role key (bypasses RLS)
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false }
+// Admin client (bypasses RLS, DB access)
+const sbAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+});
+
+// Public auth client (real end-user auth)
+const sbAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false },
 });
 
 function json(res, status, body) {
@@ -18,7 +27,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
       return json(res, 500, { error: 'Server missing Supabase env vars' });
     }
 
@@ -26,38 +35,38 @@ export default async function handler(req, res) {
     if (!email || !password) return json(res, 400, { error: 'Email and password are required' });
 
     // 1) Must be an active admin user (case-insensitive match)
-    const { data: admin, error: adminErr } = await sb
+    const { data: admin, error: adminErr } = await sbAdmin
       .from('admin_users')
       .select('id, role, is_active')
-      .ilike('email', email)       // case-insensitive
+      .ilike('email', email)
       .maybeSingle();
 
     if (adminErr) return json(res, 500, { error: 'Admin lookup failed', details: adminErr.message });
     if (!admin || !admin.is_active) return json(res, 403, { error: 'No access' });
 
-    // 2) Validate the credentials
-    const { data: auth, error: authErr } = await sb.auth.signInWithPassword({ email, password });
+    // 2) Validate the credentials (REAL end-user auth)
+    const { data: auth, error: authErr } =
+      await sbAuth.auth.signInWithPassword({ email, password });
+
     if (authErr) return json(res, 401, { error: 'Invalid email or password' });
 
     // 3) Set session cookie (httpOnly). Name can be anything your frontend expects.
     const access = auth.session?.access_token;
     if (!access) return json(res, 500, { error: 'No session token returned' });
 
-// Set BOTH cookies: a front-end readable role + a real HttpOnly session
-const role = String(admin.role || 'staff').toLowerCase();
+    // Set BOTH cookies: a front-end readable role + a real HttpOnly session
+    const role = String(admin.role || 'staff').toLowerCase();
 
-const isLocal = (req.headers.host || '').startsWith('localhost');
-const flags = `Path=/; SameSite=Lax; ${isLocal ? '' : 'Secure; '}Max-Age=604800`;
+    const isLocal = (req.headers.host || '').startsWith('localhost');
+    const flags = `Path=/; SameSite=Lax; ${isLocal ? '' : 'Secure; '}Max-Age=604800`;
 
-res.setHeader('Set-Cookie', [
-  `psa_admin=1; ${flags}`,                    // optional "I'm an admin UI" flag
-  `psa_role=${encodeURIComponent(role)}; ${flags}`,
-  `psa_admin_session=${access}; ${flags}; HttpOnly`, // real session token
-]);
+    res.setHeader('Set-Cookie', [
+      `psa_admin=1; ${flags}`,                    // optional "I'm an admin UI" flag
+      `psa_role=${encodeURIComponent(role)}; ${flags}`,
+      `psa_admin_session=${access}; ${flags}; HttpOnly`, // real session token
+    ]);
 
-return json(res, 200, { ok: true, role });
-
-
+    return json(res, 200, { ok: true, role });
   } catch (e) {
     return json(res, 500, { error: 'Server error', details: String(e?.message || e) });
   }
