@@ -6,7 +6,7 @@ const sb = createClient(
 );
 
 const USER_ID = '531e4364-9454-4472-a182-48053dae9ef1'; // poshsportsbreakers@gmail.com
-const NEW_PASSWORD = 'Bigalsucks1785!!'; // change this
+const NEW_PASSWORD = 'Bigalsucks1785!'; // change this
 
 await sb.auth.admin.updateUserById(USER_ID, {
   password: NEW_PASSWORD,
